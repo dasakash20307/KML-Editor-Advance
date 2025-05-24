@@ -1,202 +1,158 @@
-## **Artifact 7: Project Context and Log**
+**Updated Project Context and Log**
 
-**Date:** May 24, 2025 (Based on last interaction context)
+**Date:** May 24, 2025 (Reflecting current project status)
 
-### **1\. Application Details:**
+**1. Application Details:**
 
-Project: Dilasa Advance KML Tool  
-User Goal: To create a robust Windows desktop application for Dilasa Janvikash Pratishthan. The primary purpose is to process geographic data, initially from farmer field surveys (via CSV or mWater API), to generate KML polygon files for visualization and verification. A key recent requirement is to integrate historical satellite imagery to verify land use and farming continuity over several years for specific areas.  
-Project Evolution & Shape:  
-The project began as a request for a simple Tkinter-based Windows application to create KML square polygons from manually entered latitude/longitude points. It has progressively evolved through several stages:
+*   **Project Name:** Dilasa Advance KML Tool
+*   **User Goal:** The primary user, representing Dilasa Janvikash Pratishthan, aims to develop a Windows desktop application. This tool is intended to streamline the process of managing and verifying farmer field data. Key functionalities include generating KML polygon files from various data inputs (manual, CSV, API) for visualization. A critical upcoming feature is the integration of historical satellite imagery to verify land use and farming continuity.
+*   **Project Evolution & Shape:**
+    *   The project initiated with a simple Tkinter-based KML generator.
+    *   It evolved through stages: enhanced data input (CSV, UTM), advanced KML features (styling, descriptions), and planning for data persistence (SQLite) and API integration (mWater).
+    *   **Shift to Qt (PySide6) and Modular Design (Current Major Phase):** The application was refactored to Qt (PySide6) for a modern UI and better scalability, adopting a modular structure (`ui/`, `core/`, `database/`). This phase included a new main window, advanced `QTableView` for data display with filtering and sorting, custom dialogs, splash screen, and branding.
+    *   **Basic Mapping Implemented:** An initial map viewport using `QWebEngineView` and `Folium` was added to display selected farmer polygons from the database.
+    *   **Next Major Feature - Historical Imagery Integration (Current Development Focus):** The immediate next goal is to develop a "Historical Map Builder" feature. This will involve allowing users to define areas of interest (e.g., via Shapefiles), using the Google Earth Engine (GEE) Python API to fetch and process historical satellite imagery for these areas, storing these images and their geographic bounds locally, and then enabling users to view these cached historical images in the main map viewport, overlaid with specific farmer polygons.
 
-* **Initial Phase (Tkinter \- Conceptual v1.x):** Basic KML generation from 4 Lat/Lon points and a name.  
-* **CSV & UTM Input Upgrade (Tkinter \- Conceptual v2.x):** Introduced CSV file uploads, handling of UTM coordinates (requiring conversion), per-point altitude, options for single/multiple KML outputs, detailed KML descriptions, and specific KML styling (yellow outline, no fill).  
-* **Advanced Tkinter & Early Qt Planning (Conceptual Beta v3.001.Dv-A.Das):** This version (still Tkinter in its final implementation stage before the Qt decision) focused on dynamic output modes, improved UI for data management, and introduced the idea of persistent storage (SQLite) for API URLs and polygon data. It also included deduplication logic and KML export tracking. The increasing complexity and desire for a more modern UI and advanced features (like mapping) led to the strategic decision to refactor the application using Qt.  
-* **Shift to Qt (PySide6) & Modular Design (Current Phase \- Beta v4.001.Dv-A.Das):**  
-  * The application's UI was completely rewritten using Qt (PySide6) for a more modern, capable, and maintainable interface.  
-  * A modular project structure (ui/, core/, database/ packages) was adopted.  
-  * Implemented a QMainWindow with a custom header, detachable QToolBar (with icon+text buttons), QMenuBar, and QStatusBar.  
-  * A QTableView with a custom QAbstractTableModel and QSortFilterProxyModel now displays data from the SQLite database, offering advanced filtering (UUID, date added, export status, error status) and column sorting.  
-  * Checkboxes were added to the table for bulk actions (delete, KML generation).  
-  * Dialogs for API source management, duplicate handling, and KML output mode selection were created/ported to Qt, with improved centering and icon handling.  
-  * A custom splash screen and application branding (icon, logo) were integrated.  
-  * An embedded map viewport (QWebEngineView \+ folium) was added to display selected polygons (defaulting to Esri Satellite view).  
-  * **Current Development Focus:** Implementing the "Historical Map Builder" feature. This involves:  
-    * A new dialog (HistoricalMapBuilderDialog) for users to define areas of interest (via Shapefile upload), select years, and choose GEE processing parameters.  
-    * A GEEProcessingThread for background interaction with Google Earth Engine (GEE) to fetch, composite, and prepare yearly satellite images for download.  
-    * Local storage of these downloaded yearly images and their geographic bounds metadata.  
-    * UI elements in the MainWindow (a checkable "Historical View" group box and a "Year" QComboBox) to enable viewing these cached historical images.  
-    * Logic in MainWindow and MapViewWidget to display the selected local historical image as an overlay, with the specific farmer's polygon highlighted.
+**2. Application Road Map:**
 
-The application is evolving into a comprehensive geospatial data management and visualization tool, tailored to assist in verifying land use and farming continuity over time for specific operational areas.
+*   **a. Tkinter Versions (Conceptual Precursors):** (As previously described - basic KML, CSV input, advanced Tkinter features leading to Qt decision)
+*   **b. Qt Version (Current - Beta.v4.001.Dv-A.Das - Pre-Historical Imagery):**
+    *   **Added (So Far):**
+        *   Complete UI rewrite from Tkinter to PySide6.
+        *   Modular project structure (`ui/`, `core/`, `database/`).
+        *   Qt UI elements: `QMainWindow`, custom header, `QToolBar`, `QMenuBar`, `QStatusBar`.
+        *   `QTableView` with `PolygonTableModel` and `PolygonFilterProxyModel` for DB data display, filtering, and sorting.
+        *   Checkboxes in table for bulk actions ("Select/Deselect All").
+        *   Qt Dialogs: `APISourcesDialog`, `DuplicateDialog`, `OutputModeDialog`.
+        *   Custom `QSplashScreen` (via `main_app.py`'s `CustomSplashScreen`).
+        *   Map Viewport: `MapViewWidget` using `QWebEngineView` + `folium` to display selected polygons (defaulting to Esri Satellite).
+        *   Fully functional CSV and mWater API data import with DB persistence and duplicate handling.
+        *   KML generation (single/multiple file modes) from checked table items, with DB export status updates.
+        *   "Export Displayed Data as CSV", "Clear All Data", "Delete Checked Rows" features.
+    *   **Removed/Changed:** All Tkinter UI code.
+    *   **How it works (Current):** Application launches with splash. Main window displays data from SQLite in a sortable/filterable table. Users can import data via CSV or mWater API, with duplicates handled. KML files are generated for checked items. The map view shows the currently selected valid polygon.
+    *   **Upcoming:** The "Historical Map Builder" feature will be added to download and manage historical GEE imagery, and the map view will be enhanced to display these historical layers.
 
-### **2\. Application Road Map:**
+**3. Log File (Major Achievements & Milestones):**
 
-* **a. Conceptual Tkinter Versions (Pre-Beta v4.x):**  
-  * **Version Name/Number:** Beta v1.x \- "Simple KML Square Generator"  
-    * **Added:** Manual Lat/Lon input, KML generation for single squares.  
-    * **Removed/Changed:** N/A.  
-    * **How it worked:** Basic Tkinter UI, simplekml for output.  
-  * **Version Name/Number:** Beta v2.x \- "CSV-based KML Generator"  
-    * **Added:** CSV import, list display of polygons, basic KML styling.  
-    * **Removed/Changed:** Manual input became secondary.  
-    * **How it worked:** User uploaded CSV, selected items, generated a single KML.  
-  * **Version Name/Number:** Beta v3.001.Dv-A.Das (Advanced Tkinter, leading to Qt decision)  
-    * **Added:** UTM/Altitude handling, detailed KML descriptions, specific styling, single/multiple KML output modes, API URL management (planned), persistent storage (planned), deduplication (planned), KML export tracking (planned).  
-    * **Removed/Changed:** Simple styling, transient data model.  
-    * **How it worked (as fully realized in Tkinter, then planned for Qt):** Data from CSV/API stored in SQLite, displayed with error states. Duplicates handled. User selected records and output mode. *The UI was Tkinter, but limitations prompted the Qt shift.*  
-* **b. Qt Version (Current Development Track):**  
-  * **Version Name/Number:** Beta v4.001.Dv-A.Das \- "Dilasa Advance KML Tool (Qt Edition)"  
-    * **Added (So Far):**  
-      * Complete UI rewrite from Tkinter to PySide6.  
-      * Modular project structure (ui/, core/, database/).  
-      * QMainWindow with custom header, detachable toolbar (icon+text), menus, status bar.  
-      * SQLite database integration via DatabaseManager.  
-      * QTableView with PolygonTableModel and QSortFilterProxyModel for advanced data display, filtering (UUID, date added, export status, error status), and sorting.  
-      * Checkbox column and "Select/Deselect All" for bulk actions.  
-      * Functional dialogs (API Sources, Duplicates, KML Output Mode) in Qt, centered, with app icon.  
-      * Custom splash screen.  
-      * CSV and mWater API data import fully functional with DB persistence and duplicate handling.  
-      * KML generation (single/multiple) from checked table items, with DB export status updates.  
-      * "Export Displayed Data as CSV" feature.  
-      * "Clear All Data" and "Delete Checked Rows" with confirmation.  
-      * Basic map viewport using QWebEngineView and folium to display a single selected polygon (defaulting to Esri Satellite).  
-      * **Currently Integrating:** "Historical Map Builder" dialog UI and GEE processing thread (GEEProcessingThread in historical\_map\_builder\_dialog.py, gee\_handler.py in core/). UI elements for historical view (toggle, year combo) in MainWindow. Logic to display locally cached historical images in MapViewWidget.  
-    * **Removed/Changed:** All Tkinter code.  
-    * **How it works (Target):** A desktop application. Users manage API sources, import data from CSV or API. Data is stored persistently in SQLite, displayed in a feature-rich table. Users can filter/sort data, perform bulk operations. KMLs are generated for checked items with user-selected output mode. A map view shows selected polygons. The "Historical Map Builder" allows users to download yearly GEE imagery for defined areas (via Shapefile). The main map view can then overlay these cached historical images for selected polygons and years.
+*   Initial Tkinter KML generator.
+*   CSV input, styling, UTM/altitude handling.
+*   Decision to refactor to Qt and modular design.
+*   **Project Restarted/Refactored with Qt (PySide6) and Modular Structure.**
+*   `DatabaseManager` for SQLite.
+*   Core modules: `data_processor.py`, `kml_generator.py`, `api_handler.py`, `utils.py`.
+*   Qt `MainWindow` shell, `QSplashScreen`, header, menus, toolbar, status bar.
+*   `QTableView` with `PolygonTableModel`, `PolygonFilterProxyModel`.
+*   Dialogs ported to Qt: `APISourcesDialog`, `DuplicateDialog`, `OutputModeDialog`.
+*   CSV and mWater API import functional with DB persistence.
+*   KML generation from Qt UI with DB export tracking.
+*   Advanced table filtering, sorting, bulk actions via checkboxes.
+*   Integrated `MapViewWidget` using `QWebEngineView` and `folium` to display selected polygons.
+*   **Current Stage:** The core application with data management, KML generation, and basic polygon map display is stable. The next major development phase is the implementation of the "Historical Imagery" feature.
 
-### **3\. Log File (Major Achievements & Milestones):**
+**4. Libraries Used Currently (Beta v4.x - Pre-Historical Imagery):**
 
-* Initial Tkinter KML generator created.  
-* CSV import and basic KML styling added.  
-* Upgraded to handle UTM, altitude, detailed descriptions, specific KML styles.  
-* Implemented single/multiple KML output modes.  
-* **Decision to refactor to Qt and modular design.**  
-* Created DatabaseManager for SQLite persistence.  
-* Developed core modules for data processing, KML generation, API handling.  
-* Implemented basic Qt MainWindow with splash screen, header, menus.  
-* Integrated QTableView with custom models for data display from DB.  
-* Ported dialogs (API, Duplicate, Output Mode) to Qt.  
-* Achieved functional CSV and mWater API import with DB persistence and duplicate handling in Qt.  
-* Implemented KML generation from Qt UI with DB export status tracking.  
-* Added advanced table filtering and sorting.  
-* Added table checkboxes and bulk actions (delete, KML export).  
-* Integrated initial MapViewWidget with Folium for selected polygon display.  
-* **Currently:** Implementing "Historical Map Builder" dialog, GEE interaction logic (gee\_handler.py), and integration for displaying cached historical imagery. API data import is now functional.
+*   **PySide6:** (QtWidgets, QtGui, QtCore, QtWebEngineWidgets, QtWebEngineCore)
+*   **sqlite3:** (Python built-in)
+*   **requests:** For mWater API calls.
+*   **simplekml:** For KML generation.
+*   **utm:** For UTM to Latitude/Longitude conversions.
+*   **Pillow:** For logo image handling.
+*   **folium:** For generating Leaflet.js maps (HTML).
+*   **Standard Python libraries:** `os`, `sys`, `re`, `datetime`, `csv`, `io.StringIO`, `json`, `tempfile`.
 
-### **4\. Libraries Used Currently (Beta v4.x with Qt):**
-
-* **PySide6**: (QtWidgets, QtGui, QtCore, QtWebEngineWidgets, QtWebEngineCore)  
-* **sqlite3**: (Python built-in)  
-* **requests**: For API calls.  
-* **simplekml**: For KML generation.  
-* **utm**: For UTM to Lat/Lon conversions.  
-* **Pillow**: For image handling (logo).  
-* **folium**: For generating Leaflet.js maps (HTML).  
-* **geopandas**: For reading Shapefiles (Historical Map Builder).  
-* **earthengine-api**: For Google Earth Engine interaction (Historical Map Builder).  
-* Standard Python: os, sys, re, datetime, csv, io.StringIO, json, tempfile.
-
-### **5\. Current Version Structure (DilasaKMLTool\_v4):**
-
-DilasaKMLTool\_v4/  
-├── main\_app.py  
-├── ui/  
-│   ├── \_\_init\_\_.py  
-│   ├── main\_window.py  
-│   ├── splash\_screen.py  
-│   ├── dialogs/  
-│   │   ├── \_\_init\_\_.py  
-│   │   ├── api\_sources\_dialog.py  
-│   │   ├── duplicate\_dialog.py  
-│   │   ├── output\_mode\_dialog.py  
-│   │   └── historical\_map\_builder\_dialog.py   
-│   └── widgets/  
-│       ├── \_\_init\_\_.py  
-│       └── map\_view\_widget.py  
-├── core/  
-│   ├── \_\_init\_\_.py  
-│   ├── data\_processor.py  
-│   ├── kml\_generator.py  
-│   ├── api\_handler.py  
-│   ├── gee\_handler.py   
-│   └── utils.py  
-├── database/  
-│   ├── \_\_init\_\_.py  
-│   └── db\_manager.py  
-├── assets/  
-│   ├── dilasa\_logo.jpg  
-│   └── app\_icon.ico  
-├── local\_historical\_imagery/   
-│   └── (Placeholder for {AreaName}/{Year}.{format} and {Year}.json)  
-├── .gitignore  
-├── requirements.txt  
+**5. Current Version Structure (DilasaKMLTool_v4 - Based on provided code):**
+```
+DilasaKMLTool_v4/
+├── main_app.py
+├── ui/
+│   ├── __init__.py
+│   ├── main_window.py
+│   ├── splash_screen.py
+│   ├── dialogs/
+│   │   ├── __init__.py
+│   │   ├── api_sources_dialog.py
+│   │   ├── duplicate_dialog.py
+│   │   └── output_mode_dialog.py
+│   └── widgets/
+│       ├── __init__.py
+│       └── map_view_widget.py
+├── core/
+│   ├── __init__.py
+│   ├── data_processor.py
+│   ├── kml_generator.py
+│   ├── api_handler.py
+│   └── utils.py
+├── database/
+│   ├── __init__.py
+│   └── db_manager.py
+├── assets/
+│   ├── dilasa_logo.jpg
+│   └── app_icon.ico
+├── .gitignore
+├── requirements.txt
 └── README.md
+```
 
-### **6\. Current Goal:**
+**6. Current Goal: Implement the "Historical Imagery" Feature**
 
-* **Fully implement and integrate the "Historical Map Builder" and historical imagery viewing functionality.**  
-  * **Builder Dialog (historical\_map\_builder\_dialog.py):**  
-    * Ensure robust Shapefile reading and feature selection (using geopandas).  
-    * Correctly pass area geometries and parameters to GEEProcessingThread.  
-    * Ensure GEEProcessingThread correctly uses gee\_handler.py to:  
-      * Fetch/composite yearly imagery from GEE for the selected areas and years.  
-      * Obtain download URLs for the processed images.  
-      * Crucially, obtain and save the **geographic bounds** of each downloaded image (e.g., as a sidecar .json file like 2023.json next to 2023.png).  
-    * Implement the actual download of images from the GEE-provided URL to the local\_historical\_imagery/{AreaName}/{Year}/ directory.  
-    * Provide clear progress updates and error handling in the dialog's log.  
-  * **Main Window Integration (main\_window.py & map\_view\_widget.py):**  
-    * Refine the logic in update\_historical\_year\_combo\_for\_selection() to:  
-      * Reliably determine the "Area Name" (e.g., Block Name from polygon\_data.block) for the currently selected farmer's polygon. This name must match the folder names created by the builder.  
-      * Scan the local cache (local\_historical\_imagery/{AreaName}/) for available YEAR.png (or .tif) files AND their corresponding YEAR.json (bounds) files. Only list years for which both image and bounds data exist.  
-    * Refine on\_historical\_year\_selected():  
-      * When a year is selected, construct paths to the local image and its bounds file.  
-      * Load the geographic bounds from the .json file.  
-      * Call self.map\_view\_widget.display\_local\_image\_overlay() with the image path, its loaded bounds, and the current farmer's polygon coordinates (converted to Lat/Lon).  
-    * Ensure MapViewWidget.display\_local\_image\_overlay() correctly uses folium.raster\_layers.ImageOverlay with the provided image path and geographic bounds.
+*   **Develop the "Historical Map Builder" functionality:**
+    *   Create a new dialog (`HistoricalMapBuilderDialog`):
+        *   Allow users to upload a Shapefile to define administrative boundaries or areas of interest (AOIs).
+        *   Enable selection of a specific feature/area from the Shapefile to process.
+        *   Provide inputs for selecting a range of years and potentially GEE image collections/parameters.
+    *   Create a new core module (`core/gee_handler.py`):
+        *   Implement Google Earth Engine (GEE) authentication.
+        *   Include functions to process satellite imagery:
+            *   Fetch imagery for the selected AOI geometry and year(s).
+            *   Perform operations like cloud masking and temporal compositing (e.g., median annual composite).
+            *   Obtain a download URL for the processed raster image.
+            *   Extract and retrieve the geographic bounds (e.g., `[[lat_min, lon_min], [lat_max, lon_max]]`) of the final processed image for the AOI.
+    *   Integrate GEE processing with the dialog, likely using a `QThread` (`GEEProcessingThread`) for non-blocking background operations.
+    *   Implement local caching:
+        *   Download the processed images (e.g., PNG or GeoTIFF).
+        *   Store images in a structured local directory, e.g., `local_historical_imagery/{AreaName}/{Year}/image.png`.
+        *   Save the corresponding geographic bounds metadata alongside each image (e.g., `local_historical_imagery/{AreaName}/{Year}/bounds.json`).
+*   **Integrate Historical Imagery Viewing in `MainWindow` and `MapViewWidget`:**
+    *   Add UI elements to `MainWindow` (e.g., a checkable "Enable Historical View" group box, a "Year" `QComboBox`) to control historical imagery display.
+    *   When a farmer's polygon is selected in the main table:
+        *   Develop logic to link this polygon to a cached "Area Name" (e.g., using `polygon_data.block` or a similar field that corresponds to the `AreaName` used by the builder).
+        *   Scan the `local_historical_imagery/{AreaName}/` directory to find available years (where both image and bounds.json exist) and populate the "Year" `QComboBox`.
+    *   When a year is selected:
+        *   `MapViewWidget` must be enhanced with a method (e.g., `display_local_image_overlay`) to:
+            *   Load the specified local historical image.
+            *   Read its geographic bounds from the corresponding `.json` file.
+            *   Display this image as a raster overlay on the map (using `folium.raster_layers.ImageOverlay` or similar).
+            *   Ensure the selected farmer's polygon is drawn on top of the historical image.
+*   **General Considerations:**
+    *   Ensure robust error handling for GEE operations, file I/O, and network requests.
+    *   Provide user feedback during long GEE processing and download tasks.
 
-### **7\. Future Aspects and Possible Features:**
+**7. Future Aspects and Possible Features:**
+*   Advanced Polygon Editor, more sophisticated historical imagery display (sliders, NDVI), user settings, reporting, batch KML, GIS analysis, improved error handling, installer.
 
-* Advanced Polygon Editor on the map.  
-* More sophisticated historical imagery comparison tools (side-by-side, sliders).  
-* User settings panel (default paths, GEE params, map prefs).  
-* Reporting tools (PDF/HTML).  
-* Batch KML processing without UI selection.  
-* Improved error handling and user guidance throughout the application.  
-* Refined installer/packager for Windows distribution.  
-* Option to manage (delete, view info about) locally cached historical imagery.
+**8. Self Prompt (AI - Instructions for Starting Historical Imagery Feature):**
 
-### **8\. Self Prompt (Instructions for AI to Continue):**
-
-* **Current Focus:** Complete the "Historical Map Builder" feature.  
-* **Immediate Next Steps for Coding (Artifact 6 \- main\_window.py and map\_view\_widget.py updates):**  
-  1. **Modify MapViewWidget (ui/widgets/map\_view\_widget.py):**  
-     * Implement display\_local\_image\_overlay(self, image\_path, image\_bounds\_lat\_lon, farmer\_polygon\_coords\_lat\_lon=None, map\_center\_lat\_lon=None, zoom\_level=14). This method should:  
-       * Take the path to a locally stored image and its geographic bounds (e.g., \[\[lat\_min, lon\_min\], \[lat\_max, lon\_max\]\]).  
-       * Create a new Folium map centered appropriately.  
-       * Use folium.raster\_layers.ImageOverlay to display the local image using its path (converted to file:/// URL) and bounds.  
-       * If farmer\_polygon\_coords\_lat\_lon are provided, draw this polygon on top of the image overlay (e.g., in a contrasting color).  
-       * Include standard base map tile layers (OpenStreetMap, Esri Satellite) in the LayerControl for reference.  
-  2. **Update MainWindow (ui/main\_window.py):**  
-     * **\_create\_menus\_and\_toolbar():** Ensure the "Build Historical Imagery Cache..." action is present and connected to handle\_build\_historical\_maps().  
-     * **\_setup\_main\_content\_area():** Ensure the "Historical View" QGroupBox and "Year" QComboBox are correctly added and laid out.  
-     * **handle\_build\_historical\_maps():** Implement this to create and exec() an instance of HistoricalMapBuilderDialog(self).  
-     * **on\_historical\_view\_toggled(self, checked):** Implement fully.  
-     * **update\_historical\_year\_combo\_for\_selection(self):**  
-       * **Crucial:** Add robust logic to get the area\_name\_for\_cache based on the selected polygon\_record (e.g., from its block field, sanitized to match folder names created by the builder).  
-       * Scan local\_historical\_imagery/{area\_name\_for\_cache}/ for YEAR.png (or other supported image types) AND corresponding YEAR.json files. Only list years if both exist.  
-     * **on\_historical\_year\_selected(self, selected\_year\_str):**  
-       * Construct paths to the image and its .json bounds file.  
-       * Load bounds from JSON. **Ensure the bounds format saved by the builder matches what folium.ImageOverlay expects (\[\[south\_lat, west\_lon\], \[north\_lat, east\_lon\]\]).** If GEE exports bounds differently (e.g., \[xmin, ymin, xmax, ymax\]), a conversion will be needed here or when saving the JSON.  
-       * Convert the current farmer's polygon UTM coordinates to Lat/Lon.  
-       * Call self.map\_view\_widget.display\_local\_image\_overlay(...).  
-     * **historical\_imagery\_cache\_updated(self):** Implement to refresh the year combo.  
-     * **on\_table\_selection\_changed():** Ensure it correctly calls update\_historical\_year\_combo\_for\_selection() or \_display\_current\_selected\_polygon\_on\_map() based on the historical view toggle.  
-* **Data Flow for Bounds:** The GEEProcessingThread in historical\_map\_builder\_dialog.py must emit the geographic bounds of the processed GEE image. The dialog's handle\_image\_download\_signal must save these bounds (e.g., as a JSON file like 2023.json) alongside the downloaded image. MainWindow then reads this JSON to get bounds for ImageOverlay.  
-* **Error Handling:** Add try-except blocks for file operations (reading bounds JSON, checking image paths) and GEE interactions.  
-* **Testing:** After coding, the primary test will be:  
-  1. Use the builder to download imagery for a known area/year.  
-  2. Select a polygon in MainWindow that falls within that area.  
-  3. Enable "Historical View."  
-  4. Select the downloaded year.  
-  5. Verify the correct local image is displayed as an overlay with the farmer's polygon on top.
+*   **Project Initialization:**
+    *   Add `geopandas` and `earthengine-api` to `requirements.txt` and install them.
+    *   Create empty files: `core/gee_handler.py` and `ui/dialogs/historical_map_builder_dialog.py`.
+    *   Create a directory: `local_historical_imagery/` (and add to `.gitignore` if contents are large/dynamic).
+*   **Phase 1: GEE Handler Basics & Authentication (`core/gee_handler.py`)**
+    *   Implement `authenticate_ee()` and `initialize_ee()` functions.
+    *   Test basic GEE connection.
+*   **Phase 2: Historical Map Builder Dialog - UI Shell (`ui/dialogs/historical_map_builder_dialog.py`)**
+    *   Design and implement the basic UI layout:
+        *   `QPushButton` for "Select Shapefile".
+        *   `QLineEdit` (read-only) to display Shapefile path.
+        *   `QComboBox` or `QListWidget` to display features/attributes from Shapefile (e.g., "Block Name").
+        *   `QSpinBox` or `QLineEdit` for "Start Year" and "End Year".
+        *   (Optional) `QComboBox` for GEE image collection (e.g., "Sentinel-2", "Landsat 8").
+        *   `QPushButton` "Start Building Cache".
+        *   `QTextEdit` for progress logging.
+    *   Implement the "Select Shapefile" functionality using `QFileDialog`.
+    *   Connect the dialog launch from `MainWindow` (e.g., via a new menu action/toolbar button).
+*   **Phase 3: Shapefile Processing & Area Selection (in `historical_map_builder_dialog.py`)**
+    *   Use `geopandas` to read the selected Shapefile.
+    *   Populate the `QComboBox`/`QListWidget` with a chosen attribute field from the Shapefile so the user can select a specific area/feature.
+    *   Store the geometry of the selected area.
+*   **Next Steps (following Feature Pipeline):** Proceed with GEE image processing logic in `gee_handler.py`, thread implementation in the dialog, local image/bounds saving, and then integration into `MainWindow` and `MapViewWidget` for display. Focus on robustly saving and then reading the geographic bounds for `ImageOverlay`.
