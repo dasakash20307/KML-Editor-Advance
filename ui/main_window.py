@@ -4,6 +4,7 @@ import os
 import sys 
 import csv
 import utm 
+import typing # <--- ADD THIS IMPORT
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTableView, 
                                QSplitter, QFrame, QStatusBar, QMenuBar, QMenu, QToolBar, QPushButton,
                                QAbstractItemView, QHeaderView, QMessageBox, QFileDialog, QComboBox,
@@ -162,7 +163,7 @@ class PolygonFilterProxyModel(QSortFilterProxyModel):
         self.invalidateFilter()
 
     def filterAcceptsRow(self, source_row, source_parent):
-        source_model_typed = self.sourceModel() # type: PolygonTableModel
+        source_model_typed = typing.cast(PolygonTableModel, self.sourceModel()) # MODIFIED LINE
         if not source_model_typed or source_row >= len(source_model_typed._data): return False
         record = source_model_typed._data[source_row]
         # Ensure record has enough elements for all checks.
@@ -332,9 +333,9 @@ class MainWindow(QMainWindow):
 
 
     def _create_status_bar(self):
-        self.status_bar_instance = QStatusBar()
-        self.setStatusBar(self.status_bar_instance)
-        self.status_bar_instance.showMessage("Ready.", 3000)
+        self.status_bar_instance = QStatusBar() # MODIFIED LINE
+        self.setStatusBar(self.status_bar_instance) # MODIFIED LINE
+        self.status_bar_instance.showMessage("Ready.", 3000) # MODIFIED LINE
 
     def _setup_filter_panel(self):
         self.filter_groupbox = QGroupBox("Filters") 
@@ -655,7 +656,7 @@ class MainWindow(QMainWindow):
         dialog = HistoricalMapBuilderDialog(self)
         dialog.exec()
 
-    def log_message(self, message, level="info", tag=None): # Added tag=None and logic
+    def log_message(self, message, level="info", tag=None): # MODIFIED SIGNATURE AND LOGIC
         if hasattr(self, 'log_text_edit_qt_actual'): 
             log_prefix = f"[{level.upper()}]"
             if tag:
@@ -667,8 +668,8 @@ class MainWindow(QMainWindow):
             self.log_text_edit_qt_actual.ensureCursorVisible() 
         else: print(f"LOG [{level.upper()}{' ['+tag+']' if tag else ''}]: {message}")
         
-        if hasattr(self, 'status_bar_instance') and self.status_bar_instance: # Check instance exists
-            self.status_bar_instance.showMessage(message, 7000 if level=="info" else 10000)
+        if hasattr(self, 'status_bar_instance') and self.status_bar_instance: # MODIFIED LINE
+            self.status_bar_instance.showMessage(message, 7000 if level=="info" else 10000) # MODIFIED LINE
             
     def load_data_into_table(self): 
         try:
