@@ -24,6 +24,7 @@ import datetime
 from .dialogs.api_sources_dialog import APISourcesDialog 
 from .dialogs.duplicate_dialog import DuplicateDialog
 from .dialogs.output_mode_dialog import OutputModeDialog 
+from .dialogs.historical_map_builder_dialog import HistoricalMapBuilderDialog # Added import
 from .widgets.map_view_widget import MapViewWidget
 
 
@@ -281,6 +282,7 @@ class MainWindow(QMainWindow):
         self.manage_api_action = QAction(QIcon.fromTheme("preferences-system"),"Manage A&PI Sources...", self)
         self.manage_api_action.triggered.connect(self.handle_manage_api_sources)
         data_menu.addAction(self.manage_api_action)
+        data_menu.addAction(self.build_historical_cache_action) # New action
         data_menu.addSeparator()
         self.delete_checked_action = QAction(QIcon.fromTheme("edit-delete"),"Delete Checked Rows...", self) 
         self.delete_checked_action.triggered.connect(self.handle_delete_checked_rows) 
