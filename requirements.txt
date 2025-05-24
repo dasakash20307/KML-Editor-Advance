@@ -4,5 +4,7 @@ simplekml
 utm
 Pillow
 folium
+geopandas
+earthengine-api
 # Add other specific versions if needed, e.g., PySide6==6.5.0
 # PyInstaller (often installed globally or in a build environment)
