@@ -24,7 +24,7 @@ import datetime
 from .dialogs.api_sources_dialog import APISourcesDialog 
 from .dialogs.duplicate_dialog import DuplicateDialog
 from .dialogs.output_mode_dialog import OutputModeDialog 
-from .dialogs.historical_map_builder_dialog import HistoricalMapBuilderDialog # Added import
+from .dialogs.historical_map_builder_dialog import HistoricalMapBuilderDialog
 from .widgets.map_view_widget import MapViewWidget
 
 
@@ -162,9 +162,9 @@ class PolygonFilterProxyModel(QSortFilterProxyModel):
         self.invalidateFilter()
 
     def filterAcceptsRow(self, source_row, source_parent):
-        source_model = self.sourceModel()
-        if not source_model or source_row >= len(source_model._data): return False
-        record = source_model._data[source_row]
+        source_model_typed = self.sourceModel() # type: PolygonTableModel
+        if not source_model_typed or source_row >= len(source_model_typed._data): return False
+        record = source_model_typed._data[source_row]
         # Ensure record has enough elements for all checks.
         # The record tuple from DB is (id, status, uuid, farmer, village, date_added, export_count, last_exported)
         # These map to source_model columns 1-8 (0-7 in tuple)
@@ -282,8 +282,12 @@ class MainWindow(QMainWindow):
         self.manage_api_action = QAction(QIcon.fromTheme("preferences-system"),"Manage A&PI Sources...", self)
         self.manage_api_action.triggered.connect(self.handle_manage_api_sources)
         data_menu.addAction(self.manage_api_action)
-        data_menu.addAction(self.build_historical_cache_action) # New action
+
+        self.build_historical_cache_action = QAction(QIcon.fromTheme("folder-open-image"), "Build Historical Imagery Cache...", self)
+        self.build_historical_cache_action.triggered.connect(self.handle_build_historical_cache)
+        data_menu.addAction(self.build_historical_cache_action)
         data_menu.addSeparator()
+
         self.delete_checked_action = QAction(QIcon.fromTheme("edit-delete"),"Delete Checked Rows...", self) 
         self.delete_checked_action.triggered.connect(self.handle_delete_checked_rows) 
         data_menu.addAction(self.delete_checked_action)
@@ -320,6 +324,7 @@ class MainWindow(QMainWindow):
         manage_api_toolbar_action = QAction(QIcon.fromTheme("preferences-system"), "Manage API Sources", self)
         manage_api_toolbar_action.triggered.connect(self.handle_manage_api_sources)
         self.toolbar.addAction(manage_api_toolbar_action)
+        self.toolbar.addAction(self.build_historical_cache_action) 
 
         self.toolbar.addSeparator()
         self.toolbar.addAction(self.generate_kml_action)
@@ -327,8 +332,9 @@ class MainWindow(QMainWindow):
 
 
     def _create_status_bar(self):
-        self.statusBar = QStatusBar(); self.setStatusBar(self.statusBar)
-        self.statusBar.showMessage("Ready.", 3000)
+        self.status_bar_instance = QStatusBar()
+        self.setStatusBar(self.status_bar_instance)
+        self.status_bar_instance.showMessage("Ready.", 3000)
 
     def _setup_filter_panel(self):
         self.filter_groupbox = QGroupBox("Filters") 
@@ -645,14 +651,24 @@ class MainWindow(QMainWindow):
     def handle_about(self):
         QMessageBox.about(self, f"About {APP_NAME_MW}", f"<b>{APP_NAME_MW}</b><br>Version: {APP_VERSION_MW}<br><br>{ORGANIZATION_TAGLINE_MW}<br><br>Processes geographic data for KML generation.")
 
-    def log_message(self, message, level="info"): 
+    def handle_build_historical_cache(self): # Added from previous task
+        dialog = HistoricalMapBuilderDialog(self)
+        dialog.exec()
+
+    def log_message(self, message, level="info", tag=None): # Added tag=None and logic
         if hasattr(self, 'log_text_edit_qt_actual'): 
+            log_prefix = f"[{level.upper()}]"
+            if tag:
+                log_prefix += f" [{tag}]"
+            
             color_map = {"info": INFO_COLOR_MW, "error": ERROR_COLOR_MW, "success": SUCCESS_COLOR_MW}
             self.log_text_edit_qt_actual.setTextColor(QColor(color_map.get(level, FG_COLOR_MW)))
-            self.log_text_edit_qt_actual.append(f"[{level.upper()}] {message}")
+            self.log_text_edit_qt_actual.append(f"{log_prefix} {message}")
             self.log_text_edit_qt_actual.ensureCursorVisible() 
-        else: print(f"LOG [{level.upper()}]: {message}")
-        if hasattr(self, 'statusBar'): self.statusBar.showMessage(message, 7000 if level=="info" else 10000)
+        else: print(f"LOG [{level.upper()}{' ['+tag+']' if tag else ''}]: {message}")
+        
+        if hasattr(self, 'status_bar_instance') and self.status_bar_instance: # Check instance exists
+            self.status_bar_instance.showMessage(message, 7000 if level=="info" else 10000)
             
     def load_data_into_table(self): 
         try:
