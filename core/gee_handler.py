@@ -27,7 +27,7 @@ def initialize_ee():
         ee.Initialize(opt_url='https://earthengine-highvolume.googleapis.com', quiet=True)
         # Test connectivity by getting the size of a small image collection
         # This confirms that requests can be made and results returned.
-        test_collection = ee.ImageCollection('LANDSAT/LC08/C01/T1_RT').limit(1)
+        test_collection = ee.ImageCollection('LANDSAT/LC08/C01/T1_RT').limit(1) # type: ignore
         _ = test_collection.size().getInfo() # Should return 1 if successful
         print("CORE_GEE: Google Earth Engine initialized successfully and tested (high-volume endpoint).")
         ee_initialized = True
@@ -41,12 +41,12 @@ def initialize_ee():
         print("CORE_GEE: Attempting to initialize Google Earth Engine (standard endpoint)...")
         ee.Initialize(quiet=True)
         # Test connectivity
-        test_collection = ee.ImageCollection('LANDSAT/LC08/C01/T1_RT').limit(1)
+        test_collection = ee.ImageCollection('LANDSAT/LC08/C01/T1_RT').limit(1) # type: ignore
         _ = test_collection.size().getInfo() # Should return 1 if successful
         print("CORE_GEE: Google Earth Engine initialized successfully and tested (standard endpoint).")
         ee_initialized = True
         return True
-    except ee.EEException as e_standard_ee: # ee.EEException is the standard GEE exception
+    except ee.EEException as e_standard_ee: # type: ignore # ee.EEException is the standard GEE exception
         print(f"CORE_GEE: Earth Engine standard initialization failed (EEException): {e_standard_ee}")
         print("CORE_GEE: Please ensure you have authenticated with Google Earth Engine (e.g., run 'earthengine authenticate').")
         ee_initialized = False
