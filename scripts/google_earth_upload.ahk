@@ -1,6 +1,6 @@
 ; google_earth_upload.ahk
 #SingleInstance force
-SetTitleMatchMode, 2 ; Match anywhere in title
+SetTitleMatchMode 2 ; Match anywhere in title
 
 ; Retrieve command line parameters
 historical_param := A_Args[1] ; First parameter passed from Python
