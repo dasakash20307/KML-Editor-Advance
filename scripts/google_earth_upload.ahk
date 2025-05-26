@@ -14,45 +14,41 @@ searchDurationMs := 5000 ; Max time to wait for a window
 ; --- Main Logic ---
 
 ; 1. Activate Google Earth Window
-WinWait(googleEarthWindowTitle,, searchDurationMs / 1000)
-If WinExist(googleEarthWindowTitle) {
-    WinActivate
-    Sleep 300 ; Give it a moment to become active
-} else {
-    MsgBox, 16, Error, Google Earth window not found. Script cannot continue.
-    ExitApp
+WinWait, %googleEarthWindowTitle%,, % searchDurationMs / 1000
+If ErrorLevel { ; WinWait timed out
+    ExitApp ; Window not found
 }
+WinActivate, %googleEarthWindowTitle%
+Sleep 300 ; Give it a moment to become active
+Click 50 100 ; Click near top-left of the window to help focus
 
 ; 2. Open Import Dialog (Ctrl+I)
-SendInput, ^i
+SendInput ^i
 Sleep 500 ; Wait for dialog to appear
 
 ; 3. Paste File Path and Open
-WinWait(fileDialogOpenWindowTitle,, searchDurationMs / 1000)
-If WinExist(fileDialogOpenWindowTitle) {
-    WinActivate ; Ensure file dialog is active
-    Sleep 200
-    SendInput, ^v ; Paste path from clipboard
-    Sleep 300
-    SendInput, !o ; Alt+O to open/confirm. Could also be {Enter}
-    Sleep 1000 ; Give time for file to potentially load before next step
-} else {
-    MsgBox, 16, Error, File open/import dialog not found.
-    ExitApp
+WinWait, %fileDialogOpenWindowTitle%,, % searchDurationMs / 1000
+If ErrorLevel { ; WinWait timed out
+    ExitApp ; File dialog not found
 }
+WinActivate, %fileDialogOpenWindowTitle% ; Ensure file dialog is active
+Sleep 200
+SendInput ^v ; Paste path from clipboard
+Sleep 300
+SendInput !o ; Alt+O to open/confirm. Could also be {Enter}
+Sleep 1000 ; Give time for file to potentially load before next step
 
 ; 4. Enable Historical View (Conditional)
 if (historical_param = "historical_on") {
     Sleep 3000 ; Wait a bit longer for KML to load visually before Ctrl+H
 
     ; Re-activate Google Earth Window as focus might have been lost
-    If WinExist(googleEarthWindowTitle) {
-        WinActivate
+    If WinExist(googleEarthWindowTitle) { ; Using function call WinExist() is fine
+        WinActivate, %googleEarthWindowTitle%
         Sleep 300
-        SendInput, ^h ; Ctrl+H for historical imagery
-    } else {
-        MsgBox, 16, Warning, Google Earth window lost focus before Ctrl+H. Historical imagery might not be toggled.
+        SendInput ^h ; Ctrl+H for historical imagery
     }
+    ; Removed MsgBox for "window lost focus"
 }
 
 ExitApp
