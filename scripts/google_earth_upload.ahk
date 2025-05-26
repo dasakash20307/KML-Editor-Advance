@@ -10,11 +10,12 @@ historical_param := A_Args[1] ; First parameter passed from Python
 googleEarthWindowTitle := "Google Earth"
 fileDialogOpenWindowTitle := "Open" ; Or "Import", depending on system/browser language
 searchDurationMs := 5000 ; Max time to wait for a window
+timeoutSeconds := searchDurationMs / 1000
 
 ; --- Main Logic ---
 
 ; 1. Activate Google Earth Window
-WinWait, %googleEarthWindowTitle%,, % searchDurationMs / 1000
+WinWait, %googleEarthWindowTitle%,, %timeoutSeconds%
 If ErrorLevel { ; WinWait timed out
     ExitApp ; Window not found
 }
@@ -27,7 +28,7 @@ SendInput ^i
 Sleep 500 ; Wait for dialog to appear
 
 ; 3. Paste File Path and Open
-WinWait, %fileDialogOpenWindowTitle%,, % searchDurationMs / 1000
+WinWait, %fileDialogOpenWindowTitle%,, %timeoutSeconds%
 If ErrorLevel { ; WinWait timed out
     ExitApp ; File dialog not found
 }
