@@ -41,7 +41,6 @@ ERROR_COLOR_MW = "#D32F2F"
 SUCCESS_COLOR_MW = "#388E3C"   
 FG_COLOR_MW = "#333333"        
 ORGANIZATION_TAGLINE_MW = "Developed by Dilasa Janvikash Pratishthan to support community upliftment"
-AHK_SCRIPT_PATH = "scripts/google_earth_upload.ahk" # Path for the AHK script
 
 # --- Table Model with Checkbox Support ---
 class PolygonTableModel(QAbstractTableModel):
@@ -213,7 +212,8 @@ class MainWindow(QMainWindow):
         
         self.apply_choice_to_all_duplicates = False
         self.session_duplicate_choice = "skip" 
-        self.ge_historical_view_activated = False 
+        self.current_temp_kml_path = None
+        self.show_ge_instructions_popup_again = True
 
         self._setup_main_content_area() 
         self.load_data_into_table() 
@@ -302,6 +302,10 @@ class MainWindow(QMainWindow):
         self.about_action = QAction(QIcon.fromTheme("help-about"),"&About", self)
         self.about_action.triggered.connect(self.handle_about)
         help_menu.addAction(self.about_action)
+
+        self.ge_instructions_action = QAction("GE &Instructions", self)
+        self.ge_instructions_action.triggered.connect(self.handle_show_ge_instructions)
+        help_menu.addAction(self.ge_instructions_action)
         
         self.toolbar = QToolBar("Main Toolbar") 
         self.toolbar.setIconSize(QSize(20,20)) 
@@ -674,48 +678,29 @@ class MainWindow(QMainWindow):
         kml_doc = simplekml.Kml(name=str(polygon_record.get('uuid', 'Polygon')))
         if add_polygon_to_kml_object(kml_doc, polygon_record):
             try:
+                # Delete old temp KML if it exists
+                if self.current_temp_kml_path and os.path.exists(self.current_temp_kml_path):
+                    try:
+                        os.remove(self.current_temp_kml_path)
+                        self.log_message(f"Old temporary KML file deleted: {self.current_temp_kml_path}", "info")
+                    except FileNotFoundError:
+                        self.log_message(f"Old temporary KML file not found for deletion: {self.current_temp_kml_path}", "warning")
+                    except PermissionError:
+                        self.log_message(f"Permission denied while deleting old temporary KML file: {self.current_temp_kml_path}", "error")
+                    except Exception as e_del:
+                        self.log_message(f"Error deleting old temporary KML file {self.current_temp_kml_path}: {e_del}", "error")
+                
                 fd, temp_kml_path = tempfile.mkstemp(suffix=".kml", prefix="ge_poly_")
                 os.close(fd) 
                 kml_doc.save(temp_kml_path)
-                self.log_message(f"Temporary KML saved to: {temp_kml_path}", "info")
+                self.current_temp_kml_path = temp_kml_path # Store new path
+                self.log_message(f"Temporary KML saved to: {self.current_temp_kml_path}", "info")
 
-                QApplication.clipboard().setText(temp_kml_path)
+                QApplication.clipboard().setText(self.current_temp_kml_path)
                 self.log_message("KML file path copied to clipboard.", "info")
 
-                ahk_exe_path = "AutoHotkey.exe" 
-                
-                historical_arg = "historical_on" if not self.ge_historical_view_activated else "historical_off"
-                
-                # Use resource_path for AHK_SCRIPT_PATH if it's bundled with the app
-                # For now, assuming AHK_SCRIPT_PATH is relative to CWD or an absolute path.
-                # If AHK_SCRIPT_PATH is relative and within the project, make sure it's correctly found.
-                # For robustness, one might use:
-                # script_full_path = resource_path(AHK_SCRIPT_PATH) 
-                # However, if scripts/ is at the same level as where the app is run from, direct usage is fine.
-                script_full_path = AHK_SCRIPT_PATH # Using the constant directly for now
-
-                command = [ahk_exe_path, script_full_path, historical_arg]
-                
-                try:
-                    startupinfo = None
-                    if os.name == 'nt':
-                        startupinfo = subprocess.STARTUPINFO()
-                        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                        startupinfo.wShowWindow = subprocess.SW_HIDE
-
-                    process = subprocess.Popen(command, startupinfo=startupinfo)
-                    self.log_message(f"Attempting to run AHK script: {' '.join(command)}", "info")
-                    
-                    if historical_arg == "historical_on":
-                        self.ge_historical_view_activated = True 
-                        self.log_message("AHK script launched for historical view activation.", "info")
-                
-                except FileNotFoundError:
-                    self.log_message(f"Error: AutoHotkey.exe not found at '{ahk_exe_path}' or script '{script_full_path}' not found. Please ensure AutoHotkey is installed and in PATH, and the script exists.", "error")
-                    QMessageBox.critical(self, "AHK Error", f"AutoHotkey.exe or script not found.\nAutoHotkey: {ahk_exe_path}\nScript: {script_full_path}")
-                except Exception as e_ahk:
-                    self.log_message(f"Error running AHK script: {e_ahk}", "error")
-                    QMessageBox.warning(self, "AHK Error", f"Could not run AHK script: {e_ahk}")
+                if self.show_ge_instructions_popup_again:
+                    self._show_ge_instructions_popup()
 
             except Exception as e_kml_save:
                 self.log_message(f"Error saving temporary KML or copying to clipboard: {e_kml_save}", "error")
@@ -723,6 +708,26 @@ class MainWindow(QMainWindow):
         else:
             self.log_message(f"Failed to generate KML content for polygon UUID {polygon_record.get('uuid')}.", "error")
             QMessageBox.warning(self, "KML Generation Failed", "Could not generate KML content for the selected polygon.")
+
+    def _show_ge_instructions_popup(self):
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Google Earth Instructions")
+        msg_box.setTextFormat(Qt.TextFormat.PlainText) # Ensure plain text interpretation for newlines
+        msg_box.setText("Instructions:\n"
+                        "1. Click on the Google Earth window to focus.\n"
+                        "2. Press Ctrl+I to open the import dialog.\n"
+                        "3. Press Ctrl+V to paste the KML file path.\n"
+                        "4. Press Enter to load the KML.\n"
+                        "5. Press Ctrl+H for historical imagery view.")
+        
+        checkbox = QCheckBox("Do not show this popup again")
+        msg_box.setCheckBox(checkbox)
+        
+        msg_box.exec()
+        
+        if msg_box.checkBox().isChecked():
+            self.show_ge_instructions_popup_again = False
+            self.log_message("Google Earth instructions popup will not be shown again for this session.", "info")
 
     def _handle_ge_view_toggle(self, checked):
         original_action_blocked = self.toggle_ge_view_action.signalsBlocked()
@@ -741,15 +746,16 @@ class MainWindow(QMainWindow):
         if checked:
             self.map_stack.setCurrentIndex(1)
             self.google_earth_view_widget.set_focus_on_webview()
-            self.ge_historical_view_activated = False # Reset for fresh activation
         else:
             self.map_stack.setCurrentIndex(0)
-            # self.ge_historical_view_activated = False # Not strictly needed here as it's reset on activation
 
         self.log_message(f"Google Earth View Toggled: {'ON' if checked else 'OFF'}", "info")
 
     def handle_about(self):
         QMessageBox.about(self, f"About {APP_NAME_MW}", f"<b>{APP_NAME_MW}</b><br>Version: {APP_VERSION_MW}<br><br>{ORGANIZATION_TAGLINE_MW}<br><br>Processes geographic data for KML generation.")
+
+    def handle_show_ge_instructions(self):
+        self._show_ge_instructions_popup()
 
     def log_message(self, message, level="info"): 
         if hasattr(self, 'log_text_edit_qt_actual'): 
@@ -773,4 +779,13 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'google_earth_view_widget') and hasattr(self.google_earth_view_widget, 'cleanup'):
              self.google_earth_view_widget.cleanup() 
         if hasattr(self, 'db_manager') and self.db_manager: self.db_manager.close()
+
+        # Clean up the last temporary KML file if it exists
+        if self.current_temp_kml_path and os.path.exists(self.current_temp_kml_path):
+            try:
+                os.remove(self.current_temp_kml_path)
+                self.log_message(f"Temporary KML file deleted on exit: {self.current_temp_kml_path}", "info")
+            except Exception as e:
+                self.log_message(f"Error deleting temporary KML file {self.current_temp_kml_path} on exit: {e}", "error")
+        
         super().closeEvent(event)
