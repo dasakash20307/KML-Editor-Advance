@@ -38,6 +38,16 @@ class GoogleEarthWebViewWidget(QWidget):
         '''
         return self.web_view
 
+    def cleanup(self):
+        """
+        Placeholder for any cleanup logic needed for the web view.
+        For example, stopping media, clearing cache, or other resource releases.
+        """
+        # self.web_view.stop() # Example: stop loading
+        # self.web_view.setUrl(QUrl("about:blank")) # Example: clear page
+        # No specific cleanup needed for QWebEngineView itself unless page-specific actions.
+        pass
+
 if __name__ == '__main__':
     # This part is for basic testing if you run this file directly
     # It won't be used when MainWindow imports the widget
@@ -46,6 +56,7 @@ if __name__ == '__main__':
     # Qt is already imported at the top level, so no need for a separate import here for the test.
     # from PySide6.QtCore import Qt 
 
+    app = QApplication(sys.argv) # QApplication instance needed for QWebEngineView
     widget = GoogleEarthWebViewWidget()
     widget.setWindowTitle("Google Earth Web View Test")
     widget.setGeometry(100, 100, 800, 600)

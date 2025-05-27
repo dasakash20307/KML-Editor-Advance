@@ -26,7 +26,7 @@ import datetime
 
 # Assuming dialogs are in their own files and correctly imported
 from .dialogs.api_sources_dialog import APISourcesDialog 
-from .dialogs.duplicate_dialog import DuplicateDialog # Will be removed
+# from .dialogs.duplicate_dialog import DuplicateDialog # Removed as per previous subtask
 from .dialogs.output_mode_dialog import OutputModeDialog 
 from .widgets.map_view_widget import MapViewWidget
 from .widgets.google_earth_webview_widget import GoogleEarthWebViewWidget 
@@ -66,7 +66,7 @@ class PolygonTableModel(QAbstractTableModel):
         if data_list: self.update_data(data_list)
 
     def rowCount(self, parent=QModelIndex()): return len(self._data)
-    def columnCount(self, parent=QModelIndex()): return len(self._headers) # Updated implicitly by _headers length
+    def columnCount(self, parent=QModelIndex()): return len(self._headers) 
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
         if not index.isValid(): return None
@@ -121,6 +121,7 @@ class PolygonTableModel(QAbstractTableModel):
         if not index.isValid(): return False
         row, col = index.row(), index.column()
         if row >= len(self._data) or not self._data[row]: return False
+        # db_id is record[0] (the first element of the tuple from the database)
         db_id = self._data[row][0]
 
         if role == Qt.ItemDataRole.CheckStateRole and col == self.CHECKBOX_COL:
@@ -132,7 +133,7 @@ class PolygonTableModel(QAbstractTableModel):
             print(f"[TableModel.setData] Entered for EVALUATION_STATUS_COL. Row: {row}, Col: {col}, New Value: '{value}'")
             new_status = str(value)
             
-            db_id = self._data[row][0] 
+            # db_id is already correctly assigned from self._data[row][0]
             print(f"[TableModel.setData] DB ID: {db_id}")
 
             if self.db_manager and hasattr(self.db_manager, 'update_evaluation_status'):
@@ -143,30 +144,26 @@ class PolygonTableModel(QAbstractTableModel):
                 if update_success:
                     print(f"[TableModel.setData] Before internal update: self._data[{row}] = {self._data[row]}")
                     updated_record_list = list(self._data[row])
-                    updated_record_list[8] = new_status 
+                    updated_record_list[8] = new_status # evaluation_status is at index 8 in the DB tuple
                     self._data[row] = tuple(updated_record_list)
                     print(f"[TableModel.setData] After internal update: self._data[{row}] = {self._data[row]}")
                     
                     print(f"[TableModel.setData] Emitting dataChanged for index ({row},{col})")
                     self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.BackgroundRole])
                     
-                    parent_main_window = self.parent() 
-                    if parent_main_window and hasattr(parent_main_window, 'log_message'):
-                         parent_main_window.log_message(f"Evaluation status for ID {db_id} updated to '{new_status}'.", "info")
+                    # Removed direct call to self.parent().log_message as per subtask instructions (prioritizing print for debugging)
+                    # If MainWindow logging is still desired here, it needs a more robust reference.
+                    # For now, relying on print() for debugging this specific path.
                     return True
                 else:
                     error_msg = f"DB update failed for record ID {db_id} with status {new_status}"
                     print(f"[TableModel.setData] {error_msg}")
-                    parent_main_window = self.parent()
-                    if parent_main_window and hasattr(parent_main_window, 'log_message'):
-                         parent_main_window.log_message(error_msg, "error")
+                    # Removed direct call to self.parent().log_message
                     return False
             else:
                 error_msg = f"Error: self.db_manager not available or missing update_evaluation_status method for record ID {db_id}"
                 print(f"[TableModel.setData] {error_msg}")
-                parent_main_window = self.parent()
-                if parent_main_window and hasattr(parent_main_window, 'log_message'): 
-                    parent_main_window.log_message(error_msg, "error")
+                # Removed direct call to self.parent().log_message
                 return False
         return False
 
@@ -237,15 +234,18 @@ class PolygonFilterProxyModel(QSortFilterProxyModel):
 
     def filterAcceptsRow(self, source_row, source_parent):
         source_model = self.sourceModel()
-        if not source_model or source_row >= len(source_model._data): return False
-        record = source_model._data[source_row]
-        if not record or len(record) < 8: 
+        assert isinstance(source_model, PolygonTableModel), "Source model must be PolygonTableModel"
+        if not source_model or source_row >= len(source_model._data): return False # type: ignore
+        record = source_model._data[source_row] # type: ignore
+        if not record or len(record) < 9: # Ensure record has enough elements for all columns including evaluation_status
             return False 
 
         if self.filter_uuid_text:
+            # UUID is at index 2 in the record tuple (id, status, uuid, ...)
             uuid_val = str(record[2]).lower() 
             if self.filter_uuid_text not in uuid_val: return False
         
+        # Date Added is at index 5
         date_added_str = record[5]
         if date_added_str:
             try:
@@ -255,10 +255,12 @@ class PolygonFilterProxyModel(QSortFilterProxyModel):
                     if self.filter_before_date_added and row_date_added > self.filter_before_date_added: return False
             except Exception: pass 
 
+        # Export Count is at index 6
         export_count = record[6] if record[6] is not None else 0
         if self.filter_export_status == "Exported" and export_count == 0: return False
         if self.filter_export_status == "Not Exported" and export_count > 0: return False
 
+        # Status (error/valid) is at index 1
         status_val = str(record[1]).lower()
         if self.filter_error_status == "Error Records" and "error" not in status_val: return False
         if self.filter_error_status == "Valid Records" and "error" in status_val: return False
@@ -995,5 +997,3 @@ class MainWindow(QMainWindow):
                 self.log_message(f"Error deleting temporary KML file {self.current_temp_kml_path} on exit: {e}", "error")
         
         super().closeEvent(event)
-
-[end of ui/main_window.py]
