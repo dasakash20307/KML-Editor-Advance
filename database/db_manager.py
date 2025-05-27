@@ -86,7 +86,8 @@ class DatabaseManager:
                     kml_export_count INTEGER DEFAULT 0,
                     last_kml_export_date TIMESTAMP,
                     date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP 
+                    last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    evaluation_status TEXT DEFAULT 'Not Evaluated Yet'
                 )
             ''')
             self.conn.commit()
@@ -225,7 +226,7 @@ class DatabaseManager:
         """Fetches specific columns for display in the Treeview."""
         try:
             self.cursor.execute("""
-                SELECT id, status, uuid, farmer_name, village_name, date_added, kml_export_count, last_kml_export_date 
+                SELECT id, status, uuid, farmer_name, village_name, date_added, kml_export_count, last_kml_export_date, evaluation_status
                 FROM polygon_data 
                 ORDER BY date_added DESC
             """) 
@@ -287,6 +288,22 @@ class DatabaseManager:
             print(f"DB: Error deleting all polygon data: {e}")
             return False
 
+    def update_evaluation_status(self, record_id, status):
+        """Updates the evaluation_status for a given record ID."""
+        try:
+            current_time_iso = datetime.datetime.now().isoformat()
+            self.cursor.execute("""
+                UPDATE polygon_data
+                SET evaluation_status = ?,
+                    last_modified = ?
+                WHERE id = ?
+            """, (status, current_time_iso, record_id))
+            self.conn.commit()
+            return self.cursor.rowcount > 0 # True if a row was updated
+        except sqlite3.Error as e:
+            print(f"DB: Error updating evaluation_status for ID '{record_id}': {e}")
+            return False
+
     def close(self):
         """Closes the database connection."""
         if self.conn:
@@ -323,13 +340,13 @@ if __name__ == '__main__':
     print("\n--- Testing Polygon Data ---")
     sample_poly_data1 = {
         "uuid": "uuid-test-001", "response_code": "rc-test-001", "farmer_name": "Test Farmer 1",
-        "village_name": "Test Village", "status": "valid_for_kml",
+        "village_name": "Test Village", "status": "valid_for_kml", "evaluation_status": "Eligible", # Added for testing
         "p1_utm_str": "43Q 123 456", "p1_altitude": 100.0, "p1_easting": 123.0, "p1_northing": 456.0, "p1_zone_num": 43, "p1_zone_letter": "Q",
         # ... (add other point data if needed for full test)
     }
     sample_poly_data2 = {
         "uuid": "uuid-test-002", "response_code": "rc-test-002", "farmer_name": "Test Farmer 2",
-        "village_name": "Another Village", "status": "error_missing_points", "error_messages": "Point 3 missing",
+        "village_name": "Another Village", "status": "error_missing_points", "error_messages": "Point 3 missing", "evaluation_status": "Not Evaluated Yet",
         # ...
     }
 
@@ -338,6 +355,13 @@ if __name__ == '__main__':
     print(f"Added polygon 1 ID: {poly_id1}")
     print(f"Added polygon 2 ID: {poly_id2}")
 
+    if poly_id1:
+        print(f"Updating evaluation status for ID {poly_id1} to 'Not Eligible'")
+        db_manager.update_evaluation_status(poly_id1, "Not Eligible")
+        updated_record = db_manager.get_polygon_data_by_id(poly_id1)
+        print(f"Record {poly_id1} after status update: {updated_record.get('evaluation_status')}")
+
+
     # Test duplicate handling (skip)
     poly_id1_again = db_manager.add_or_update_polygon_data(sample_poly_data1, overwrite=False)
     print(f"Attempted to add polygon 1 again (no overwrite), result ID: {poly_id1_again}") # Should be same as poly_id1
@@ -345,6 +369,7 @@ if __name__ == '__main__':
     # Test duplicate handling (overwrite)
     sample_poly_data1_updated = sample_poly_data1.copy()
     sample_poly_data1_updated["farmer_name"] = "Test Farmer 1 Updated Name"
+    sample_poly_data1_updated["evaluation_status"] = "Eligible" # Update for overwrite
     poly_id1_overwrite = db_manager.add_or_update_polygon_data(sample_poly_data1_updated, overwrite=True)
     print(f"Attempted to add polygon 1 again (overwrite), result ID: {poly_id1_overwrite}")
 
@@ -373,4 +398,3 @@ if __name__ == '__main__':
     # if os.path.exists(test_db_file):
     #     os.remove(test_db_file)
     #     print(f"Removed test database: {test_db_file}")
-
