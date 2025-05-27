@@ -72,7 +72,7 @@ def add_polygon_to_kml_object(kml_document, polygon_db_record):
         
         return True # Polygon added successfully
 
-    except utm.error.OutOfRangeError as e_utm:
+    except utm.error.OutOfRangeError as e_utm: # type: ignore
         print(f"KML GEN Error (UTM Conversion): {e_utm} for UUID {polygon_db_record.get('uuid')}")
         return False
     except Exception as e:
