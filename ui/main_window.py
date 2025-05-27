@@ -26,7 +26,7 @@ import datetime
 
 # Assuming dialogs are in their own files and correctly imported
 from .dialogs.api_sources_dialog import APISourcesDialog 
-from .dialogs.duplicate_dialog import DuplicateDialog
+from .dialogs.duplicate_dialog import DuplicateDialog # Will be removed
 from .dialogs.output_mode_dialog import OutputModeDialog 
 from .widgets.map_view_widget import MapViewWidget
 from .widgets.google_earth_webview_widget import GoogleEarthWebViewWidget 
@@ -56,8 +56,9 @@ class PolygonTableModel(QAbstractTableModel):
     EXPORT_COUNT_COL = 8       # Was 7
     LAST_EXPORTED_COL = 9      # Was 8
 
-    def __init__(self, data_list=None, parent=None):
+    def __init__(self, data_list=None, parent=None, db_manager_instance=None): 
         super().__init__(parent)
+        self.db_manager = db_manager_instance 
         self._data = []
         self._check_states = {}
         self._headers = ["", "ID", "Evaluation Status", "Status", "UUID", "Farmer Name", "Village",
@@ -72,7 +73,6 @@ class PolygonTableModel(QAbstractTableModel):
         row, col = index.row(), index.column()
         if row >= len(self._data): return None
         record = self._data[row] 
-        # db_id is the first element of the tuple 'record' (index 0) as per db_manager.get_all_polygon_data_for_display
         db_id = record[0] 
 
         if role == Qt.ItemDataRole.CheckStateRole and col == self.CHECKBOX_COL:
@@ -80,12 +80,9 @@ class PolygonTableModel(QAbstractTableModel):
         
         if role == Qt.ItemDataRole.DisplayRole:
             if col == self.CHECKBOX_COL: return None
-            # Adjust data access based on new column order and record structure
-            # record: (id, status, uuid, farmer_name, village_name, date_added, kml_export_count, last_kml_export_date, evaluation_status)
-            # Indices:   0,      1,    2,           3,            4,            5,                6,                   7,                 8
             value = None
             if col == self.ID_COL: value = record[0]
-            elif col == self.EVALUATION_STATUS_COL: value = record[8] # New: Access evaluation_status from record's 9th element
+            elif col == self.EVALUATION_STATUS_COL: value = record[8] 
             elif col == self.STATUS_COL: value = record[1]
             elif col == self.UUID_COL: value = record[2]
             elif col == self.FARMER_COL: value = record[3]
@@ -93,7 +90,7 @@ class PolygonTableModel(QAbstractTableModel):
             elif col == self.DATE_ADDED_COL: value = record[5]
             elif col == self.EXPORT_COUNT_COL: value = record[6]
             elif col == self.LAST_EXPORTED_COL: value = record[7]
-            else: return None # Should not happen if col is valid
+            else: return None
 
             if col == self.EXPORT_COUNT_COL and value is None: return "0" 
             if col == self.LAST_EXPORTED_COL and value is None: return ""  
@@ -102,23 +99,18 @@ class PolygonTableModel(QAbstractTableModel):
             return str(value) if value is not None else ""
 
         elif role == Qt.ItemDataRole.BackgroundRole:
-            # record structure: (id, status, uuid, farmer_name, village_name, date_added, kml_export_count, last_kml_export_date, evaluation_status)
-            # evaluation_status is at index 8
             evaluation_status_val = record[8] 
             if col == self.EVALUATION_STATUS_COL:
                 if evaluation_status_val == "Eligible":
-                    return QColor(144, 238, 144, int(255 * 0.7)) # Light Green with 70% opacity
+                    return QColor(144, 238, 144, int(255 * 0.7)) 
                 elif evaluation_status_val == "Not Eligible":
-                    return QColor(255, 182, 193, int(255 * 0.7)) # Light Pink/Red with 70% opacity
-                # For "Not Evaluated Yet" or other values, don't set a specific color,
-                # so it uses default/alternating row color.
-                return None # Or return QColor("#FFFFFF") if explicit white is desired over alternating.
-            return None # No specific background for other columns from this logic
+                    return QColor(255, 182, 193, int(255 * 0.7)) 
+                return None 
+            return None 
             
         elif role == Qt.ItemDataRole.TextAlignmentRole:
             return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter if col != self.CHECKBOX_COL else Qt.AlignmentFlag.AlignCenter
         elif role == Qt.ItemDataRole.ForegroundRole: 
-            # status is now record[1]
             if col == self.STATUS_COL and record[1] and "error" in str(record[1]).lower():
                 return QColor("red")
         elif role == Qt.ItemDataRole.FontRole and col != self.CHECKBOX_COL: 
@@ -128,7 +120,6 @@ class PolygonTableModel(QAbstractTableModel):
     def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
         if not index.isValid(): return False
         row, col = index.row(), index.column()
-        # db_id is record[0]
         if row >= len(self._data) or not self._data[row]: return False
         db_id = self._data[row][0]
 
@@ -138,34 +129,44 @@ class PolygonTableModel(QAbstractTableModel):
             return True
         
         if role == Qt.ItemDataRole.EditRole and col == self.EVALUATION_STATUS_COL:
+            print(f"[TableModel.setData] Entered for EVALUATION_STATUS_COL. Row: {row}, Col: {col}, New Value: '{value}'")
             new_status = str(value)
-            # Assuming self.parent() is MainWindow, which has db_manager.
-            # This relies on point 4 (DatabaseManager.update_evaluation_status) being implemented.
-            if self.parent() and hasattr(self.parent(), 'db_manager') and \
-               hasattr(self.parent().db_manager, 'update_evaluation_status'):
-                if self.parent().db_manager.update_evaluation_status(db_id, new_status):
-                    # Update internal data: record is a tuple, so create a new list/tuple
+            
+            db_id = self._data[row][0] 
+            print(f"[TableModel.setData] DB ID: {db_id}")
+
+            if self.db_manager and hasattr(self.db_manager, 'update_evaluation_status'):
+                print(f"[TableModel.setData] Attempting DB update for ID {db_id} to status '{new_status}'")
+                update_success = self.db_manager.update_evaluation_status(db_id, new_status) 
+                print(f"[TableModel.setData] DB update_success: {update_success}")
+
+                if update_success:
+                    print(f"[TableModel.setData] Before internal update: self._data[{row}] = {self._data[row]}")
                     updated_record_list = list(self._data[row])
-                    updated_record_list[8] = new_status # Update evaluation_status at index 8
+                    updated_record_list[8] = new_status 
                     self._data[row] = tuple(updated_record_list)
+                    print(f"[TableModel.setData] After internal update: self._data[{row}] = {self._data[row]}")
+                    
+                    print(f"[TableModel.setData] Emitting dataChanged for index ({row},{col})")
                     self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.BackgroundRole])
-                    # Log success in MainWindow's log
-                    if hasattr(self.parent(), 'log_message'):
-                         self.parent().log_message(f"Evaluation status for ID {db_id} updated to '{new_status}'.", "info")
+                    
+                    parent_main_window = self.parent() 
+                    if parent_main_window and hasattr(parent_main_window, 'log_message'):
+                         parent_main_window.log_message(f"Evaluation status for ID {db_id} updated to '{new_status}'.", "info")
                     return True
                 else:
-                    # Handle DB update failure
                     error_msg = f"DB update failed for record ID {db_id} with status {new_status}"
-                    print(error_msg)
-                    if hasattr(self.parent(), 'log_message'):
-                         self.parent().log_message(error_msg, "error")
+                    print(f"[TableModel.setData] {error_msg}")
+                    parent_main_window = self.parent()
+                    if parent_main_window and hasattr(parent_main_window, 'log_message'):
+                         parent_main_window.log_message(error_msg, "error")
                     return False
             else:
-                # Handle case where db_manager or update_evaluation_status method is not accessible
-                error_msg = f"Error: db_manager or update_evaluation_status method not accessible for record ID {db_id}"
-                print(error_msg)
-                if hasattr(self.parent(), 'log_message'):
-                    self.parent().log_message(error_msg, "error")
+                error_msg = f"Error: self.db_manager not available or missing update_evaluation_status method for record ID {db_id}"
+                print(f"[TableModel.setData] {error_msg}")
+                parent_main_window = self.parent()
+                if parent_main_window and hasattr(parent_main_window, 'log_message'): 
+                    parent_main_window.log_message(error_msg, "error")
                 return False
         return False
 
@@ -175,7 +176,7 @@ class PolygonTableModel(QAbstractTableModel):
             flags |= Qt.ItemFlag.ItemIsUserCheckable
         elif index.column() == self.EVALUATION_STATUS_COL:
             flags |= Qt.ItemFlag.ItemIsEditable
-            flags |= Qt.ItemFlag.ItemIsSelectable # Keep selectable and enabled
+            flags |= Qt.ItemFlag.ItemIsSelectable 
             flags |= Qt.ItemFlag.ItemIsEnabled
         else:
             flags |= Qt.ItemFlag.ItemIsSelectable 
@@ -270,7 +271,7 @@ class EvaluationStatusDelegate(QStyledItemDelegate):
         super().__init__(parent)
         self.options = ["Not Evaluated Yet", "Eligible", "Not Eligible"]
 
-    def createEditor(self, parent_widget, option, index): # Renamed parent to parent_widget to avoid conflict
+    def createEditor(self, parent_widget, option, index): 
         editor = QComboBox(parent_widget)
         editor.addItems(self.options)
         return editor
@@ -279,11 +280,12 @@ class EvaluationStatusDelegate(QStyledItemDelegate):
         value = index.model().data(index, Qt.ItemDataRole.DisplayRole)
         if value in self.options:
             editor.setCurrentText(value)
-        else: # Default to "Not Evaluated Yet" if current value is not in options or is None
+        else: 
             editor.setCurrentText("Not Evaluated Yet")
 
     def setModelData(self, editor, model, index):
         value = editor.currentText()
+        print(f"[Delegate.setModelData] Called for index ({index.row()},{index.column()}). Value: {value}")
         model.setData(index, value, Qt.ItemDataRole.EditRole)
 
 # --- API Import Progress Dialog ---
@@ -292,7 +294,7 @@ class APIImportProgressDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("API Import Progress")
         self.setModal(True)
-        self.setMinimumWidth(400) # Set a reasonable minimum width
+        self.setMinimumWidth(400) 
         self._was_cancelled = False
 
         layout = QVBoxLayout(self)
@@ -300,7 +302,7 @@ class APIImportProgressDialog(QDialog):
         self.total_label = QLabel("Total Records to Process: 0")
         layout.addWidget(self.total_label)
 
-        self.processed_label = QLabel("Records Processed (Attempted): 0") # Changed from "Successfully Processed"
+        self.processed_label = QLabel("Records Processed (Attempted): 0") 
         layout.addWidget(self.processed_label)
         
         self.new_added_label = QLabel("New Records Added: 0")
@@ -310,7 +312,7 @@ class APIImportProgressDialog(QDialog):
         layout.addWidget(self.skipped_label)
 
         self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 0) # Will be set by set_total_records
+        self.progress_bar.setRange(0, 0) 
         self.progress_bar.setValue(0)
         layout.addWidget(self.progress_bar)
 
@@ -322,27 +324,25 @@ class APIImportProgressDialog(QDialog):
 
     def _perform_cancel(self):
         self._was_cancelled = True
-        self.reject() # Reject the dialog
+        self.reject() 
 
     def set_total_records(self, count):
         self.total_label.setText(f"Total Records to Process: {count}")
         if count > 0:
             self.progress_bar.setRange(0, count)
         else:
-            self.progress_bar.setRange(0, 100) # Default if no records
+            self.progress_bar.setRange(0, 100) 
 
     def update_progress(self, processed_count, skipped_count, new_added_count):
         self.processed_label.setText(f"Records Processed (Attempted): {processed_count}")
         self.new_added_label.setText(f"New Records Added: {new_added_count}")
         self.skipped_label.setText(f"Records Skipped (Duplicates/Errors): {skipped_count}")
         
-        # The progress bar should reflect the total number of items handled from the input list
-        # which is processed_count (as it's incremented for every row from input)
         self.progress_bar.setValue(processed_count) 
-        QApplication.processEvents() # Keep UI responsive
+        QApplication.processEvents() 
 
     def was_cancelled(self):
-        return self._was_cancelled # Use the internal flag
+        return self._was_cancelled 
 
 
 class MainWindow(QMainWindow):
@@ -361,8 +361,6 @@ class MainWindow(QMainWindow):
         self._create_menus_and_toolbar() 
         self._create_status_bar()
         
-        self.apply_choice_to_all_duplicates = False
-        self.session_duplicate_choice = "skip" 
         self.current_temp_kml_path = None
         self.show_ge_instructions_popup_again = True
 
@@ -601,7 +599,9 @@ class MainWindow(QMainWindow):
         table_layout.addLayout(checkbox_header_layout)
         
         self.table_view = QTableView()
-        self.source_model = PolygonTableModel(); 
+        # self.db_manager is initialized in MainWindow.__init__
+        # Pass the db_manager instance to the PolygonTableModel constructor
+        self.source_model = PolygonTableModel(parent=self, db_manager_instance=self.db_manager) 
         self.filter_proxy_model = PolygonFilterProxyModel(self)
         self.filter_proxy_model.setSourceModel(self.source_model)
         self.table_view.setModel(self.filter_proxy_model)
@@ -995,3 +995,5 @@ class MainWindow(QMainWindow):
                 self.log_message(f"Error deleting temporary KML file {self.current_temp_kml_path} on exit: {e}", "error")
         
         super().closeEvent(event)
+
+[end of ui/main_window.py]
