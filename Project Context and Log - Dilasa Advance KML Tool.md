@@ -1,6 +1,6 @@
 **Updated Project Context and Log**
 
-**Date:** May 24, 2025 (Reflecting current project status)
+**Date:** May 24, 2025 (Reflecting current project status and recent GE integration changes)
 
 **1. Application Details:**
 
@@ -11,6 +11,7 @@
     *   It evolved through stages: enhanced data input (CSV, UTM), advanced KML features (styling, descriptions), and planning for data persistence (SQLite) and API integration (mWater).
     *   **Shift to Qt (PySide6) and Modular Design (Current Major Phase):** The application was refactored to Qt (PySide6) for a modern UI and better scalability, adopting a modular structure (`ui/`, `core/`, `database/`). This phase included a new main window, advanced `QTableView` for data display with filtering and sorting, custom dialogs, splash screen, and branding.
     *   **Basic Mapping Implemented:** An initial map viewport using `QWebEngineView` and `Folium` was added to display selected farmer polygons from the database.
+    *   **Google Earth Integration Refined:** The method for viewing polygons in Google Earth was changed from an AHK-based automation to a manual KML import workflow, guided by an in-app instructional popup.
     *   **Next Major Feature - Historical Imagery Integration (Current Development Focus):** The immediate next goal is to develop a "Historical Map Builder" feature. This will involve allowing users to define areas of interest (e.g., via Shapefiles), using the Google Earth Engine (GEE) Python API to fetch and process historical satellite imagery for these areas, storing these images and their geographic bounds locally, and then enabling users to view these cached historical images in the main map viewport, overlaid with specific farmer polygons.
 
 **2. Application Road Map:**
@@ -26,11 +27,18 @@
         *   Qt Dialogs: `APISourcesDialog`, `DuplicateDialog`, `OutputModeDialog`.
         *   Custom `QSplashScreen` (via `main_app.py`'s `CustomSplashScreen`).
         *   Map Viewport: `MapViewWidget` using `QWebEngineView` + `folium` to display selected polygons (defaulting to Esri Satellite).
+        *   Google Earth View: A `GoogleEarthWebViewWidget` for displaying Google Earth.
+        *   Interaction with Google Earth:
+            *   Removed previous AHK-based automation for KML uploading.
+            *   Implemented a new workflow: when a polygon is selected while Google Earth View is active, a temporary KML file is generated, its path is copied to the clipboard, and an instructional popup appears.
+            *   The popup guides the user through manual steps in Google Earth (Ctrl+I, Ctrl+V, Enter, Ctrl+H).
+            *   The popup includes a "Do not show this popup again" option for the current session.
+            *   These instructions are also accessible via a "GE Instructions" action in the Help menu.
         *   Fully functional CSV and mWater API data import with DB persistence and duplicate handling.
         *   KML generation (single/multiple file modes) from checked table items, with DB export status updates.
         *   "Export Displayed Data as CSV", "Clear All Data", "Delete Checked Rows" features.
-    *   **Removed/Changed:** All Tkinter UI code.
-    *   **How it works (Current):** Application launches with splash. Main window displays data from SQLite in a sortable/filterable table. Users can import data via CSV or mWater API, with duplicates handled. KML files are generated for checked items. The map view shows the currently selected valid polygon.
+    *   **Removed/Changed:** All Tkinter UI code. Removed AHK script (`google_earth_upload.ahk`) and associated direct process invocation.
+    *   **How it works (Current):** Application launches with splash. Main window displays data from SQLite in a sortable/filterable table. Users can import data via CSV or mWater API, with duplicates handled. KML files are generated for checked items. The map view (either Folium or Google Earth) shows the currently selected valid polygon. If Google Earth view is active and a polygon is selected, a temporary KML is created, its path is copied, and a popup guides the user for manual import into Google Earth.
     *   **Upcoming:** The "Historical Map Builder" feature will be added to download and manage historical GEE imagery, and the map view will be enhanced to display these historical layers.
 
 **3. Log File (Major Achievements & Milestones):**
@@ -48,7 +56,14 @@
 *   KML generation from Qt UI with DB export tracking.
 *   Advanced table filtering, sorting, bulk actions via checkboxes.
 *   Integrated `MapViewWidget` using `QWebEngineView` and `folium` to display selected polygons.
-*   **Current Stage:** The core application with data management, KML generation, and basic polygon map display is stable. The next major development phase is the implementation of the "Historical Imagery" feature.
+*   Implemented `GoogleEarthWebViewWidget` for an alternative map view.
+*   **Refined Google Earth Integration:**
+    *   Removed AHK-based automation for uploading KMLs to Google Earth.
+    *   Introduced a manual KML import workflow: on polygon selection in GE view, a temporary KML is generated, its path is copied to clipboard.
+    *   An instructional `QMessageBox` guides the user on how to load this KML into Google Earth (Ctrl+I, Ctrl+V, etc.).
+    *   Added a "Do not show again" checkbox to the instruction popup.
+    *   Added a "GE Instructions" item to the Help menu to re-display the popup.
+*   **Current Stage:** The core application with data management, KML generation, and dual map views (Folium & Google Earth with manual KML import) is stable. The next major development phase is the implementation of the "Historical Imagery" feature.
 
 **4. Libraries Used Currently (Beta v4.x - Pre-Historical Imagery):**
 
@@ -76,7 +91,8 @@ DilasaKMLTool_v4/
 │   │   └── output_mode_dialog.py
 │   └── widgets/
 │       ├── __init__.py
-│       └── map_view_widget.py
+│       ├── map_view_widget.py
+│       └── google_earth_webview_widget.py # Added
 ├── core/
 │   ├── __init__.py
 │   ├── data_processor.py
@@ -93,6 +109,7 @@ DilasaKMLTool_v4/
 ├── requirements.txt
 └── README.md
 ```
+*(Note: `scripts/` directory and `google_earth_upload.ahk` removed from structure if previously listed)*
 
 **6. Current Goal: Implement the "Historical Imagery" Feature**
 

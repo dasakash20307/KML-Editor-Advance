@@ -4,11 +4,14 @@ import os
 import sys 
 import csv
 import utm 
+import tempfile # Added for _trigger_ge_polygon_upload
+import subprocess # Added for _trigger_ge_polygon_upload
+
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTableView, 
                                QSplitter, QFrame, QStatusBar, QMenuBar, QMenu, QToolBar, QPushButton,
                                QAbstractItemView, QHeaderView, QMessageBox, QFileDialog, QComboBox,
                                QSizePolicy, QTextEdit, QInputDialog, QLineEdit, QDateEdit, QGridLayout,
-                               QCheckBox, QGroupBox) 
+                               QCheckBox, QGroupBox, QStackedWidget, QApplication) # Added QStackedWidget and QApplication
 from PySide6.QtGui import QPixmap, QIcon, QAction, QStandardItemModel, QStandardItem, QFont, QColor 
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QTimer, QSize, QSortFilterProxyModel, QDate 
 
@@ -17,7 +20,7 @@ from core.utils import resource_path
 from core.data_processor import process_csv_row_data, CSV_HEADERS 
 from core.api_handler import fetch_data_from_mwater_api
 from core.kml_generator import add_polygon_to_kml_object 
-import simplekml 
+import simplekml # Already present, used for KML generation
 import datetime 
 
 # Assuming dialogs are in their own files and correctly imported
@@ -25,6 +28,7 @@ from .dialogs.api_sources_dialog import APISourcesDialog
 from .dialogs.duplicate_dialog import DuplicateDialog
 from .dialogs.output_mode_dialog import OutputModeDialog 
 from .widgets.map_view_widget import MapViewWidget
+from .widgets.google_earth_webview_widget import GoogleEarthWebViewWidget 
 
 
 # Constants 
@@ -36,7 +40,6 @@ INFO_COLOR_MW = "#0078D7"
 ERROR_COLOR_MW = "#D32F2F"     
 SUCCESS_COLOR_MW = "#388E3C"   
 FG_COLOR_MW = "#333333"        
-
 ORGANIZATION_TAGLINE_MW = "Developed by Dilasa Janvikash Pratishthan to support community upliftment"
 
 # --- Table Model with Checkbox Support ---
@@ -60,8 +63,8 @@ class PolygonTableModel(QAbstractTableModel):
         row, col = index.row(), index.column()
         if row >= len(self._data): return None
         record = self._data[row] 
-        if len(record) <= (self.ID_COL -1) : return None # Ensure record has ID column
-        db_id = record[self.ID_COL -1] # ID is at index 0 of the DB tuple, maps to col 1 in view
+        if len(record) <= (self.ID_COL -1) : return None 
+        db_id = record[self.ID_COL -1] 
 
         if role == Qt.ItemDataRole.CheckStateRole and col == self.CHECKBOX_COL:
             return self._check_states.get(db_id, Qt.CheckState.Unchecked)
@@ -164,18 +167,13 @@ class PolygonFilterProxyModel(QSortFilterProxyModel):
         source_model = self.sourceModel()
         if not source_model or source_row >= len(source_model._data): return False
         record = source_model._data[source_row]
-        # Ensure record has enough elements for all checks.
-        # The record tuple from DB is (id, status, uuid, farmer, village, date_added, export_count, last_exported)
-        # These map to source_model columns 1-8 (0-7 in tuple)
-        if not record or len(record) < 8: # Check based on number of fields expected from DB
+        if not record or len(record) < 8: 
             return False 
 
-        # UUID Filter (maps to record[2])
         if self.filter_uuid_text:
             uuid_val = str(record[2]).lower() 
             if self.filter_uuid_text not in uuid_val: return False
         
-        # Date Added Filter (maps to record[5])
         date_added_str = record[5]
         if date_added_str:
             try:
@@ -185,12 +183,10 @@ class PolygonFilterProxyModel(QSortFilterProxyModel):
                     if self.filter_before_date_added and row_date_added > self.filter_before_date_added: return False
             except Exception: pass 
 
-        # Export Status Filter (maps to record[6])
         export_count = record[6] if record[6] is not None else 0
         if self.filter_export_status == "Exported" and export_count == 0: return False
         if self.filter_export_status == "Not Exported" and export_count > 0: return False
 
-        # Error Status Filter (maps to record[1])
         status_val = str(record[1]).lower()
         if self.filter_error_status == "Error Records" and "error" not in status_val: return False
         if self.filter_error_status == "Valid Records" and "error" in status_val: return False
@@ -216,6 +212,8 @@ class MainWindow(QMainWindow):
         
         self.apply_choice_to_all_duplicates = False
         self.session_duplicate_choice = "skip" 
+        self.current_temp_kml_path = None
+        self.show_ge_instructions_popup_again = True
 
         self._setup_main_content_area() 
         self.load_data_into_table() 
@@ -294,10 +292,20 @@ class MainWindow(QMainWindow):
         self.generate_kml_action.triggered.connect(self.handle_generate_kml) 
         kml_menu.addAction(self.generate_kml_action)
 
+        self.view_menu = menubar.addMenu("&View")
+        self.toggle_ge_view_action = QAction("Google Earth View", self)
+        self.toggle_ge_view_action.setCheckable(True)
+        self.toggle_ge_view_action.toggled.connect(self._handle_ge_view_toggle)
+        self.view_menu.addAction(self.toggle_ge_view_action)
+
         help_menu = menubar.addMenu("&Help"); 
         self.about_action = QAction(QIcon.fromTheme("help-about"),"&About", self)
         self.about_action.triggered.connect(self.handle_about)
         help_menu.addAction(self.about_action)
+
+        self.ge_instructions_action = QAction("GE &Instructions", self)
+        self.ge_instructions_action.triggered.connect(self.handle_show_ge_instructions)
+        help_menu.addAction(self.ge_instructions_action)
         
         self.toolbar = QToolBar("Main Toolbar") 
         self.toolbar.setIconSize(QSize(20,20)) 
@@ -307,6 +315,12 @@ class MainWindow(QMainWindow):
         
         self.toolbar.addAction(self.import_csv_action) 
         self.toolbar.addSeparator() 
+
+        self.toggle_ge_view_button = QPushButton("GE View: OFF")
+        self.toggle_ge_view_button.setCheckable(True)
+        self.toggle_ge_view_button.toggled.connect(self._handle_ge_view_toggle)
+        self.toolbar.addWidget(self.toggle_ge_view_button)
+        self.toolbar.addSeparator()
         
         self.toolbar.addWidget(QLabel(" API Source: ")) 
         self.api_source_combo_toolbar = QComboBox() 
@@ -399,13 +413,21 @@ class MainWindow(QMainWindow):
         self.date_added_before_edit.clear(); self.date_added_before_edit.setSpecialValueText(" ")      
         self.export_status_combo.setCurrentIndex(0) 
         self.error_status_combo.setCurrentIndex(0)  
-        # apply_filters will be called by the signals from setDate/setCurrentIndex/clear
 
     def _setup_main_content_area(self):
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal) 
+        
         self.map_view_widget = MapViewWidget(self) 
         self.map_view_widget.setMinimumWidth(300) 
-        self.main_splitter.addWidget(self.map_view_widget)
+
+        self.google_earth_view_widget = GoogleEarthWebViewWidget(self)
+        self.google_earth_view_widget.setMinimumWidth(300)
+
+        self.map_stack = QStackedWidget(self)
+        self.map_stack.addWidget(self.map_view_widget) 
+        self.map_stack.addWidget(self.google_earth_view_widget) 
+        
+        self.main_splitter.addWidget(self.map_stack)
 
         right_pane_widget = QWidget()
         right_pane_layout = QVBoxLayout(right_pane_widget)
@@ -472,20 +494,16 @@ class MainWindow(QMainWindow):
         log_layout.addWidget(self.log_text_edit_qt_actual) 
         self.right_splitter.addWidget(log_container)
         
-        # Set stretch factors for the vertical splitter
-        self.right_splitter.setStretchFactor(0, 3) # Table container gets more space
-        self.right_splitter.setStretchFactor(1, 1) # Log container
-        # self.right_splitter.setSizes([int(self.height() * 0.70), int(self.height() * 0.20)]) # Initial sizes
+        self.right_splitter.setStretchFactor(0, 3) 
+        self.right_splitter.setStretchFactor(1, 1) 
 
         right_pane_layout.addWidget(self.right_splitter, 1) 
         self.main_splitter.addWidget(right_pane_widget) 
         
-        # Set stretch factors for the main horizontal splitter
-        self.main_splitter.setStretchFactor(0, 1) # Map placeholder
-        self.main_splitter.setStretchFactor(1, 2) # Right pane (table/log)
-        # self.main_splitter.setSizes([self.width() // 4, (self.width() * 3) // 4]) 
+        self.main_splitter.setStretchFactor(0, 1) 
+        self.main_splitter.setStretchFactor(1, 2) 
         
-        self.main_layout.addWidget(self.main_splitter, 1) # Add with stretch factor
+        self.main_layout.addWidget(self.main_splitter, 1) 
         
 
     def toggle_all_checkboxes(self, state_int):
@@ -494,17 +512,32 @@ class MainWindow(QMainWindow):
 
     def on_table_selection_changed(self, selected, deselected):
         selected_proxy_indexes = self.table_view.selectionModel().selectedRows()
-        if not selected_proxy_indexes:
-            if hasattr(self, 'map_view_widget'): self.map_view_widget.clear_map(); return
-        source_model_index = self.filter_proxy_model.mapToSource(selected_proxy_indexes[0])
-        # Ensure source_model_index is valid before proceeding
-        if not source_model_index.isValid():
-            if hasattr(self, 'map_view_widget'): self.map_view_widget.clear_map(); return
+        polygon_record = None # Initialize polygon_record
 
-        db_id_item = self.source_model.data(source_model_index.siblingAtColumn(self.source_model.ID_COL))
-        try:
-            db_id = int(db_id_item)
-            polygon_record = self.db_manager.get_polygon_data_by_id(db_id)
+        if selected_proxy_indexes:
+            source_model_index = self.filter_proxy_model.mapToSource(selected_proxy_indexes[0])
+            if source_model_index.isValid():
+                db_id_item = self.source_model.data(source_model_index.siblingAtColumn(self.source_model.ID_COL))
+                try:
+                    db_id = int(db_id_item)
+                    polygon_record = self.db_manager.get_polygon_data_by_id(db_id)
+                except (ValueError, TypeError):
+                    self.log_message(f"Map/GE: Invalid ID for selected row.", "error")
+                    polygon_record = None # Ensure it's None on error
+                except Exception as e:
+                    self.log_message(f"Map/GE: Error fetching record: {e}", "error")
+                    polygon_record = None # Ensure it's None on error
+        
+        # Logic for Google Earth View
+        if self.map_stack.currentIndex() == 1: # Google Earth View is active
+            if polygon_record and polygon_record.get('status') == 'valid_for_kml':
+                self._trigger_ge_polygon_upload(polygon_record)
+            else:
+                # Clear map if no valid selection or record not valid for KML
+                # self.google_earth_view_widget.clear_polygon_highlight() # Assuming such a method might exist
+                self.log_message("GE View: No valid polygon record selected or record not valid for KML upload.", "warning")
+        # Logic for original MapViewWidget
+        else:
             if polygon_record and polygon_record.get('status') == 'valid_for_kml':
                 coords_lat_lon, utm_valid = [], True
                 for i in range(1,5):
@@ -515,9 +548,8 @@ class MainWindow(QMainWindow):
                     except Exception as e_conv: self.log_message(f"Map: UTM conv fail {polygon_record.get('uuid')}, P{i}: {e_conv}","error"); utm_valid=False; break
                 if utm_valid and len(coords_lat_lon)==4: self.map_view_widget.display_polygon(coords_lat_lon,coords_lat_lon[0])
                 elif hasattr(self,'map_view_widget'): self.map_view_widget.clear_map()
-            elif hasattr(self,'map_view_widget'): self.map_view_widget.clear_map()
-        except (ValueError, TypeError): self.log_message(f"Map: Invalid ID for selected row.","error"); self.map_view_widget.clear_map()
-        except Exception as e: self.log_message(f"Map: Update error: {e}","error"); self.map_view_widget.clear_map()
+            else: # No valid selection or record not suitable for map
+                if hasattr(self,'map_view_widget'): self.map_view_widget.clear_map()
 
     def refresh_api_source_dropdown(self):
         if hasattr(self, 'api_source_combo_toolbar'):
@@ -640,8 +672,90 @@ class MainWindow(QMainWindow):
             self.log_message(msg,"success" if files_gen>0 else "info"); QMessageBox.information(self,"KML Generation",msg)
         except Exception as e: self.log_message(f"KML Gen Error: {e}","error"); QMessageBox.critical(self,"KML Error",f"Error:\n{e}")
 
+    def _trigger_ge_polygon_upload(self, polygon_record):
+        self.log_message(f"GE View: Processing polygon UUID {polygon_record.get('uuid')} for Google Earth upload.", "info")
+
+        kml_doc = simplekml.Kml(name=str(polygon_record.get('uuid', 'Polygon')))
+        if add_polygon_to_kml_object(kml_doc, polygon_record):
+            try:
+                # Delete old temp KML if it exists
+                if self.current_temp_kml_path and os.path.exists(self.current_temp_kml_path):
+                    try:
+                        os.remove(self.current_temp_kml_path)
+                        self.log_message(f"Old temporary KML file deleted: {self.current_temp_kml_path}", "info")
+                    except FileNotFoundError:
+                        self.log_message(f"Old temporary KML file not found for deletion: {self.current_temp_kml_path}", "warning")
+                    except PermissionError:
+                        self.log_message(f"Permission denied while deleting old temporary KML file: {self.current_temp_kml_path}", "error")
+                    except Exception as e_del:
+                        self.log_message(f"Error deleting old temporary KML file {self.current_temp_kml_path}: {e_del}", "error")
+                
+                fd, temp_kml_path = tempfile.mkstemp(suffix=".kml", prefix="ge_poly_")
+                os.close(fd) 
+                kml_doc.save(temp_kml_path)
+                self.current_temp_kml_path = temp_kml_path # Store new path
+                self.log_message(f"Temporary KML saved to: {self.current_temp_kml_path}", "info")
+
+                QApplication.clipboard().setText(self.current_temp_kml_path)
+                self.log_message("KML file path copied to clipboard.", "info")
+
+                if self.show_ge_instructions_popup_again:
+                    self._show_ge_instructions_popup()
+
+            except Exception as e_kml_save:
+                self.log_message(f"Error saving temporary KML or copying to clipboard: {e_kml_save}", "error")
+                QMessageBox.warning(self, "KML Error", f"Could not save KML or copy path: {e_kml_save}")
+        else:
+            self.log_message(f"Failed to generate KML content for polygon UUID {polygon_record.get('uuid')}.", "error")
+            QMessageBox.warning(self, "KML Generation Failed", "Could not generate KML content for the selected polygon.")
+
+    def _show_ge_instructions_popup(self):
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Google Earth Instructions")
+        msg_box.setTextFormat(Qt.TextFormat.PlainText) # Ensure plain text interpretation for newlines
+        msg_box.setText("Instructions:\n"
+                        "1. Click on the Google Earth window to focus.\n"
+                        "2. Press Ctrl+I to open the import dialog.\n"
+                        "3. Press Ctrl+V to paste the KML file path.\n"
+                        "4. Press Enter to load the KML.\n"
+                        "5. Press Ctrl+H for historical imagery view.")
+        
+        checkbox = QCheckBox("Do not show this popup again")
+        msg_box.setCheckBox(checkbox)
+        
+        msg_box.exec()
+        
+        if msg_box.checkBox().isChecked():
+            self.show_ge_instructions_popup_again = False
+            self.log_message("Google Earth instructions popup will not be shown again for this session.", "info")
+
+    def _handle_ge_view_toggle(self, checked):
+        original_action_blocked = self.toggle_ge_view_action.signalsBlocked()
+        original_button_blocked = self.toggle_ge_view_button.signalsBlocked()
+
+        self.toggle_ge_view_action.blockSignals(True)
+        self.toggle_ge_view_button.blockSignals(True)
+
+        self.toggle_ge_view_action.setChecked(checked)
+        self.toggle_ge_view_button.setChecked(checked)
+        self.toggle_ge_view_button.setText(f"GE View: {'ON' if checked else 'OFF'}")
+
+        self.toggle_ge_view_action.blockSignals(original_action_blocked)
+        self.toggle_ge_view_button.blockSignals(original_button_blocked)
+
+        if checked:
+            self.map_stack.setCurrentIndex(1)
+            self.google_earth_view_widget.set_focus_on_webview()
+        else:
+            self.map_stack.setCurrentIndex(0)
+
+        self.log_message(f"Google Earth View Toggled: {'ON' if checked else 'OFF'}", "info")
+
     def handle_about(self):
         QMessageBox.about(self, f"About {APP_NAME_MW}", f"<b>{APP_NAME_MW}</b><br>Version: {APP_VERSION_MW}<br><br>{ORGANIZATION_TAGLINE_MW}<br><br>Processes geographic data for KML generation.")
+
+    def handle_show_ge_instructions(self):
+        self._show_ge_instructions_popup()
 
     def log_message(self, message, level="info"): 
         if hasattr(self, 'log_text_edit_qt_actual'): 
@@ -662,5 +776,16 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         if hasattr(self, 'map_view_widget') and self.map_view_widget: self.map_view_widget.cleanup()
+        if hasattr(self, 'google_earth_view_widget') and hasattr(self.google_earth_view_widget, 'cleanup'):
+             self.google_earth_view_widget.cleanup() 
         if hasattr(self, 'db_manager') and self.db_manager: self.db_manager.close()
+
+        # Clean up the last temporary KML file if it exists
+        if self.current_temp_kml_path and os.path.exists(self.current_temp_kml_path):
+            try:
+                os.remove(self.current_temp_kml_path)
+                self.log_message(f"Temporary KML file deleted on exit: {self.current_temp_kml_path}", "info")
+            except Exception as e:
+                self.log_message(f"Error deleting temporary KML file {self.current_temp_kml_path} on exit: {e}", "error")
+        
         super().closeEvent(event)
