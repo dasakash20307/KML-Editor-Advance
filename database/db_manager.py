@@ -41,7 +41,21 @@ class DatabaseManager:
         self.cursor = None
         self._connect()
         self._create_tables()
+        self._migrate_schema() # Add migration step
         # print(f"Database initialized at: {self.db_path}") # For debugging
+
+    def _migrate_schema(self):
+        """Checks for and applies necessary schema migrations."""
+        try:
+            self.cursor.execute("PRAGMA table_info(polygon_data)")
+            columns = [row[1] for row in self.cursor.fetchall()]
+            if 'evaluation_status' not in columns:
+                print("Schema migration: Adding 'evaluation_status' column to 'polygon_data' table.")
+                self.cursor.execute("ALTER TABLE polygon_data ADD COLUMN evaluation_status TEXT DEFAULT 'Not Evaluated Yet'")
+                self.conn.commit()
+                print("'evaluation_status' column added successfully.")
+        except sqlite3.Error as e:
+            print(f"Schema migration error: {e}")
 
     def _connect(self):
         """Establishes a connection to the SQLite database."""
