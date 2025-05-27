@@ -99,14 +99,21 @@ class PolygonTableModel(QAbstractTableModel):
             return str(value) if value is not None else ""
 
         elif role == Qt.ItemDataRole.BackgroundRole:
-            evaluation_status_val = record[8] 
-            if col == self.EVALUATION_STATUS_COL:
-                if evaluation_status_val == "Eligible":
-                    return QColor(144, 238, 144, int(255 * 0.7)) 
-                elif evaluation_status_val == "Not Eligible":
-                    return QColor(255, 182, 193, int(255 * 0.7)) 
-                return None 
-            return None 
+            # Apply row-wide background color based on evaluation_status
+            # evaluation_status is at index 8 in the record tuple
+            status_value = record[8] 
+            print(f"[TableModel.data BackgroundRole] Index: ({index.row()},{index.column()}), Status read: '{status_value}'")
+            if status_value == "Eligible":
+                color = QColor(144, 238, 144, int(255 * 0.7)) # Light Green
+                print(f"[TableModel.data BackgroundRole] Index: ({index.row()},{index.column()}), Returning Eligible color: {color.name()}")
+                return color
+            elif status_value == "Not Eligible":
+                color = QColor(255, 182, 193, int(255 * 0.7)) # Light Pink/Red
+                print(f"[TableModel.data BackgroundRole] Index: ({index.row()},{index.column()}), Returning Not Eligible color: {color.name()}")
+                return color
+            else: # "Not Evaluated Yet" or other
+                # print(f"[TableModel.data BackgroundRole] Index: ({index.row()},{index.column()}), Returning None (default background)") # Optional
+                return None # Return None to use default table styling (e.g., alternating row colors)
             
         elif role == Qt.ItemDataRole.TextAlignmentRole:
             return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter if col != self.CHECKBOX_COL else Qt.AlignmentFlag.AlignCenter
