@@ -25,6 +25,23 @@ class GoogleEarthWebViewWidget(QWidget):
         # Load Google Earth Web
         self.web_view.setUrl(QUrl("https://earth.google.com/web/"))
 
+        # Example: Run JavaScript after the page loads (for testing)
+        # Get user agent to infer WebEngine version
+        self.web_view.page().runJavaScript("navigator.userAgent", self.js_callback)
+
+    def js_callback(self, result):
+        print(f"JavaScript Result: {result}")
+
+    def run_javascript(self, script, callback=None):
+        '''
+        Runs JavaScript code in the web view.
+        Optionally takes a callback function to handle the result.
+        '''
+        if callback:
+            self.web_view.page().runJavaScript(script, callback)
+        else:
+            self.web_view.page().runJavaScript(script)
+
     @Slot()
     def set_focus_on_webview(self):
         '''

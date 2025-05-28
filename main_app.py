@@ -1,6 +1,7 @@
 # File: DilasaKMLTool_v4/main_app.py
 # ----------------------------------------------------------------------
 import sys
+import os # Import the os module
 from PySide6.QtWidgets import QApplication, QSplashScreen 
 from PySide6.QtGui import QPixmap, QFont, QPainter, QColor 
 from PySide6.QtCore import QTimer, Qt                 
@@ -56,6 +57,9 @@ class CustomSplashScreen(QSplashScreen):
 
 
 def main():
+    # Set environment variable to pass Chromium flags
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--enable-features=WebGPU"
+
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME_MAIN)
     app.setApplicationVersion(APP_VERSION_MAIN)
@@ -81,4 +85,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

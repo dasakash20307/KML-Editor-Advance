@@ -102,18 +102,18 @@ class PolygonTableModel(QAbstractTableModel):
             # Apply row-wide background color based on evaluation_status
             # evaluation_status is at index 8 in the record tuple
             status_value = record[8] 
-            print(f"[TableModel.data BackgroundRole] Index: ({index.row()},{index.column()}), Status read: '{status_value}'")
             if status_value == "Eligible":
                 color = QColor(144, 238, 144, int(255 * 0.7)) # Light Green
-                print(f"[TableModel.data BackgroundRole] Index: ({index.row()},{index.column()}), Returning Eligible color: {color.name()}")
                 return color
             elif status_value == "Not Eligible":
                 color = QColor(255, 182, 193, int(255 * 0.7)) # Light Pink/Red
-                print(f"[TableModel.data BackgroundRole] Index: ({index.row()},{index.column()}), Returning Not Eligible color: {color.name()}")
                 return color
-            else: # "Not Evaluated Yet" or other
-                # print(f"[TableModel.data BackgroundRole] Index: ({index.row()},{index.column()}), Returning None (default background)") # Optional
-                return None # Return None to use default table styling (e.g., alternating row colors)
+            elif status_value == "Not Evaluated Yet":
+                color = QColor(255, 255, 255) # White
+                return color
+            else: # Other or unexpected status, default to white
+                color = QColor(255, 255, 255) # White
+                return color
             
         elif role == Qt.ItemDataRole.TextAlignmentRole:
             return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter if col != self.CHECKBOX_COL else Qt.AlignmentFlag.AlignCenter
@@ -161,22 +161,23 @@ class PolygonTableModel(QAbstractTableModel):
                     self.dataChanged.emit(row_start_index, row_end_index) 
                     print(f"[TableModel.setData] Emitted dataChanged for entire row {row}")
                     
-                    parent_main_window = self.parent() 
-                    if parent_main_window and hasattr(parent_main_window, 'log_message'):
+                    parent_main_window = self.parent()
+                    # Ensure parent is an instance of MainWindow before calling log_message
+                    if isinstance(parent_main_window, MainWindow) and hasattr(parent_main_window, 'log_message'):
                          parent_main_window.log_message(f"Evaluation status for ID {db_id} updated to '{new_status}'.", "info")
                     return True
                 else:
                     error_msg = f"DB update failed for record ID {db_id} with status {new_status}"
                     print(f"[TableModel.setData] {error_msg}")
                     parent_main_window = self.parent()
-                    if parent_main_window and hasattr(parent_main_window, 'log_message'):
-                         parent_main_window.log_message(error_msg, "error")
+                    if isinstance(parent_main_window, MainWindow) and hasattr(parent_main_window, 'log_message'): 
+                        parent_main_window.log_message(error_msg, "error")
                     return False
             else:
                 error_msg = f"Error: self.db_manager not available or missing update_evaluation_status method for record ID {db_id}"
                 print(f"[TableModel.setData] {error_msg}")
                 parent_main_window = self.parent()
-                if parent_main_window and hasattr(parent_main_window, 'log_message'): 
+                if isinstance(parent_main_window, MainWindow) and hasattr(parent_main_window, 'log_message'): 
                     parent_main_window.log_message(error_msg, "error")
                 return False
         return False
@@ -627,7 +628,7 @@ class MainWindow(QMainWindow):
         # Allow editing specifically for delegate-managed columns, triggered by DoubleClicked or SelectedClicked
         self.table_view.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.SelectedClicked)
         self.table_view.horizontalHeader().setStretchLastSection(True)
-        self.table_view.setAlternatingRowColors(True)
+        self.table_view.setAlternatingRowColors(False) # Changed to False
         self.table_view.setSortingEnabled(True) 
         # Sort by Date Added (column index 7 after new column) by default
         self.table_view.sortByColumn(self.source_model.DATE_ADDED_COL, Qt.SortOrder.DescendingOrder) 
@@ -636,18 +637,18 @@ class MainWindow(QMainWindow):
         evaluation_delegate = EvaluationStatusDelegate(self.table_view) # Pass table_view as parent
         self.table_view.setItemDelegateForColumn(self.source_model.EVALUATION_STATUS_COL, evaluation_delegate)
 
-        self.table_view.setStyleSheet("""
-            QTableView {
-                border: 1px solid #D0D0D0; gridline-color: #E0E0E0;
-                selection-background-color: #AED6F1; selection-color: black;
-                alternate-background-color: #F8F8F8;
-            }
-            QTableView::item { padding: 5px; border-bottom: 1px solid #E0E0E0; border-right: none; }
-            QTableView::item:selected { background-color: #AED6F1; color: black; }
-            QHeaderView::section { background-color: #EAEAEA; padding: 6px;
-                                   border: none; border-bottom: 1px solid #C0C0C0; font-weight: bold; }
-            QHeaderView { border: none; }
-        """)
+        # Temporarily remove stylesheet for debugging background colors
+        # self.table_view.setStyleSheet("""
+        #     QTableView {
+        #         border: 1px solid #D0D0D0; gridline-color: #E0E0E0;
+        #         selection-background-color: #AED6F1; selection-color: black;
+        #     }
+        #     QTableView::item { padding: 5px; border-bottom: 1px solid #E0E0E0; border-right: none; }
+        #     QTableView::item:selected { background-color: #AED6F1; color: black; }
+        #     QHeaderView::section { background-color: #EAEAEA; padding: 6px;
+        #                            border: none; border-bottom: 1px solid #C0C0C0; font-weight: bold; }
+        #     QHeaderView { border: none; }
+        # """)
 
         self.table_view.setColumnWidth(self.source_model.CHECKBOX_COL, 30)
         self.table_view.setColumnWidth(self.source_model.ID_COL, 50)
