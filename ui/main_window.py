@@ -155,22 +155,29 @@ class PolygonTableModel(QAbstractTableModel):
                     self._data[row] = tuple(updated_record_list)
                     print(f"[TableModel.setData] After internal update: self._data[{row}] = {self._data[row]}")
                     
-                    print(f"[TableModel.setData] Emitting dataChanged for index ({row},{col})")
-                    self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.BackgroundRole])
+                    # Emit dataChanged for the entire row to ensure all cells are refreshed
+                    row_start_index = self.index(row, 0)
+                    row_end_index = self.index(row, self.columnCount() - 1)
+                    self.dataChanged.emit(row_start_index, row_end_index) 
+                    print(f"[TableModel.setData] Emitted dataChanged for entire row {row}")
                     
-                    # Removed direct call to self.parent().log_message as per subtask instructions (prioritizing print for debugging)
-                    # If MainWindow logging is still desired here, it needs a more robust reference.
-                    # For now, relying on print() for debugging this specific path.
+                    parent_main_window = self.parent() 
+                    if parent_main_window and hasattr(parent_main_window, 'log_message'):
+                         parent_main_window.log_message(f"Evaluation status for ID {db_id} updated to '{new_status}'.", "info")
                     return True
                 else:
                     error_msg = f"DB update failed for record ID {db_id} with status {new_status}"
                     print(f"[TableModel.setData] {error_msg}")
-                    # Removed direct call to self.parent().log_message
+                    parent_main_window = self.parent()
+                    if parent_main_window and hasattr(parent_main_window, 'log_message'):
+                         parent_main_window.log_message(error_msg, "error")
                     return False
             else:
                 error_msg = f"Error: self.db_manager not available or missing update_evaluation_status method for record ID {db_id}"
                 print(f"[TableModel.setData] {error_msg}")
-                # Removed direct call to self.parent().log_message
+                parent_main_window = self.parent()
+                if parent_main_window and hasattr(parent_main_window, 'log_message'): 
+                    parent_main_window.log_message(error_msg, "error")
                 return False
         return False
 
@@ -1004,3 +1011,35 @@ class MainWindow(QMainWindow):
                 self.log_message(f"Error deleting temporary KML file {self.current_temp_kml_path} on exit: {e}", "error")
         
         super().closeEvent(event)
+
+[end of ui/main_window.py]
+
+[end of ui/main_window.py]
+
+[end of ui/main_window.py]
+
+[end of ui/main_window.py]
+
+[end of ui/main_window.py]
+
+[end of ui/main_window.py]
+
+[end of ui/main_window.py]
+
+[end of ui/main_window.py]
+
+[end of ui/main_window.py]
+
+[end of ui/main_window.py]
+
+[end of ui/main_window.py]
+
+[end of ui/main_window.py]
+
+[end of ui/main_window.py]
+
+[end of ui/main_window.py]
+
+[end of ui/main_window.py]
+
+[end of ui/main_window.py]
