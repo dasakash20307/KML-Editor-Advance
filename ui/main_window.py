@@ -375,7 +375,7 @@ class MainWindow(QMainWindow):
         self._create_main_layout()
         self._create_header() 
         self._create_menus_and_toolbar() 
-        self._create_status_bar()
+        self._create_status_bar() # Corrected: Call the renamed method
         
         self.current_temp_kml_path = None
         self.show_ge_instructions_popup_again = True
@@ -504,8 +504,9 @@ class MainWindow(QMainWindow):
 
 
     def _create_status_bar(self):
-        self.statusBar = QStatusBar(); self.setStatusBar(self.statusBar)
-        self.statusBar.showMessage("Ready.", 3000)
+        self._main_status_bar = QStatusBar() # Corrected: Renamed instance variable
+        self.setStatusBar(self._main_status_bar) # Corrected: Use the renamed variable
+        self._main_status_bar.showMessage("Ready.", 3000) # Corrected: Use the renamed variable
 
     def _setup_filter_panel(self):
         self.filter_groupbox = QGroupBox("Filters") 
@@ -986,7 +987,7 @@ class MainWindow(QMainWindow):
             self.log_text_edit_qt_actual.append(f"[{level.upper()}] {message}")
             self.log_text_edit_qt_actual.ensureCursorVisible() 
         else: print(f"LOG [{level.upper()}]: {message}")
-        if hasattr(self, 'statusBar'): self.statusBar.showMessage(message, 7000 if level=="info" else 10000)
+        if hasattr(self, '_main_status_bar'): self._main_status_bar.showMessage(message, 7000 if level=="info" else 10000) # Corrected: Use the renamed variable
             
     def load_data_into_table(self): 
         try:
@@ -1011,35 +1012,3 @@ class MainWindow(QMainWindow):
                 self.log_message(f"Error deleting temporary KML file {self.current_temp_kml_path} on exit: {e}", "error")
         
         super().closeEvent(event)
-
-[end of ui/main_window.py]
-
-[end of ui/main_window.py]
-
-[end of ui/main_window.py]
-
-[end of ui/main_window.py]
-
-[end of ui/main_window.py]
-
-[end of ui/main_window.py]
-
-[end of ui/main_window.py]
-
-[end of ui/main_window.py]
-
-[end of ui/main_window.py]
-
-[end of ui/main_window.py]
-
-[end of ui/main_window.py]
-
-[end of ui/main_window.py]
-
-[end of ui/main_window.py]
-
-[end of ui/main_window.py]
-
-[end of ui/main_window.py]
-
-[end of ui/main_window.py]
