@@ -58,7 +58,9 @@ class CustomSplashScreen(QSplashScreen):
 
 def main():
     # Set environment variable to pass Chromium flags
-    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--enable-features=WebGPU"
+    # Disable GPU acceleration to prevent rendering issues
+    # Attempt to resolve rendering issues by disabling GPU compositing, while keeping WebGL enabled.
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu-compositing"
 
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME_MAIN)
