@@ -7,15 +7,16 @@ import utm
 import tempfile # Added for _trigger_ge_polygon_upload
 import subprocess # Added for _trigger_ge_polygon_upload
 
-from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTableView, 
+from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTableView,
                                QSplitter, QFrame, QStatusBar, QMenuBar, QMenu, QToolBar, QPushButton,
                                QAbstractItemView, QHeaderView, QMessageBox, QFileDialog, QComboBox,
                                QSizePolicy, QTextEdit, QInputDialog, QLineEdit, QDateEdit, QGridLayout,
-                               QCheckBox, QGroupBox, QStackedWidget, QApplication) # Added QStackedWidget and QApplication
-from PySide6.QtGui import QPixmap, QIcon, QAction, QStandardItemModel, QStandardItem, QFont, QColor 
-from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QTimer, QSize, QSortFilterProxyModel, QDate 
+                               QCheckBox, QGroupBox, QStackedWidget, QApplication, QStyledItemDelegate,
+                               QDialog, QProgressBar) # Added QDialog, QProgressBar
+from PySide6.QtGui import QPixmap, QIcon, QAction, QStandardItemModel, QStandardItem, QFont, QColor
+from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QTimer, QSize, QSortFilterProxyModel, QDate
 
-from database.db_manager import DatabaseManager 
+from database.db_manager import DatabaseManager
 from core.utils import resource_path
 from core.data_processor import process_csv_row_data, CSV_HEADERS 
 from core.api_handler import fetch_data_from_mwater_api
@@ -25,7 +26,7 @@ import datetime
 
 # Assuming dialogs are in their own files and correctly imported
 from .dialogs.api_sources_dialog import APISourcesDialog 
-from .dialogs.duplicate_dialog import DuplicateDialog
+# from .dialogs.duplicate_dialog import DuplicateDialog # Removed as per previous subtask
 from .dialogs.output_mode_dialog import OutputModeDialog 
 from .widgets.map_view_widget import MapViewWidget
 from .widgets.google_earth_webview_widget import GoogleEarthWebViewWidget 
@@ -44,47 +45,80 @@ ORGANIZATION_TAGLINE_MW = "Developed by Dilasa Janvikash Pratishthan to support 
 
 # --- Table Model with Checkbox Support ---
 class PolygonTableModel(QAbstractTableModel):
-    CHECKBOX_COL = 0; ID_COL = 1; STATUS_COL = 2; UUID_COL = 3; FARMER_COL = 4
-    VILLAGE_COL = 5; DATE_ADDED_COL = 6; EXPORT_COUNT_COL = 7; LAST_EXPORTED_COL = 8
+    CHECKBOX_COL = 0
+    ID_COL = 1
+    EVALUATION_STATUS_COL = 2  # New column
+    STATUS_COL = 3             # Was 2
+    UUID_COL = 4               # Was 3
+    FARMER_COL = 5             # Was 4
+    VILLAGE_COL = 6            # Was 5
+    DATE_ADDED_COL = 7         # Was 6
+    EXPORT_COUNT_COL = 8       # Was 7
+    LAST_EXPORTED_COL = 9      # Was 8
 
-    def __init__(self, data_list=None, parent=None):
+    def __init__(self, data_list=None, parent=None, db_manager_instance=None): 
         super().__init__(parent)
-        self._data = [] 
-        self._check_states = {} 
-        self._headers = ["", "ID", "Status", "UUID", "Farmer Name", "Village", 
+        self.db_manager = db_manager_instance 
+        self._data = []
+        self._check_states = {}
+        self._headers = ["", "ID", "Evaluation Status", "Status", "UUID", "Farmer Name", "Village",
                          "Date Added", "Export Count", "Last Exported"]
         if data_list: self.update_data(data_list)
 
     def rowCount(self, parent=QModelIndex()): return len(self._data)
-    def columnCount(self, parent=QModelIndex()): return len(self._headers)
+    def columnCount(self, parent=QModelIndex()): return len(self._headers) 
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
         if not index.isValid(): return None
         row, col = index.row(), index.column()
         if row >= len(self._data): return None
         record = self._data[row] 
-        if len(record) <= (self.ID_COL -1) : return None 
-        db_id = record[self.ID_COL -1] 
+        db_id = record[0] 
 
         if role == Qt.ItemDataRole.CheckStateRole and col == self.CHECKBOX_COL:
             return self._check_states.get(db_id, Qt.CheckState.Unchecked)
         
         if role == Qt.ItemDataRole.DisplayRole:
             if col == self.CHECKBOX_COL: return None
-            data_col_idx = col -1 
-            if data_col_idx >= len(record): return None 
-            try:
-                value = record[data_col_idx]
-                if data_col_idx == (self.EXPORT_COUNT_COL -1) and value is None: return "0" 
-                if data_col_idx == (self.LAST_EXPORTED_COL -1) and value is None: return ""  
-                if isinstance(value, (datetime.datetime, datetime.date)): 
-                    return value.strftime("%Y-%m-%d %H:%M:%S") if isinstance(value, datetime.datetime) else value.strftime("%Y-%m-%d")
-                return str(value) if value is not None else "" 
-            except IndexError: return None
+            value = None
+            if col == self.ID_COL: value = record[0]
+            elif col == self.EVALUATION_STATUS_COL: value = record[8] 
+            elif col == self.STATUS_COL: value = record[1]
+            elif col == self.UUID_COL: value = record[2]
+            elif col == self.FARMER_COL: value = record[3]
+            elif col == self.VILLAGE_COL: value = record[4]
+            elif col == self.DATE_ADDED_COL: value = record[5]
+            elif col == self.EXPORT_COUNT_COL: value = record[6]
+            elif col == self.LAST_EXPORTED_COL: value = record[7]
+            else: return None
+
+            if col == self.EXPORT_COUNT_COL and value is None: return "0" 
+            if col == self.LAST_EXPORTED_COL and value is None: return ""  
+            if isinstance(value, (datetime.datetime, datetime.date)): 
+                return value.strftime("%Y-%m-%d %H:%M:%S") if isinstance(value, datetime.datetime) else value.strftime("%Y-%m-%d")
+            return str(value) if value is not None else ""
+
+        elif role == Qt.ItemDataRole.BackgroundRole:
+            # Apply row-wide background color based on evaluation_status
+            # evaluation_status is at index 8 in the record tuple
+            status_value = record[8] 
+            if status_value == "Eligible":
+                color = QColor(144, 238, 144, int(255 * 0.7)) # Light Green
+                return color
+            elif status_value == "Not Eligible":
+                color = QColor(255, 182, 193, int(255 * 0.7)) # Light Pink/Red
+                return color
+            elif status_value == "Not Evaluated Yet":
+                color = QColor(255, 255, 255) # White
+                return color
+            else: # Other or unexpected status, default to white
+                color = QColor(255, 255, 255) # White
+                return color
+            
         elif role == Qt.ItemDataRole.TextAlignmentRole:
             return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter if col != self.CHECKBOX_COL else Qt.AlignmentFlag.AlignCenter
         elif role == Qt.ItemDataRole.ForegroundRole: 
-            if col == self.STATUS_COL and len(record) > (self.STATUS_COL-1) and record[self.STATUS_COL-1] and "error" in str(record[self.STATUS_COL-1]).lower():
+            if col == self.STATUS_COL and record[1] and "error" in str(record[1]).lower():
                 return QColor("red")
         elif role == Qt.ItemDataRole.FontRole and col != self.CHECKBOX_COL: 
              return QFont("Segoe UI", 9)
@@ -93,19 +127,69 @@ class PolygonTableModel(QAbstractTableModel):
     def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
         if not index.isValid(): return False
         row, col = index.row(), index.column()
-        if row >= len(self._data) or len(self._data[row]) <= (self.ID_COL -1) : return False
+        if row >= len(self._data) or not self._data[row]: return False
+        # db_id is record[0] (the first element of the tuple from the database)
+        db_id = self._data[row][0]
 
         if role == Qt.ItemDataRole.CheckStateRole and col == self.CHECKBOX_COL:
-            db_id = self._data[row][self.ID_COL-1] 
-            self._check_states[db_id] = Qt.CheckState(value) 
+            self._check_states[db_id] = Qt.CheckState(value)
             self.dataChanged.emit(index, index, [Qt.ItemDataRole.CheckStateRole])
             return True
+        
+        if role == Qt.ItemDataRole.EditRole and col == self.EVALUATION_STATUS_COL:
+            print(f"[TableModel.setData] Entered for EVALUATION_STATUS_COL. Row: {row}, Col: {col}, New Value: '{value}'")
+            new_status = str(value)
+            
+            # db_id is already correctly assigned from self._data[row][0]
+            print(f"[TableModel.setData] DB ID: {db_id}")
+
+            if self.db_manager and hasattr(self.db_manager, 'update_evaluation_status'):
+                print(f"[TableModel.setData] Attempting DB update for ID {db_id} to status '{new_status}'")
+                update_success = self.db_manager.update_evaluation_status(db_id, new_status) 
+                print(f"[TableModel.setData] DB update_success: {update_success}")
+
+                if update_success:
+                    print(f"[TableModel.setData] Before internal update: self._data[{row}] = {self._data[row]}")
+                    updated_record_list = list(self._data[row])
+                    updated_record_list[8] = new_status # evaluation_status is at index 8 in the DB tuple
+                    self._data[row] = tuple(updated_record_list)
+                    print(f"[TableModel.setData] After internal update: self._data[{row}] = {self._data[row]}")
+                    
+                    # Emit dataChanged for the entire row to ensure all cells are refreshed
+                    row_start_index = self.index(row, 0)
+                    row_end_index = self.index(row, self.columnCount() - 1)
+                    self.dataChanged.emit(row_start_index, row_end_index) 
+                    print(f"[TableModel.setData] Emitted dataChanged for entire row {row}")
+                    
+                    parent_main_window = self.parent()
+                    # Ensure parent is an instance of MainWindow before calling log_message
+                    if isinstance(parent_main_window, MainWindow) and hasattr(parent_main_window, 'log_message'):
+                         parent_main_window.log_message(f"Evaluation status for ID {db_id} updated to '{new_status}'.", "info")
+                    return True
+                else:
+                    error_msg = f"DB update failed for record ID {db_id} with status {new_status}"
+                    print(f"[TableModel.setData] {error_msg}")
+                    parent_main_window = self.parent()
+                    if isinstance(parent_main_window, MainWindow) and hasattr(parent_main_window, 'log_message'): 
+                        parent_main_window.log_message(error_msg, "error")
+                    return False
+            else:
+                error_msg = f"Error: self.db_manager not available or missing update_evaluation_status method for record ID {db_id}"
+                print(f"[TableModel.setData] {error_msg}")
+                parent_main_window = self.parent()
+                if isinstance(parent_main_window, MainWindow) and hasattr(parent_main_window, 'log_message'): 
+                    parent_main_window.log_message(error_msg, "error")
+                return False
         return False
 
     def flags(self, index):
         flags = super().flags(index)
         if index.column() == self.CHECKBOX_COL:
             flags |= Qt.ItemFlag.ItemIsUserCheckable
+        elif index.column() == self.EVALUATION_STATUS_COL:
+            flags |= Qt.ItemFlag.ItemIsEditable
+            flags |= Qt.ItemFlag.ItemIsSelectable 
+            flags |= Qt.ItemFlag.ItemIsEnabled
         else:
             flags |= Qt.ItemFlag.ItemIsSelectable 
             flags |= Qt.ItemFlag.ItemIsEnabled
@@ -165,15 +249,18 @@ class PolygonFilterProxyModel(QSortFilterProxyModel):
 
     def filterAcceptsRow(self, source_row, source_parent):
         source_model = self.sourceModel()
-        if not source_model or source_row >= len(source_model._data): return False
-        record = source_model._data[source_row]
-        if not record or len(record) < 8: 
+        assert isinstance(source_model, PolygonTableModel), "Source model must be PolygonTableModel"
+        if not source_model or source_row >= len(source_model._data): return False # type: ignore
+        record = source_model._data[source_row] # type: ignore
+        if not record or len(record) < 9: # Ensure record has enough elements for all columns including evaluation_status
             return False 
 
         if self.filter_uuid_text:
+            # UUID is at index 2 in the record tuple (id, status, uuid, ...)
             uuid_val = str(record[2]).lower() 
             if self.filter_uuid_text not in uuid_val: return False
         
+        # Date Added is at index 5
         date_added_str = record[5]
         if date_added_str:
             try:
@@ -183,15 +270,96 @@ class PolygonFilterProxyModel(QSortFilterProxyModel):
                     if self.filter_before_date_added and row_date_added > self.filter_before_date_added: return False
             except Exception: pass 
 
+        # Export Count is at index 6
         export_count = record[6] if record[6] is not None else 0
         if self.filter_export_status == "Exported" and export_count == 0: return False
         if self.filter_export_status == "Not Exported" and export_count > 0: return False
 
+        # Status (error/valid) is at index 1
         status_val = str(record[1]).lower()
         if self.filter_error_status == "Error Records" and "error" not in status_val: return False
         if self.filter_error_status == "Valid Records" and "error" in status_val: return False
             
         return True
+
+# --- Delegate for Evaluation Status ComboBox ---
+class EvaluationStatusDelegate(QStyledItemDelegate):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.options = ["Not Evaluated Yet", "Eligible", "Not Eligible"]
+
+    def createEditor(self, parent_widget, option, index): 
+        editor = QComboBox(parent_widget)
+        editor.addItems(self.options)
+        return editor
+
+    def setEditorData(self, editor, index):
+        value = index.model().data(index, Qt.ItemDataRole.DisplayRole)
+        if value in self.options:
+            editor.setCurrentText(value)
+        else: 
+            editor.setCurrentText("Not Evaluated Yet")
+
+    def setModelData(self, editor, model, index):
+        value = editor.currentText()
+        print(f"[Delegate.setModelData] Called for index ({index.row()},{index.column()}). Value: {value}")
+        model.setData(index, value, Qt.ItemDataRole.EditRole)
+
+# --- API Import Progress Dialog ---
+class APIImportProgressDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("API Import Progress")
+        self.setModal(True)
+        self.setMinimumWidth(400) 
+        self._was_cancelled = False
+
+        layout = QVBoxLayout(self)
+
+        self.total_label = QLabel("Total Records to Process: 0")
+        layout.addWidget(self.total_label)
+
+        self.processed_label = QLabel("Records Processed (Attempted): 0") 
+        layout.addWidget(self.processed_label)
+        
+        self.new_added_label = QLabel("New Records Added: 0")
+        layout.addWidget(self.new_added_label)
+
+        self.skipped_label = QLabel("Records Skipped (Duplicates/Errors): 0")
+        layout.addWidget(self.skipped_label)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0) 
+        self.progress_bar.setValue(0)
+        layout.addWidget(self.progress_bar)
+
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self._perform_cancel)
+        layout.addWidget(self.cancel_button)
+
+        self.setLayout(layout)
+
+    def _perform_cancel(self):
+        self._was_cancelled = True
+        self.reject() 
+
+    def set_total_records(self, count):
+        self.total_label.setText(f"Total Records to Process: {count}")
+        if count > 0:
+            self.progress_bar.setRange(0, count)
+        else:
+            self.progress_bar.setRange(0, 100) 
+
+    def update_progress(self, processed_count, skipped_count, new_added_count):
+        self.processed_label.setText(f"Records Processed (Attempted): {processed_count}")
+        self.new_added_label.setText(f"New Records Added: {new_added_count}")
+        self.skipped_label.setText(f"Records Skipped (Duplicates/Errors): {skipped_count}")
+        
+        self.progress_bar.setValue(processed_count) 
+        QApplication.processEvents() 
+
+    def was_cancelled(self):
+        return self._was_cancelled 
 
 
 class MainWindow(QMainWindow):
@@ -208,10 +376,8 @@ class MainWindow(QMainWindow):
         self._create_main_layout()
         self._create_header() 
         self._create_menus_and_toolbar() 
-        self._create_status_bar()
+        self._create_status_bar() # Corrected: Call the renamed method
         
-        self.apply_choice_to_all_duplicates = False
-        self.session_duplicate_choice = "skip" 
         self.current_temp_kml_path = None
         self.show_ge_instructions_popup_again = True
 
@@ -339,8 +505,9 @@ class MainWindow(QMainWindow):
 
 
     def _create_status_bar(self):
-        self.statusBar = QStatusBar(); self.setStatusBar(self.statusBar)
-        self.statusBar.showMessage("Ready.", 3000)
+        self._main_status_bar = QStatusBar() # Corrected: Renamed instance variable
+        self.setStatusBar(self._main_status_bar) # Corrected: Use the renamed variable
+        self._main_status_bar.showMessage("Ready.", 3000) # Corrected: Use the renamed variable
 
     def _setup_filter_panel(self):
         self.filter_groupbox = QGroupBox("Filters") 
@@ -450,34 +617,47 @@ class MainWindow(QMainWindow):
         table_layout.addLayout(checkbox_header_layout)
         
         self.table_view = QTableView()
-        self.source_model = PolygonTableModel(); 
+        # self.db_manager is initialized in MainWindow.__init__
+        # Pass the db_manager instance to the PolygonTableModel constructor
+        self.source_model = PolygonTableModel(parent=self, db_manager_instance=self.db_manager) 
         self.filter_proxy_model = PolygonFilterProxyModel(self)
         self.filter_proxy_model.setSourceModel(self.source_model)
         self.table_view.setModel(self.filter_proxy_model)
 
         self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table_view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers) 
+        # Allow editing specifically for delegate-managed columns, triggered by DoubleClicked or SelectedClicked
+        self.table_view.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.SelectedClicked)
         self.table_view.horizontalHeader().setStretchLastSection(True)
-        self.table_view.setAlternatingRowColors(True)
+        self.table_view.setAlternatingRowColors(False) # Changed to False
         self.table_view.setSortingEnabled(True) 
+        # Sort by Date Added (column index 7 after new column) by default
         self.table_view.sortByColumn(self.source_model.DATE_ADDED_COL, Qt.SortOrder.DescendingOrder) 
 
-        self.table_view.setStyleSheet("""
-            QTableView {
-                border: 1px solid #D0D0D0; gridline-color: #E0E0E0;
-                selection-background-color: #AED6F1; selection-color: black;
-                alternate-background-color: #F8F8F8;
-            }
-            QTableView::item { padding: 5px; border-bottom: 1px solid #E0E0E0; border-right: none; }
-            QTableView::item:selected { background-color: #AED6F1; color: black; }
-            QHeaderView::section { background-color: #EAEAEA; padding: 6px;
-                                   border: none; border-bottom: 1px solid #C0C0C0; font-weight: bold; }
-            QHeaderView { border: none; }
-        """)
+        # Setup Delegate for Evaluation Status Column
+        evaluation_delegate = EvaluationStatusDelegate(self.table_view) # Pass table_view as parent
+        self.table_view.setItemDelegateForColumn(self.source_model.EVALUATION_STATUS_COL, evaluation_delegate)
+
+        # Temporarily remove stylesheet for debugging background colors
+        # self.table_view.setStyleSheet("""
+        #     QTableView {
+        #         border: 1px solid #D0D0D0; gridline-color: #E0E0E0;
+        #         selection-background-color: #AED6F1; selection-color: black;
+        #     }
+        #     QTableView::item { padding: 5px; border-bottom: 1px solid #E0E0E0; border-right: none; }
+        #     QTableView::item:selected { background-color: #AED6F1; color: black; }
+        #     QHeaderView::section { background-color: #EAEAEA; padding: 6px;
+        #                            border: none; border-bottom: 1px solid #C0C0C0; font-weight: bold; }
+        #     QHeaderView { border: none; }
+        # """)
 
         self.table_view.setColumnWidth(self.source_model.CHECKBOX_COL, 30)
         self.table_view.setColumnWidth(self.source_model.ID_COL, 50)
+        self.table_view.setColumnWidth(self.source_model.EVALUATION_STATUS_COL, 150) # New column width
         self.table_view.setColumnWidth(self.source_model.STATUS_COL, 100)
+        self.table_view.setColumnWidth(self.source_model.UUID_COL, 120) # Example, adjust as needed
+        self.table_view.setColumnWidth(self.source_model.FARMER_COL, 150) # Example, adjust as needed
+        self.table_view.setColumnWidth(self.source_model.VILLAGE_COL, 120) # Example, adjust as needed
+        # DATE_ADDED_COL, EXPORT_COUNT_COL, LAST_EXPORTED_COL can use default or be set too
 
         table_layout.addWidget(self.table_view) 
         self.right_splitter.addWidget(table_container)
@@ -584,34 +764,78 @@ class MainWindow(QMainWindow):
         if rows_from_api is not None: self._process_imported_data(rows_from_api, selected_api_title) 
         else: self.log_message(f"No data returned or error for {selected_api_title}.", "info")
 
-    def _process_imported_data(self, row_list, source_description): 
-        new, skip, err = 0,0,0; self.apply_choice_to_all_duplicates=False; self.session_duplicate_choice="skip"
-        if not row_list: self.log_message(f"No data rows in {source_description}.",tag="info_tag"); return
+    def _process_imported_data(self, row_list, source_description):
+        if not row_list:
+            self.log_message(f"No data rows found in {source_description}.", "info")
+            return
+
+        progress_dialog = APIImportProgressDialog(self)
+        progress_dialog.set_total_records(len(row_list))
+        progress_dialog.show()
+
+        processed_in_loop = 0
+        skipped_in_loop = 0
+        new_added_in_loop = 0
         
-        for i, original_row_dict in enumerate(row_list): 
-            rc_from_row = ""; 
-            for k,v in original_row_dict.items():
-                if k.lstrip('\ufeff') == CSV_HEADERS["response_code"]: rc_from_row = v.strip(); break
-            if not rc_from_row: self.log_message(f"Row {i+1} from {source_description} skipped: Missing RC.", "error"); err+=1; continue
+        for i, original_row_dict in enumerate(row_list):
+            processed_in_loop += 1
+            rc_from_row = ""
+            for k, v in original_row_dict.items():
+                if k.lstrip('\ufeff') == CSV_HEADERS["response_code"]:
+                    rc_from_row = v.strip()
+                    break
             
-            action, apply_now = self.session_duplicate_choice, self.apply_choice_to_all_duplicates
-            is_dup_id = self.db_manager.check_duplicate_response_code(rc_from_row) 
+            if not rc_from_row:
+                self.log_message(f"Row {i+1} from {source_description} skipped: Missing Response Code.", "error")
+                skipped_in_loop += 1
+                progress_dialog.update_progress(processed_in_loop, skipped_in_loop, new_added_in_loop)
+                if progress_dialog.was_cancelled(): break
+                continue
+
+            is_dup_id = self.db_manager.check_duplicate_response_code(rc_from_row)
             if is_dup_id:
-                if not apply_now: action, apply_now = DuplicateDialog(self,rc_from_row).get_user_choice()
-                if apply_now: self.apply_choice_to_all_duplicates=True; self.session_duplicate_choice=action
-                if action=="cancel_all": self.log_message("Import cancelled.", "info"); break 
-                elif action=="skip": self.log_message(f"Skipped duplicate RC '{rc_from_row}'.", "info"); skip+=1; continue
-            
-            processed_flat = process_csv_row_data(original_row_dict) 
+                self.log_message(f"Skipped duplicate Response Code '{rc_from_row}'.", "info")
+                skipped_in_loop += 1
+                progress_dialog.update_progress(processed_in_loop, skipped_in_loop, new_added_in_loop)
+                if progress_dialog.was_cancelled(): break
+                continue
+
+            processed_flat = process_csv_row_data(original_row_dict)
             cur_uuid, cur_rc = processed_flat.get("uuid"), processed_flat.get("response_code")
-            if not cur_uuid or not cur_rc: self.log_message(f"Critical: UUID/RC empty. Original RC: '{rc_from_row}'. Details: {processed_flat.get('error_messages')}", "error"); err+=1; continue
+
+            if not cur_uuid or not cur_rc:
+                error_detail = processed_flat.get('error_messages', 'Unknown processing error')
+                self.log_message(f"Data processing error for original RC '{rc_from_row}'. Details: {error_detail}", "error")
+                skipped_in_loop += 1
+                progress_dialog.update_progress(processed_in_loop, skipped_in_loop, new_added_in_loop)
+                if progress_dialog.was_cancelled(): break
+                continue
             
             processed_flat["last_modified"] = datetime.datetime.now().isoformat()
-            if self.db_manager.add_or_update_polygon_data(processed_flat, overwrite=(action=="overwrite" if is_dup_id else False)): new+=1
-            else: self.log_message(f"Failed to save RC '{cur_rc}' to DB.", "error"); err+=1
+            # Always attempt to add, overwrite is False as we skip duplicates now
+            db_result_id = self.db_manager.add_or_update_polygon_data(processed_flat, overwrite=False)
+
+            if db_result_id is not None:
+                if not is_dup_id: # It was a new record if is_dup_id was None/False before DB call
+                    new_added_in_loop += 1
+            else:
+                self.log_message(f"Failed to save RC '{cur_rc}' to DB.", "error")
+                skipped_in_loop += 1 # Count as skipped if DB operation failed
+
+            progress_dialog.update_progress(processed_in_loop, skipped_in_loop, new_added_in_loop)
+            if progress_dialog.was_cancelled():
+                self.log_message("Import cancelled by user.", "info")
+                break
         
-        self.load_data_into_table() 
-        self.log_message(f"Import from {source_description}: Processed: {new}, Skipped: {skip}, Errors: {err}.", "info")
+        progress_dialog.close()
+        self.load_data_into_table()
+        self.log_message(
+            f"Import from {source_description}: "
+            f"Attempted: {processed_in_loop}, "
+            f"New Added: {new_added_in_loop}, "
+            f"Skipped (Duplicates/Errors): {skipped_in_loop}.",
+            "info"
+        )
 
     def handle_export_displayed_data_csv(self): 
         model_to_export = self.table_view.model() 
@@ -764,7 +988,7 @@ class MainWindow(QMainWindow):
             self.log_text_edit_qt_actual.append(f"[{level.upper()}] {message}")
             self.log_text_edit_qt_actual.ensureCursorVisible() 
         else: print(f"LOG [{level.upper()}]: {message}")
-        if hasattr(self, 'statusBar'): self.statusBar.showMessage(message, 7000 if level=="info" else 10000)
+        if hasattr(self, '_main_status_bar'): self._main_status_bar.showMessage(message, 7000 if level=="info" else 10000) # Corrected: Use the renamed variable
             
     def load_data_into_table(self): 
         try:

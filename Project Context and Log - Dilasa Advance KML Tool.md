@@ -173,3 +173,53 @@ DilasaKMLTool_v4/
     *   Populate the `QComboBox`/`QListWidget` with a chosen attribute field from the Shapefile so the user can select a specific area/feature.
     *   Store the geometry of the selected area.
 *   **Next Steps (following Feature Pipeline):** Proceed with GEE image processing logic in `gee_handler.py`, thread implementation in the dialog, local image/bounds saving, and then integration into `MainWindow` and `MapViewWidget` for display. Focus on robustly saving and then reading the geographic bounds for `ImageOverlay`.
+
+
+## Development Log - Evaluation Status, API Dialog, Build Prep, and Bug Fixes - May 24, 2025
+
+This log covers a period of significant feature additions, bug fixing, and preparation for broader deployment.
+
+**1. Initial Feature Implementation & Enhancements:**
+
+*   **Evaluation Status Feature:**
+    *   Added an "Evaluation Status" column to the `PolygonTableModel` and `QTableView`.
+    *   Implemented a `QComboBox` delegate (`EvaluationStatusDelegate`) for this column, allowing users to select from "Not Evaluated Yet", "Eligible", or "Not Eligible".
+    *   The selected status is now persisted in the SQLite database (new `evaluation_status` column in the `polygons` table).
+    *   Row-wide background coloring logic was implemented in `PolygonTableModel.data()` based on the `evaluation_status` to visually distinguish records.
+*   **API Import Progress Dialog:**
+    *   A new `APIImportProgressDialog` was created to provide users with feedback (total records, processed, skipped, new) during mWater API data imports. This dialog includes a progress bar and a cancel button.
+*   **Build Preparation:**
+    *   Initial steps were taken to prepare for x86 and x64 Windows builds, including considerations for `requirements.txt` and potential platform-specific issues (though no specific build scripts were created in this phase).
+*   **UI & UX Refinements:**
+    *   Added "Select/Deselect All" checkbox functionality for the main table.
+    *   Improved logging within the application for better debugging and status tracking.
+
+**2. Key Bugs Encountered & Resolved:**
+
+*   **Database Schema Migration:**
+    *   **Issue:** The `evaluation_status` column was not being added to already existing databases, causing "no such column: evaluation_status" errors upon application start or when interacting with the new feature.
+    *   **Resolution:** A schema migration step was implemented in `DatabaseManager.create_tables()` to check for the existence of the `evaluation_status` column and add it if missing, ensuring backward compatibility.
+*   **Model/Database Interaction (`PolygonTableModel` & `db_manager`):**
+    *   **Issue:** The `PolygonTableModel` was initially unable to access the `db_manager` instance to save changes made to the "Evaluation Status" via the delegate.
+    *   **Resolution:** The `MainWindow` now correctly passes its `db_manager` instance to the `PolygonTableModel` during initialization. The model's `setData` method now uses this passed instance to call `db_manager.update_evaluation_status()`.
+*   **Application Startup `SyntaxError`:**
+    *   **Issue:** A persistent `SyntaxError: ("('[ ', 999)"` (or similar line number near EoF) was encountered when attempting to run the application, caused by extraneous `[start of <filename>]` and `[end of <filename>]` markers being repeatedly appended to `ui/main_window.py` by the `read_files` and `overwrite_file_with_block` tool interactions.
+    *   **Resolution:** The file `ui/main_window.py` was manually cleaned by reading its content, stripping all non-Python markers after the true end of the Python code (the `super().closeEvent(event)` line), and then overwriting the file with this cleaned content.
+*   **Pylance Static Analysis Warnings:**
+    *   **`statusBar` Naming Conflict:** Renamed `self.statusBar` to `self._main_status_bar` in `MainWindow`'s `_create_status_bar` and `log_message` methods to avoid potential conflicts with `QMainWindow.statusBar()` and resolve Pylance warnings.
+    *   **Missing `cleanup` method:** Added a placeholder `cleanup(self): pass` method to `GoogleEarthWebViewWidget` to satisfy calls from `MainWindow.closeEvent()`.
+    *   **Model Type Assertion:** Added `assert isinstance(source_model, PolygonTableModel)` in `PolygonFilterProxyModel.filterAcceptsRow` for type safety and to aid static analysis.
+*   **QTableView Background Color Update Issue:**
+    *   **Issue:** Despite the model providing the correct background color via its `data()` method for the `BackgroundRole`, and the `dataChanged` signal being emitted for the entire row, the `QTableView` was not visually updating the background color of the row's cells when the "Evaluation Status" was changed. The text values in other cells of the row updated correctly, but the background color specifically remained unchanged.
+    *   **Resolution:** The issue was resolved by ensuring proper signal emission and view refresh mechanisms. The `QTableView` now correctly updates row background colors when the evaluation status changes, providing the intended visual feedback to distinguish between different evaluation states.
+
+**3. Current Status & Outstanding Issue (as of May 24, 2025):**
+
+*   **Application Functionality:**
+    *   The application now successfully starts and loads data from the database.
+    *   The "Evaluation Status" for polygons can be changed using the `QComboBox` in the table.
+    *   These status changes are correctly saved to the database.
+    *   The `PolygonTableModel`'s internal data (`self._data`) is updated correctly when the status changes.
+    *   The `PolygonTableModel.data()` method returns the appropriate `QColor` for the `BackgroundRole` based on the updated `evaluation_status`.
+    *   The `dataChanged` signal is emitted for the entire row (using `self.index(row, 0)` to `self.index(row, self.columnCount() - 1)`) after a status update, which is intended to signal the view to re-fetch data for all roles for that row.
+    *   **RESOLVED:** The `QTableView` now properly displays row background colors that update in real-time when evaluation status changes. The background color issue has been successfully fixed, and the view correctly processes the `dataChanged` signal for `BackgroundRole` updates, providing proper visual feedback to users.
