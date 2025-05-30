@@ -6,36 +6,26 @@ import datetime
 # These constants will be used by the main application to instantiate the DB manager
 # For modularity, the DB_FOLDER_NAME and DB_FILE_NAME could also be passed
 # to the DatabaseManager constructor if you prefer more flexibility later.
-DB_FOLDER_NAME_CONST = "DilasaKMLTool_v4" # AppData subfolder for this version
-DB_FILE_NAME_CONST = "app_data_v4.db"   # Specific DB file for this version
 
 class DatabaseManager:
     """
     Manages all interactions with the SQLite database for the Dilasa KML Tool.
     Handles creation of tables, and CRUD operations for API sources and polygon data.
     """
-    def __init__(self, db_folder_name=None, db_file_name=None):
+    def __init__(self, db_path):
         """
         Initializes the DatabaseManager.
         Connects to the database and creates tables if they don't exist.
 
         Args:
-            db_folder_name (str, optional): Name of the folder within AppData.
-                                            Defaults to DB_FOLDER_NAME_CONST.
-            db_file_name (str, optional): Name of the SQLite database file.
-                                          Defaults to DB_FILE_NAME_CONST.
+            db_path (str): The full path to the SQLite database file.
         """
-        folder_name = db_folder_name or DB_FOLDER_NAME_CONST
-        file_name = db_file_name or DB_FILE_NAME_CONST
+        self.db_path = db_path
         
-        app_data_dir = os.getenv('APPDATA')
-        if not app_data_dir:  # Fallback for systems where APPDATA might not be set
-            app_data_dir = os.path.expanduser("~")
-            print(f"Warning: APPDATA environment variable not found. Using user home directory: {app_data_dir}")
-
-        self.db_path = os.path.join(app_data_dir, folder_name)
-        os.makedirs(self.db_path, exist_ok=True) # Ensure the directory exists
-        self.db_path = os.path.join(self.db_path, file_name)
+        # Ensure the directory for the db_path exists
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir and not os.path.exists(db_dir): # Check if db_dir is not empty (for relative paths)
+            os.makedirs(db_dir, exist_ok=True)
 
         self.conn = None
         self.cursor = None
@@ -330,8 +320,7 @@ if __name__ == '__main__':
     print("Testing DatabaseManager...")
     # Create a temporary DB for testing or use the default path
     # For isolated testing, you might want to pass a specific test DB name
-    # db_manager = DatabaseManager(db_file_name="test_app_data_v4.db")
-    db_manager = DatabaseManager()
+    db_manager = DatabaseManager(db_path="temp_v5_test.db")
     print(f"Using database at: {db_manager.db_path}")
 
     # Test mWater sources
@@ -407,8 +396,8 @@ if __name__ == '__main__':
     db_manager.close()
     print("\nDatabaseManager tests finished.")
 
-    # To clean up the test database file:
-    # test_db_file = os.path.join(os.getenv('APPDATA') or os.path.expanduser("~"), DB_FOLDER_NAME_CONST, "test_app_data_v4.db")
+    # To clean up the test database file (if created in current dir):
+    # test_db_file = "temp_v5_test.db"
     # if os.path.exists(test_db_file):
     #     os.remove(test_db_file)
     #     print(f"Removed test database: {test_db_file}")
