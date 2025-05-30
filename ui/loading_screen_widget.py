@@ -203,20 +203,20 @@ if __name__ == '__main__':
 
     from PySide6.QtCore import QTimer
     timer = QTimer()
-    progress_value = 0
+    progress_tracker = [0] # Changed from progress_value = 0
 
     def simulate_loading():
-        nonlocal progress_value
-        progress_value += 10
-        if progress_value <= 100:
-            loading_screen.update_progress(progress_value, f"Loading component {progress_value//10}...")
-            if progress_value == 20:
+        # nonlocal progress_value # Removed
+        progress_tracker[0] += 10 # Modified
+        if progress_tracker[0] <= 100: # Modified
+            loading_screen.update_progress(progress_tracker[0], f"Loading component {progress_tracker[0]//10}...") # Modified
+            if progress_tracker[0] == 20: # Modified
                 loading_screen.append_log("Initializing core modules...", "INFO")
-            elif progress_value == 50:
+            elif progress_tracker[0] == 50: # Modified
                 loading_screen.append_log("Configuration loaded.", "SUCCESS")
-            elif progress_value == 70:
+            elif progress_tracker[0] == 70: # Modified
                 loading_screen.append_log("Network check failed, retrying...", "WARNING")
-            elif progress_value == 90:
+            elif progress_tracker[0] == 90: # Modified
                 loading_screen.append_log("Critical component missing!", "ERROR")
         else:
             timer.stop()
