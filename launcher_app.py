@@ -44,37 +44,41 @@ class InitializationThread(QThread):
             self.progress_updated.emit(10, "Initializing core components...")
             time.sleep(0.2) # Simulate some work
 
-            # Perform non-GUI tasks
             self.log_message.emit("Performing non-GUI setup...", "INFO")
-            self.progress_updated.emit(30, "Loading configurations...")
+            self.progress_updated.emit(30, "Loading configurations & core services...")
 
-            # Call the new non-GUI initialization function
-            success_non_gui = perform_non_gui_initialization() # from main_app.py
+            init_result = perform_non_gui_initialization() # from main_app.py
+            success_non_gui = init_result.get("success", False)
 
             if not success_non_gui:
-                # This assumes perform_non_gui_initialization returns False on failure
-                # If it raises exceptions, this try-except block will catch them.
-                raise RuntimeError("Non-GUI initialization failed.")
+                error_msg = init_result.get("error", "Unknown non-GUI initialization failure.")
+                detailed_error = init_result.get("detailed_error")
+                # Log messages are already printed by perform_non_gui_initialization,
+                # but we can add a summary here for the launcher log.
+                self.log_message(f"Non-GUI Initialization Summary: {error_msg}", "ERROR")
+                if detailed_error:
+                     # This might be too verbose for loading screen log, better for console/file log
+                     # self.log_message(f"Detailed Error (Non-GUI): {detailed_error}", "DEBUG")
+                     pass
+                raise RuntimeError(f"Non-GUI init failed: {error_msg}") # This will be caught by the outer except
 
-            time.sleep(0.3) # Simulate more work
-
+            # If successful, init_result contains db_manager and credential_manager
             self.log_message.emit("Non-GUI initialization successful.", "SUCCESS")
-            self.progress_updated.emit(70, "Ready to create main window...") # Adjusted progress
+            self.progress_updated.emit(70, "Ready to create main window...")
             time.sleep(0.2)
 
-            # The actual MainWindow creation is now deferred to the main thread.
-            # This thread's job for preparing MainWindow is done.
             self.progress_updated.emit(100, "Initialization tasks complete!") # Thread tasks are done
-            self.initialization_complete.emit(True, None) # Emit success, no main_window instance here
+            self.initialization_complete.emit(True, init_result) # Pass the dictionary
 
-        except Exception as e:
+        except Exception as e: # Catches RuntimeError from above or any other exception
             error_message = f"Initialization thread failed: {str(e)}"
-            import traceback
-            detailed_error = traceback.format_exc()
+            # traceback might be too much for loading screen, but good for console
+            # import traceback
+            # detailed_error = traceback.format_exc()
             self.log_message.emit(error_message, "ERROR")
-            self.log_message.emit(f"Details: {detailed_error}", "DEBUG")
-            self.progress_updated.emit(0, "Error during startup!")
-            self.initialization_complete.emit(False, e)
+            # self.log_message(f"Details: {detailed_error}", "DEBUG") # Redundant if error is from RuntimeError above
+            self.progress_updated.emit(0, "Error during startup!") # Reset progress on error
+            self.initialization_complete.emit(False, e) # Pass the exception object
 
 
 # Global reference to keep ModernWindow alive if needed, or manage within launch
@@ -140,11 +144,26 @@ def launch():
         global _main_modern_window
 
         if success: # Non-GUI initialization was successful
-            loading_screen.update_progress(85, "Creating user interface...") # New progress step
+            # data_or_error here is the init_result dictionary
+            init_data = data_or_error
+            db_manager = init_data.get("db_manager")
+            credential_manager = init_data.get("credential_manager")
+
+            if not db_manager or not credential_manager:
+                error_msg = "Critical components (DBManager or CredentialManager) not initialized."
+                loading_screen.append_log(error_msg, "ERROR")
+                loading_screen.update_progress(0, "Startup Failed!")
+                # Handle this critical failure - perhaps by not proceeding further
+                return # Exit if critical components are missing
+
+            loading_screen.update_progress(85, "Creating user interface...")
             QApplication.processEvents()
             try:
                 # Step 2: Create MainWindow instance in the main thread
-                main_window_instance = create_main_window_instance() # from main_app.py
+                main_window_instance = create_main_window_instance(
+                    db_manager=db_manager,
+                    credential_manager=credential_manager
+                ) # from main_app.py
 
                 if not main_window_instance:
                     # This should ideally not happen if create_main_window_instance is robust

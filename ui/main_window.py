@@ -363,14 +363,33 @@ class APIImportProgressDialog(QDialog):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, db_manager, credential_manager):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME_MW} - {APP_VERSION_MW}")
         self.app_icon_path = resource_path(APP_ICON_FILE_NAME_MW) 
         if os.path.exists(self.app_icon_path): self.setWindowIcon(QIcon(self.app_icon_path))
         else: print(f"Warning: Main window icon '{self.app_icon_path}' not found.")
-        try: self.db_manager = DatabaseManager()
-        except Exception as e: QMessageBox.critical(self, "DB Error", f"DB init failed: {e}\nExiting."); sys.exit(1) 
+
+        self.db_manager = db_manager
+        self.credential_manager = credential_manager # Store credential_manager
+
+        if self.db_manager is None:
+            QMessageBox.critical(self, "Initialization Error", "Database Manager not provided. Application cannot start.")
+            # In a real scenario, you might want to exit or disable features.
+            # For now, this will likely cause issues later if not handled,
+            # but the launcher should prevent this if db_manager is None.
+            # Consider sys.exit(1) if this is truly unrecoverable.
+            # For now, let's assume launcher prevents None db_manager.
+            print("CRITICAL: MainWindow initialized with None db_manager!")
+            # Simulating an exit for safety, as the app would be broken.
+            # QApplication.instance().quit() # This might be too abrupt here.
+            # For now, just log and proceed, assuming launcher caught it.
+            # A proper solution might be for create_main_window_instance to not return if db_manager is None.
+
+        if self.credential_manager is None:
+            QMessageBox.critical(self, "Initialization Error", "Credential Manager not provided. Application cannot start.")
+            print("CRITICAL: MainWindow initialized with None credential_manager!")
+            # Similar handling as db_manager being None.
         
         self.resize(1200, 800); self._center_window() 
         self._create_main_layout()
