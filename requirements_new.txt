@@ -94,3 +94,4 @@ wadllib==1.3.6
 xyzservices==2025.4.0
 zipp==3.21.0
 zstandard==0.23.0
+qtmodern
