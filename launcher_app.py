@@ -36,8 +36,6 @@ def launch():
         except Exception as e:
             print(f"Warning: An unexpected error occurred while setting Windows dark mode: {e}")
 
-    # 1. High DPI Scaling (Qt.AA_EnableHighDpiScaling)
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
 
     app = QApplication(sys.argv)
     app.setApplicationName("Dilasa Advance KML Tool") # Set App Name
@@ -47,18 +45,16 @@ def launch():
 
     # 3. Set Application Style (Fusion)
     app.setStyle('Fusion')
-    qtmodern.styles.dark(app) # ADD THIS - Apply qtmodern dark style
 
     # 4. qtmodern styling (e.g., qtmodern.styles.dark(app))
-    # This is done above now. Placeholder comment can be removed or updated.
-    # No, this was step 4, now done.
+    qtmodern.styles.dark(app) # Apply qtmodern dark style
 
     # 5. Load global QSS stylesheet (assets/style.qss)
     try:
         qss_file_name = "style.qss"
         qss_folder = "assets"
         # Construct the path using resource_path from core.utils
-        qss_path = resource_path(qss_file_name, qss_folder)
+        qss_path = resource_path(qss_file_name)
 
         if os.path.exists(qss_path):
             with open(qss_path, "r") as f:
