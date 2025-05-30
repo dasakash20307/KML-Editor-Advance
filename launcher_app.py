@@ -102,7 +102,7 @@ def launch():
 
     # Load global QSS stylesheet
     try:
-        qss_path = resource_path("style.qss", "assets")
+        qss_path = resource_path("style.qss") # Corrected: removed "assets" argument
         if os.path.exists(qss_path):
             with open(qss_path, "r") as f:
                 stylesheet = f.read()
