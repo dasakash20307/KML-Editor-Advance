@@ -36,6 +36,9 @@ The **Dilasa Advance KML Tool** is a Windows desktop application developed for D
         *   "Select/Deselect All" checkbox for bulk actions.
     *   **Filter Panel:** Allows filtering of the data table by UUID, date added, KML export status, and record error status.
     *   **Log Panel:** Shows status messages, errors, and logs of application activity.
+*   **Startup Sequence:**
+    *   **`launcher_app.py`**: Main application entry point. Manages application setup, styling, and initiates the loading sequence.
+    *   **`ui/loading_screen_widget.py`**: Provides an initial UI with progress indication and logs during application startup. Ensures a responsive user experience while core components are initialized in a background thread.
 *   **Dialogs:**
     *   **API Sources Dialog:** Manage mWater API source URLs.
     *   **Duplicate Dialog:** Handle duplicate record imports.
@@ -46,6 +49,7 @@ The **Dilasa Advance KML Tool** is a Windows desktop application developed for D
 
 *   **Language:** Python
 *   **GUI:** PySide6 (Qt) - *Theming enhanced with Fusion style and `qtmodern` for a modern dark look.*
+*   **Application Launcher & Startup:** `launcher_app.py` with `ui/loading_screen_widget.py` for threaded initialization.
 *   **UI Styling:** `qtmodern` *(for modern themes and window frames)*, Custom QSS via `assets/style.qss`
 *   **Database:** SQLite
 *   **Mapping & KML:** Folium, simplekml
