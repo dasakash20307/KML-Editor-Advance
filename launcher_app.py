@@ -16,7 +16,8 @@ if platform.system() == "Windows":
     import ctypes
 
 # Updated import from main_app
-from main_app import prepare_main_window
+# from main_app import prepare_main_window # Old import
+from main_app import perform_non_gui_initialization, create_main_window_instance # New imports
 # Import the new loading screen widget
 from ui.loading_screen_widget import LoadingScreenWidget
 from core.utils import resource_path # For QSS path
@@ -34,46 +35,45 @@ class InitializationThread(QThread):
     progress_updated = Signal(int, str)
     # Signals: message, level (e.g., "INFO", "ERROR")
     log_message = Signal(str, str)
-    # Signals: success_status, main_window_instance_or_error
+    # Signal: success_status, data_from_non_gui_init (can be None or a dict/object)
     initialization_complete = Signal(bool, object)
 
     def run(self):
         try:
             self.log_message.emit("Starting application initialization...", "INFO")
             self.progress_updated.emit(10, "Initializing core components...")
-            # Simulate some work
-            time.sleep(0.5) # Placeholder for actual init steps
+            time.sleep(0.2) # Simulate some work
 
-            # In a real app, CredentialManager and other core services would be initialized here.
-            # For now, we just call prepare_main_window.
-            # More granular progress updates would involve prepare_main_window (or MainWindow itself)
-            # emitting signals that this thread could catch and re-emit.
+            # Perform non-GUI tasks
+            self.log_message.emit("Performing non-GUI setup...", "INFO")
+            self.progress_updated.emit(30, "Loading configurations...")
 
-            self.log_message.emit("Creating main window...", "INFO")
-            self.progress_updated.emit(30, "Loading main user interface...")
-            main_window = prepare_main_window() # This is the refactored function
-            time.sleep(1) # Simulate main window setup
+            # Call the new non-GUI initialization function
+            success_non_gui = perform_non_gui_initialization() # from main_app.py
 
-            if not main_window: # Basic check
-                raise RuntimeError("Main window preparation failed.")
+            if not success_non_gui:
+                # This assumes perform_non_gui_initialization returns False on failure
+                # If it raises exceptions, this try-except block will catch them.
+                raise RuntimeError("Non-GUI initialization failed.")
 
-            # Simulate further loading steps
-            self.progress_updated.emit(70, "Finalizing setup...")
-            # Example: if main_window has a method to do more setup and report progress:
-            # main_window.perform_final_setup(progress_callback=self.progress_updated, log_callback=self.log_message)
-            time.sleep(1)
+            time.sleep(0.3) # Simulate more work
 
-            self.log_message.emit("Initialization successful.", "SUCCESS")
-            self.progress_updated.emit(100, "Done!")
-            self.initialization_complete.emit(True, main_window)
+            self.log_message.emit("Non-GUI initialization successful.", "SUCCESS")
+            self.progress_updated.emit(70, "Ready to create main window...") # Adjusted progress
+            time.sleep(0.2)
+
+            # The actual MainWindow creation is now deferred to the main thread.
+            # This thread's job for preparing MainWindow is done.
+            self.progress_updated.emit(100, "Initialization tasks complete!") # Thread tasks are done
+            self.initialization_complete.emit(True, None) # Emit success, no main_window instance here
 
         except Exception as e:
-            error_message = f"Initialization failed: {str(e)}"
+            error_message = f"Initialization thread failed: {str(e)}"
             import traceback
             detailed_error = traceback.format_exc()
             self.log_message.emit(error_message, "ERROR")
-            self.log_message.emit(f"Details: {detailed_error}", "DEBUG") # DEBUG for detailed traceback
-            self.progress_updated.emit(0, "Error during startup!") # Reset progress or show error status
+            self.log_message.emit(f"Details: {detailed_error}", "DEBUG")
+            self.progress_updated.emit(0, "Error during startup!")
             self.initialization_complete.emit(False, e)
 
 
@@ -90,7 +90,7 @@ def launch():
         except Exception as e:
             print(f"Warning (launcher_app): Could not set Windows dark mode: {e}")
 
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    # QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True) # Removed: Deprecated in Qt6, HighDPI is on by default
 
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME_LAUNCHER)
@@ -136,31 +136,48 @@ def launch():
     thread.log_message.connect(loading_screen.append_log)
 
     # --- Handle Initialization Completion ---
-    def handle_initialization_finished(success, result):
-        global _main_modern_window # Ensure we assign to the global var
+    def handle_initialization_finished(success, data_or_error): # 'data_or_error' from thread
+        global _main_modern_window
 
-        loading_screen.update_progress(100, "Finalizing..." if success else "Startup Failed!")
-        QApplication.processEvents() # Update UI one last time
+        if success: # Non-GUI initialization was successful
+            loading_screen.update_progress(85, "Creating user interface...") # New progress step
+            QApplication.processEvents()
+            try:
+                # Step 2: Create MainWindow instance in the main thread
+                main_window_instance = create_main_window_instance() # from main_app.py
 
-        if success:
-            main_window_instance = result
-            if main_window_instance:
-                # Close loading screen *before* showing main window to avoid flicker
+                if not main_window_instance:
+                    # This should ideally not happen if create_main_window_instance is robust
+                    raise RuntimeError("Failed to create MainWindow instance (returned None).")
+
+                loading_screen.append_log("Main window created successfully.", "SUCCESS")
+                loading_screen.update_progress(95, "Finalizing UI...")
+                QApplication.processEvents()
+
+                # Close loading screen before showing main window to avoid overlap/flicker
+                # A small delay can ensure messages are visible before close, if necessary.
+                # time.sleep(0.5) # Optional: if logs are too quick to read before close
                 loading_screen.close()
 
                 _main_modern_window = qtmodern.windows.ModernWindow(main_window_instance)
                 _main_modern_window.show()
-                # main_window_instance.show() # If not using ModernWindow or if it handles it
-            else:
-                # This case should ideally be caught by the thread's error handling
-                loading_screen.append_log("Critical error: Main window not created, but thread reported success.", "ERROR")
-                # Keep loading screen open to show the error
+
+            except Exception as e:
+                # Handle errors during main window creation or display
+                error_message = f"Failed to create or show main window: {str(e)}"
+                import traceback
+                detailed_error = traceback.format_exc()
+                loading_screen.append_log(error_message, "ERROR")
+                loading_screen.append_log(f"Details: {detailed_error}", "DEBUG")
+                loading_screen.update_progress(0, "UI Creation Failed!")
+                # Keep loading_screen open to show the error
         else:
-            # Error already logged by the thread.
+            # Non-GUI Initialization failed, error already logged by the thread.
+            # 'data_or_error' here is the exception from the thread.
+            loading_screen.append_log(f"Startup aborted due to non-GUI initialization failure: {str(data_or_error)}", "ERROR")
+            loading_screen.update_progress(0, "Startup Failed!")
             # Keep loading screen open to show error messages.
-            # Optionally, add a close button or retry mechanism here.
-            print(f"Error during initialization: {result}")
-            # loading_screen.enable_close_button() # If such a feature exists
+            print(f"Error during non-GUI initialization (passed to main thread): {data_or_error}")
 
     thread.initialization_complete.connect(handle_initialization_finished)
     thread.start()
