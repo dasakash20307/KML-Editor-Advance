@@ -45,14 +45,17 @@ The **Dilasa Advance KML Tool** is a Windows desktop application developed for D
 ## Key Technologies
 
 *   **Language:** Python
-*   **GUI:** PySide6 (Qt)
+*   **GUI:** PySide6 (Qt) - *Theming enhanced with Fusion style and `qtmodern` for a modern dark look.*
+*   **UI Styling:** `qtmodern` *(for modern themes and window frames)*, Custom QSS via `assets/style.qss`
 *   **Database:** SQLite
 *   **Mapping & KML:** Folium, simplekml
 *   **APIs:** mWater (for data import), Google Earth Engine (upcoming for historical imagery processing)
 
 ## Current Status
 
-The application is in a beta stage. The core data management, KML generation, and manual Google Earth KML import features are functional. Development is actively focused on integrating Google Earth Engine for advanced historical imagery analysis.
+The application is undergoing a significant update to **Version 5 (v5)**.
+This includes a modernized UI with High DPI support, a new application launcher, and foundational styling improvements (Fusion, qtmodern dark theme).
+The core data management, KML generation, and manual Google Earth KML import features from v4 remain functional. Development is actively focused on integrating Google Earth Engine for advanced historical imagery analysis and further v5 enhancements.
 
 ## Setup
 
@@ -60,4 +63,13 @@ The application is in a beta stage. The core data management, KML generation, an
 2.  Clone the repository.
 3.  Create a virtual environment and activate it.
 4.  Install dependencies: `pip install -r requirements.txt`
-5.  Run: `python main_app.py`
+5.  Run: `python launcher_app.py`
+
+## Project Documentation & Development Insights
+
+For more detailed information on the project's v5 transition, architecture, and ongoing development tasks, please refer to the following documents:
+
+*   **`v5_task_and_Concept.md`**: Provides a comprehensive overview of the v5 project plan, architectural changes, glossary of terms, and detailed task breakdowns.
+*   **`Project_Logfile.md`**: Contains a log of development progress, detailing the changes and objectives for each completed task.
+
+These documents offer deeper insights into the development process and the evolution of the application.
