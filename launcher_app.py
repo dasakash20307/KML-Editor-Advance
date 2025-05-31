@@ -55,10 +55,10 @@ class InitializationThread(QThread):
                 detailed_error = init_result.get("detailed_error")
                 # Log messages are already printed by perform_non_gui_initialization,
                 # but we can add a summary here for the launcher log.
-                self.log_message(f"Non-GUI Initialization Summary: {error_msg}", "ERROR")
+                self.log_message.emit(f"Non-GUI Initialization Summary: {error_msg}", "ERROR")
                 if detailed_error:
                      # This might be too verbose for loading screen log, better for console/file log
-                     # self.log_message(f"Detailed Error (Non-GUI): {detailed_error}", "DEBUG")
+                     # self.log_message.emit(f"Detailed Error (Non-GUI): {detailed_error}", "DEBUG")
                      pass
                 raise RuntimeError(f"Non-GUI init failed: {error_msg}") # This will be caught by the outer except
 
