@@ -304,56 +304,34 @@ class PolygonFilterProxyModel(QSortFilterProxyModel):
             uuid_val = str(record[1]).lower()
             if self.filter_uuid_text not in uuid_val: return False
         
-        # Date Added is at index 5 - remains correct
-        date_added_str_from_record = record[5]
+        # Date Added is at index 5
+        date_val_from_record = record[5]
+        row_qdate = None
 
-        # Date filter evaluations
-        passes_after_date_filter = True
-        passes_before_date_filter = True
+        if isinstance(date_val_from_record, datetime.datetime):
+            row_qdate = QDate(date_val_from_record.year, date_val_from_record.month, date_val_from_record.day)
+        elif isinstance(date_val_from_record, datetime.date):
+            row_qdate = QDate(date_val_from_record.year, date_val_from_record.month, date_val_from_record.day)
+        elif isinstance(date_val_from_record, str) and date_val_from_record:
+            try:
+                # Attempt to parse the date part, assuming "YYYY-MM-DD" or "YYYY-MM-DD HH:MM:SS"
+                date_part_str = date_val_from_record.split(" ")[0]
+                parsed_qdate = QDate.fromString(date_part_str, "yyyy-MM-dd")
+                if parsed_qdate.isValid():
+                    row_qdate = parsed_qdate
+                # else: print(f"DEBUG: filterAcceptsRow - Could not parse date string: {date_val_from_record} into a valid QDate.")
+            except Exception as e:
+                # print(f"DEBUG: filterAcceptsRow - Exception parsing date string '{date_val_from_record}': {e}")
+                pass # row_qdate remains None
 
-        if self.filter_after_date_added: # Only try to parse and compare if a filter date is set
-            if date_added_str_from_record and isinstance(date_added_str_from_record, str):
-                try:
-                    date_part_str = date_added_str_from_record.split(" ")[0]
-                    row_qdate = QDate.fromString(date_part_str, "yyyy-MM-dd")
-                    if row_qdate.isValid():
-                        if row_qdate < self.filter_after_date_added:
-                            passes_after_date_filter = False
-                    else:
-                        # Date string from record is present but not parsable to a valid QDate
-                        # print(f"DEBUG: filterAcceptsRow - Could not parse 'after' date_added_str: {date_added_str_from_record}")
-                        passes_after_date_filter = False # Treat unparseable as not matching
-                except Exception as e:
-                    # print(f"DEBUG: filterAcceptsRow - Exception parsing 'after' date_added_str '{date_added_str_from_record}': {e}")
-                    passes_after_date_filter = False # Treat error in parsing as not matching
-            else:
-                # date_added_str_from_record is None or not a string, so it cannot satisfy the filter
-                passes_after_date_filter = False
+        # Now, use row_qdate for comparisons
+        if self.filter_after_date_added:
+            if row_qdate is None or not row_qdate.isValid() or row_qdate < self.filter_after_date_added:
+                return False # Filter out if no valid date or before the 'after' date
 
-        if not passes_after_date_filter: # Early exit if "after" filter fails
-            return False
-
-        if self.filter_before_date_added: # Only try to parse and compare if a filter date is set
-            if date_added_str_from_record and isinstance(date_added_str_from_record, str):
-                try:
-                    date_part_str = date_added_str_from_record.split(" ")[0]
-                    row_qdate = QDate.fromString(date_part_str, "yyyy-MM-dd")
-                    if row_qdate.isValid():
-                        if row_qdate > self.filter_before_date_added:
-                            passes_before_date_filter = False
-                    else:
-                        # Date string from record is present but not parsable to a valid QDate
-                        # print(f"DEBUG: filterAcceptsRow - Could not parse 'before' date_added_str: {date_added_str_from_record}")
-                        passes_before_date_filter = False # Treat unparseable as not matching
-                except Exception as e:
-                    # print(f"DEBUG: filterAcceptsRow - Exception parsing 'before' date_added_str '{date_added_str_from_record}': {e}")
-                    passes_before_date_filter = False # Treat error in parsing as not matching
-            else:
-                # date_added_str_from_record is None or not a string, so it cannot satisfy the filter
-                passes_before_date_filter = False
-
-        if not passes_before_date_filter: # Early exit if "before" filter fails
-            return False
+        if self.filter_before_date_added:
+            if row_qdate is None or not row_qdate.isValid() or row_qdate > self.filter_before_date_added:
+                return False # Filter out if no valid date or after the 'before' date
 
         # Export Count (kml_export_count) is at index 6 - remains correct
         export_count = record[6] if record[6] is not None else 0
@@ -691,7 +669,8 @@ class MainWindow(QMainWindow):
         self.date_added_after_edit.clear(); self.date_added_after_edit.setSpecialValueText(" ")
         self.date_added_before_edit.clear(); self.date_added_before_edit.setSpecialValueText(" ")      
         self.export_status_combo.setCurrentIndex(0) 
-        self.error_status_combo.setCurrentIndex(0)  
+        self.error_status_combo.setCurrentIndex(0)
+        self.apply_filters() # Added this line
 
     def _setup_main_content_area(self):
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal) 
