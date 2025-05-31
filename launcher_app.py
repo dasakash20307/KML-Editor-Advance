@@ -70,15 +70,41 @@ class InitializationThread(QThread):
             self.progress_updated.emit(100, "Initialization tasks complete!") # Thread tasks are done
             self.initialization_complete.emit(True, init_result) # Pass the dictionary
 
-        except Exception as e: # Catches RuntimeError from above or any other exception
-            error_message = f"Initialization thread failed: {str(e)}"
-            # traceback might be too much for loading screen, but good for console
-            # import traceback
-            # detailed_error = traceback.format_exc()
-            self.log_message.emit(error_message, "ERROR")
-            # self.log_message(f"Details: {detailed_error}", "DEBUG") # Redundant if error is from RuntimeError above
-            self.progress_updated.emit(0, "Error during startup!") # Reset progress on error
-            self.initialization_complete.emit(False, e) # Pass the exception object
+        except Exception as e:
+            e_str = str(e) # Capture string representation of original error first
+
+            # Prepare the main error message
+            error_message_main = f"Initialization thread failed: {e_str}"
+
+            # Attempt to log this main failure.
+            try:
+                self.log_message.emit(error_message_main, "ERROR")
+            except Exception as log_emit_ex:
+                # Fallback to print if emitting to UI log fails
+                print(f"CRITICAL LAUNCHER ERROR: Failed to emit primary error to UI log. UI Log emitter error: {log_emit_ex}")
+                print(f"Original error in thread was: {e_str}")
+
+            # Optionally, log detailed traceback to console (not to UI log to avoid clutter / further errors)
+            # This was previously commented out but is useful for debugging.
+            # We are not emitting this detailed_error to self.log_message to avoid recursion
+            # if the error 'e' itself was related to self.log_message.
+            try:
+                import traceback
+                detailed_traceback_str = traceback.format_exc()
+                print(f"LAUNCHER THREAD TRACEBACK:\n{detailed_traceback_str}")
+            except Exception:
+                print("LAUNCHER THREAD: Failed to get detailed traceback.")
+
+            # Update progress and signal completion with the original error
+            try:
+                self.progress_updated.emit(0, "Error during startup!")
+            except Exception as progress_emit_ex:
+                print(f"CRITICAL LAUNCHER ERROR: Failed to emit progress update in thread's except block: {progress_emit_ex}")
+
+            try:
+                self.initialization_complete.emit(False, e) # Emit original exception 'e'
+            except Exception as complete_emit_ex:
+                print(f"CRITICAL LAUNCHER ERROR: Failed to emit initialization_complete in thread's except block: {complete_emit_ex}")
 
 
 # Global reference to keep ModernWindow alive if needed, or manage within launch

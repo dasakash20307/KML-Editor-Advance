@@ -151,10 +151,8 @@ if __name__ == '__main__':
                      if os.path.exists(db_file_path_for_test):
                         os.remove(db_file_path_for_test)
                         print("Removed DB after creating parent directory.")
-                 except OSError as e_dir_create:
-                     print(f"Error creating directory {expected_app_data_dir}: {e_dir_create}")
-                 except OSError as e_retry:
-                     print(f"Still failed to remove DB after attempting to create dir: {e_retry}")
+                 except OSError as e_dir_create: # Catches OSError from makedirs or remove
+                     print(f"Error during directory creation or file removal: {e_dir_create}")
             else:
                 print("Parent directory already existed. Removal failed for other reasons (e.g. permissions, file in use).")
 

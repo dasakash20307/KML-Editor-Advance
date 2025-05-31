@@ -11,15 +11,15 @@ class NicknameDialog(QDialog):
         self.setWindowTitle("Device Nickname Setup")
         self.setModal(True)
 
-        self.layout = QVBoxLayout(self)
+        self.main_dialog_layout = QVBoxLayout(self)
 
         self.instruction_label = QLabel("Please provide a nickname for this device. This will help identify it if you use the 'Connected App' mode on other devices.")
         self.instruction_label.setWordWrap(True)
-        self.layout.addWidget(self.instruction_label)
+        self.main_dialog_layout.addWidget(self.instruction_label)
 
         self.nickname_input = QLineEdit()
         self.nickname_input.setPlaceholderText("e.g., Office PC, Field Laptop 1")
-        self.layout.addWidget(self.nickname_input)
+        self.main_dialog_layout.addWidget(self.nickname_input)
 
         self.button_layout = QHBoxLayout()
         self.next_button = QPushButton("Next")
@@ -28,7 +28,7 @@ class NicknameDialog(QDialog):
 
         self.button_layout.addStretch()
         self.button_layout.addWidget(self.next_button)
-        self.layout.addLayout(self.button_layout)
+        self.main_dialog_layout.addLayout(self.button_layout)
 
         self.setMinimumWidth(400)
 
@@ -47,19 +47,19 @@ class ModeSelectionDialog(QDialog):
         self.setWindowTitle("Application Mode Setup")
         self.setModal(True)
 
-        self.layout = QVBoxLayout(self)
+        self.main_dialog_layout = QVBoxLayout(self)
 
         self.instruction_label = QLabel("Select the operational mode for this application instance:")
         self.instruction_label.setWordWrap(True)
-        self.layout.addWidget(self.instruction_label)
+        self.main_dialog_layout.addWidget(self.instruction_label)
 
         self.central_app_radio = QRadioButton("Central App (Manage a local database and KML files)")
         self.connected_app_radio = QRadioButton("Connected App (Connect to an existing Central App's shared data)")
 
         self.central_app_radio.setChecked(True) # Default selection
 
-        self.layout.addWidget(self.central_app_radio)
-        self.layout.addWidget(self.connected_app_radio)
+        self.main_dialog_layout.addWidget(self.central_app_radio)
+        self.main_dialog_layout.addWidget(self.connected_app_radio)
 
         self.button_layout = QHBoxLayout()
         self.next_button = QPushButton("Next")
@@ -68,7 +68,7 @@ class ModeSelectionDialog(QDialog):
 
         self.button_layout.addStretch()
         self.button_layout.addWidget(self.next_button)
-        self.layout.addLayout(self.button_layout)
+        self.main_dialog_layout.addLayout(self.button_layout)
 
         self.setMinimumWidth(400)
 
@@ -89,7 +89,7 @@ class PathConfigurationDialog(QDialog):
         self.setWindowTitle(f"Path Configuration ({self.app_mode})")
         self.setModal(True)
 
-        self.layout = QVBoxLayout(self)
+        self.main_dialog_layout = QVBoxLayout(self)
 
         self.db_path_label = QLabel() # Define before use in _setup_ui_for_mode
         self.kml_folder_label = QLabel() # Define before use
@@ -109,7 +109,7 @@ class PathConfigurationDialog(QDialog):
 
         self.button_layout.addStretch()
         self.button_layout.addWidget(self.finish_button)
-        self.layout.addLayout(self.button_layout)
+        self.main_dialog_layout.addLayout(self.button_layout)
 
         self.setMinimumWidth(500)
 
@@ -156,7 +156,7 @@ class PathConfigurationDialog(QDialog):
         group_layout.addLayout(kml_folder_layout)
 
         main_group.setLayout(group_layout)
-        self.layout.addWidget(main_group)
+        self.main_dialog_layout.addWidget(main_group)
 
     def _browse_db_file_central(self):
         path, _ = QFileDialog.getSaveFileName(
@@ -192,8 +192,8 @@ class PathConfigurationDialog(QDialog):
                 reply = QMessageBox.question(self, "Confirm Database Name",
                                              f"The database path '{db_path}' does not have a standard .db/.sqlite extension. "
                                              "Are you sure this is correct?",
-                                             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-                if reply == QMessageBox.No:
+                                             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+                if reply == QMessageBox.StandardButton.No:
                     return
 
             db_parent_dir = os.path.dirname(db_path)
@@ -209,8 +209,8 @@ class PathConfigurationDialog(QDialog):
                 reply = QMessageBox.question(self, "Create Folder?",
                                              f"The KML folder '{kml_folder_path}' does not exist. "
                                              "Would you like to create it?",
-                                             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-                if reply == QMessageBox.Yes:
+                                             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes)
+                if reply == QMessageBox.StandardButton.Yes:
                     try:
                         os.makedirs(kml_folder_path, exist_ok=True)
                         print(f"Created KML folder: {kml_folder_path}")

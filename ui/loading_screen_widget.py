@@ -23,8 +23,8 @@ class LoadingScreenWidget(QWidget):
 
         self.setWindowTitle("Initializing...")
         # Configure to be modal, frameless, and always-on-top
-        self.setWindowModality(Qt.ApplicationModal)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Dialog) # Qt.Dialog helps with modality and appearance
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Dialog) # Qt.Dialog helps with modality and appearance
 
         # Define initial size - this can be adjusted
         self.setFixedSize(600, 450) # Or use dynamic sizing based on content
@@ -161,11 +161,13 @@ class LoadingScreenWidget(QWidget):
             self.status_label.setText("")
 
     def center_on_screen(self):
-        if self.parent():
-            parent_geo = self.parent().geometry()
+        parent_widget = self.parent()
+        if isinstance(parent_widget, QWidget): # Check if parent is a QWidget
+            parent_geo = parent_widget.geometry()
             self.move(parent_geo.x() + (parent_geo.width() - self.width()) // 2,
                       parent_geo.y() + (parent_geo.height() - self.height()) // 2)
         else:
+            # Fallback if no parent or parent is not a QWidget
             screen = QApplication.primaryScreen()
             if screen:
                 screen_geo = screen.geometry()

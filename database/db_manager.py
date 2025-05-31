@@ -36,6 +36,9 @@ class DatabaseManager:
 
     def _migrate_schema(self):
         """Checks for and applies necessary schema migrations."""
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager._migrate_schema: Connection or cursor not available.")
+            return
         try:
             self.cursor.execute("PRAGMA table_info(polygon_data)")
             columns = [row[1] for row in self.cursor.fetchall()]
@@ -60,6 +63,9 @@ class DatabaseManager:
 
     def _create_tables(self):
         """Creates the necessary tables if they don't already exist."""
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager._create_tables: Connection or cursor not available.")
+            return
         try:
             # mWater API Sources Table
             self.cursor.execute('''
@@ -100,6 +106,9 @@ class DatabaseManager:
 
     # --- mWater API Sources Methods ---
     def add_mwater_source(self, title, url):
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.add_mwater_source: Connection or cursor not available.")
+            return None
         try:
             self.cursor.execute("INSERT INTO mwater_sources (title, url) VALUES (?, ?)", (title, url))
             self.conn.commit()
@@ -112,6 +121,9 @@ class DatabaseManager:
             return None
 
     def get_mwater_sources(self):
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.get_mwater_sources: Connection or cursor not available.")
+            return []
         try:
             self.cursor.execute("SELECT id, title, url FROM mwater_sources ORDER BY title")
             return self.cursor.fetchall()
@@ -120,6 +132,9 @@ class DatabaseManager:
             return []
 
     def update_mwater_source(self, source_id, title, url):
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.update_mwater_source: Connection or cursor not available.")
+            return False
         try:
             self.cursor.execute("UPDATE mwater_sources SET title = ?, url = ? WHERE id = ?", (title, url, source_id))
             self.conn.commit()
@@ -132,6 +147,9 @@ class DatabaseManager:
             return False
 
     def delete_mwater_source(self, source_id):
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.delete_mwater_source: Connection or cursor not available.")
+            return False
         try:
             self.cursor.execute("DELETE FROM mwater_sources WHERE id = ?", (source_id,))
             self.conn.commit()
@@ -143,6 +161,9 @@ class DatabaseManager:
     # --- Polygon Data Methods ---
     def check_duplicate_response_code(self, response_code):
         """Checks if a response_code already exists. Returns the record ID if found, else None."""
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.check_duplicate_response_code: Connection or cursor not available.")
+            return None
         try:
             self.cursor.execute("SELECT id FROM polygon_data WHERE response_code = ?", (response_code,))
             result = self.cursor.fetchone()
@@ -156,6 +177,10 @@ class DatabaseManager:
         Adds a new polygon record or updates an existing one based on response_code if overwrite is True.
         data_dict should contain keys matching the polygon_data table columns.
         """
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.add_or_update_polygon_data: Connection or cursor not available.")
+            return None
+
         response_code_val = data_dict.get('response_code')
         if not response_code_val:
             print(f"DB Error: Missing 'response_code' in data_dict for add/update.")
@@ -228,6 +253,9 @@ class DatabaseManager:
 
     def get_all_polygon_data_for_display(self):
         """Fetches specific columns for display in the Treeview."""
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.get_all_polygon_data_for_display: Connection or cursor not available.")
+            return []
         try:
             self.cursor.execute("""
                 SELECT id, status, uuid, farmer_name, village_name, date_added, kml_export_count, last_kml_export_date, evaluation_status
@@ -241,6 +269,9 @@ class DatabaseManager:
 
     def get_polygon_data_by_id(self, record_id):
         """Fetches a full polygon record by its database ID."""
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.get_polygon_data_by_id: Connection or cursor not available.")
+            return None
         try:
             self.cursor.execute("SELECT * FROM polygon_data WHERE id = ?", (record_id,))
             row = self.cursor.fetchone()
@@ -254,6 +285,9 @@ class DatabaseManager:
 
     def update_kml_export_status(self, record_id):
         """Updates the KML export count and date for a given record ID."""
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.update_kml_export_status: Connection or cursor not available.")
+            return False
         try:
             current_time_iso = datetime.datetime.now().isoformat()
             self.cursor.execute("""
@@ -270,6 +304,9 @@ class DatabaseManager:
             return False
 
     def delete_polygon_data(self, record_id_list):
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.delete_polygon_data: Connection or cursor not available.")
+            return False
         if not isinstance(record_id_list, list): record_id_list = [record_id_list]
         if not record_id_list: return False # No IDs to delete
         try:
@@ -282,6 +319,9 @@ class DatabaseManager:
             return False
 
     def delete_all_polygon_data(self):
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.delete_all_polygon_data: Connection or cursor not available.")
+            return False
         try:
             self.cursor.execute("DELETE FROM polygon_data")
             # Optionally, reset the autoincrement sequence if desired (usually not necessary)
@@ -294,6 +334,9 @@ class DatabaseManager:
 
     def update_evaluation_status(self, record_id, status):
         """Updates the evaluation_status for a given record ID."""
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.update_evaluation_status: Connection or cursor not available.")
+            return False
         try:
             current_time_iso = datetime.datetime.now().isoformat()
             self.cursor.execute("""
