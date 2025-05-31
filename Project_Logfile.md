@@ -127,3 +127,86 @@ This entry provides a detailed look at the implementation of the App Launcher, i
 *   The debugging process, especially addressing the Qt threading model for GUI objects, was critical to achieving a stable and correct implementation.
 *   The system is now more robust and adheres to Qt's best practices for multi-threaded GUI applications.
 ---
+---
+**Update Date:** 2024-05-31
+**Version:** Beta.v5.0.x.Dev-ADas (Reflects ongoing V5 development)
+**Author:** AI Assistant (Jules)
+**Task Reference:** Task 3: CredentialManager & First Run Setup (from CA4 Part 1)
+
+**Objective:**
+Establish the application's identity and operational mode. Create a system for unique installation IDs and nicknames, allow user selection of "Central App" or "Connected App" mode, and configure necessary data paths accordingly. This is a one-time setup on first launch, with settings persisted in a local `device_config.db`.
+
+**Core Components Implemented:**
+
+1.  **`core/credential_manager.py` (New File):**
+    *   Manages `device_config.db`, a local SQLite database for storing device-specific settings.
+    *   Uses the `platformdirs` library to determine a standard, cross-platform user-specific data directory for `device_config.db` (e.g., under `DilasaKMLTool_V5_Config`).
+    *   **First Run Detection:** Determines if the application is running for the first time by checking for the existence of `device_config.db`.
+    *   **Device Identity:** Generates and stores a unique 8-digit alphanumeric device UUID. Manages a user-provided device nickname.
+    *   **Application Mode:** Stores whether the app is configured as "Central App" or "Connected App".
+    *   **Data Paths:** Stores paths for the main database file and KML files folder, as configured by the user.
+    *   Provides getter methods for all settings and a method `get_config_file_path()` to get the full path to `device_config.db`.
+
+2.  **`ui/first_run_setup_dialogs.py` (New File):**
+    *   Defines a sequence of `QDialog` subclasses for the first-run setup process:
+        *   `NicknameDialog`: Prompts the user for a device nickname.
+        *   `ModeSelectionDialog`: Allows the user to select "Central App" or "Connected App" mode.
+        *   `PathConfigurationDialog`: Dynamically adjusts based on the selected mode.
+            *   For "Central App": Uses `QFileDialog` for selecting local paths for a new/existing database and KML folder.
+            *   For "Connected App": Provides fields for entering network/shared paths to an existing Central App's data.
+    *   Includes input validation for the dialogs. Pylance suggested fixes for QMessageBox buttons and layout attribute names were also applied.
+
+3.  **`database/db_manager.py` (Modified):**
+    *   Removed hardcoded constants (`DB_FOLDER_NAME_CONST`, `DB_FILE_NAME_CONST`) and associated logic for determining the main database path via AppData.
+    *   The `DatabaseManager.__init__` now expects the full `db_path` to be provided externally.
+    *   The actual database connection is deferred to an explicit `connect()` method, called by the launcher on the main UI thread, to resolve SQLite threading issues.
+    *   Added None-checks for `self.conn` and `self.cursor` in data access methods for robustness, addressing Pylance warnings.
+
+
+**Debugging Journey & Key Fixes/Enhancements:**
+
+The integration of `CredentialManager` and the deferred database path logic surfaced issues in the application's startup sequence, which required significant debugging:
+
+1.  **Initial Challenge:** The application failed to start correctly after Task 3's initial components were integrated. The loading screen would either freeze or report errors related to `CredentialManager` not finding configured paths (because `device_config.db` was incomplete or missing, and the error handling path itself had a bug).
+
+2.  **`TypeError: native Qt signal instance 'log_message' is not callable`:**
+    *   **Diagnosis:** This critical error crashed the initialization thread. User-provided tracebacks pinpointed that a call to `self.log_message` in `launcher_app.py`'s `InitializationThread` (specifically when logging a summary of `perform_non_gui_initialization` failure) was missing `.emit()`.
+    *   **Fix:** The specific call `self.log_message(...)` was corrected to `self.log_message.emit(...)` in `launcher_app.py`. The exception handling in the thread was also made more robust.
+
+3.  **SQLite Threading Error (`SQLite objects created in a thread can only be used in that same thread`):**
+    *   **Diagnosis:** After fixing the `TypeError`, `MainWindow` would load but immediately fail to fetch data (e.g., API sources, polygon data). This was because the `DatabaseManager`'s connection was established in the background `InitializationThread` but then used by `MainWindow` and its models in the main UI thread.
+    *   **Fix:**
+        *   `DatabaseManager.__init__` was modified to only store the `db_path` and not connect.
+        *   A new `DatabaseManager.connect()` method was created to perform the actual connection, table creation, and schema migration.
+        *   `main_app.perform_non_gui_initialization()` now only instantiates `DatabaseManager` (unconnected).
+        *   `launcher_app.py`'s `handle_initialization_finished` (on the main thread) now calls `db_manager.connect()` *before* `MainWindow` is created.
+
+4.  **Enhancement: Handling Corrupted/Incomplete Configuration:**
+    *   To improve robustness, if `device_config.db` exists (not a first run) but is missing critical settings (like `main_db_path`):
+        *   This state is detected by `CredentialManager` and reported by `main_app.py` with a specific status (`CORRUPT_CONFIG`) and the path to `device_config.db`.
+        *   `launcher_app.py` now catches this status, informs the user on the loading screen about the issue (including config file location), and automatically triggers the first-run setup dialogs (`_execute_first_run_setup_flow`) to allow the user to reconfigure.
+        *   After setup is completed via these dialogs, the application advises a restart and then automatically quits to ensure a clean start with the new configuration.
+
+5.  **Pylance Static Analysis Issues Addressed:**
+    *   During the debugging and implementation process, numerous Pylance-reported issues were fixed across several files:
+        *   `core/credential_manager.py`: Fixed unreachable `except OSError` in test code.
+        *   `core/utils.py`: Refactored `sys._MEIPASS` access using `getattr`.
+        *   `ui/loading_screen_widget.py`: Corrected Qt Enum usage for window modality/flags and ensured safer parent geometry access. Loading screen UI was also tweaked (removed always-on-top, made movable by restoring frame, attempted rounded corners). Theming aspects (hardcoded colors) were adjusted for baseline observation.
+        *   `ui/main_window.py`: Removed hardcoded header background color.
+        *   The Pylance fixes for `ui/first_run_setup_dialogs.py` and `database/db_manager.py` were mentioned above in relation to those components.
+
+**Alignment with Requirements & Current Status:**
+
+*   The implemented `CredentialManager` and first-run setup dialogs fulfill the core requirements of Task 3:
+    *   Unique device ID and nickname are handled.
+    *   User can select "Central App" or "Connected App" mode.
+    *   Data paths are configured based on the selected mode.
+    *   All settings are persisted in `device_config.db` in a platform-appropriate user data directory.
+    *   `DatabaseManager` is no longer using hardcoded paths and its connection is thread-safe.
+*   The debugging journey has made the application startup significantly more robust.
+*   The system now gracefully handles scenarios where `device_config.db` is present but incomplete by guiding the user through a reconfiguration process.
+*   The application successfully launches and can load `MainWindow` if the configuration is valid.
+
+**Further Considerations (Not part of Task 3 but related):**
+*   The actual invocation of the first-run setup dialogs for a *true first run* (i.e., `device_config.db` does not exist at all) is primarily the responsibility of `launcher_app.py` logic that should ideally check `CredentialManager.is_first_run()` very early in the startup sequence. The current "corrupt config" flow reuses the dialogs; ensuring the "true first run" path is equally robust or integrated into this new setup trigger in `handle_initialization_finished` might be beneficial.
+---
