@@ -305,14 +305,55 @@ class PolygonFilterProxyModel(QSortFilterProxyModel):
             if self.filter_uuid_text not in uuid_val: return False
         
         # Date Added is at index 5 - remains correct
-        date_added_str = record[5]
-        if date_added_str:
-            try:
-                row_date_added = QDate.fromString(date_added_str.split(" ")[0], "yyyy-MM-dd")
-                if row_date_added.isValid():
-                    if self.filter_after_date_added and row_date_added < self.filter_after_date_added: return False
-                    if self.filter_before_date_added and row_date_added > self.filter_before_date_added: return False
-            except Exception: pass 
+        date_added_str_from_record = record[5]
+
+        # Date filter evaluations
+        passes_after_date_filter = True
+        passes_before_date_filter = True
+
+        if self.filter_after_date_added: # Only try to parse and compare if a filter date is set
+            if date_added_str_from_record and isinstance(date_added_str_from_record, str):
+                try:
+                    date_part_str = date_added_str_from_record.split(" ")[0]
+                    row_qdate = QDate.fromString(date_part_str, "yyyy-MM-dd")
+                    if row_qdate.isValid():
+                        if row_qdate < self.filter_after_date_added:
+                            passes_after_date_filter = False
+                    else:
+                        # Date string from record is present but not parsable to a valid QDate
+                        # print(f"DEBUG: filterAcceptsRow - Could not parse 'after' date_added_str: {date_added_str_from_record}")
+                        passes_after_date_filter = False # Treat unparseable as not matching
+                except Exception as e:
+                    # print(f"DEBUG: filterAcceptsRow - Exception parsing 'after' date_added_str '{date_added_str_from_record}': {e}")
+                    passes_after_date_filter = False # Treat error in parsing as not matching
+            else:
+                # date_added_str_from_record is None or not a string, so it cannot satisfy the filter
+                passes_after_date_filter = False
+
+        if not passes_after_date_filter: # Early exit if "after" filter fails
+            return False
+
+        if self.filter_before_date_added: # Only try to parse and compare if a filter date is set
+            if date_added_str_from_record and isinstance(date_added_str_from_record, str):
+                try:
+                    date_part_str = date_added_str_from_record.split(" ")[0]
+                    row_qdate = QDate.fromString(date_part_str, "yyyy-MM-dd")
+                    if row_qdate.isValid():
+                        if row_qdate > self.filter_before_date_added:
+                            passes_before_date_filter = False
+                    else:
+                        # Date string from record is present but not parsable to a valid QDate
+                        # print(f"DEBUG: filterAcceptsRow - Could not parse 'before' date_added_str: {date_added_str_from_record}")
+                        passes_before_date_filter = False # Treat unparseable as not matching
+                except Exception as e:
+                    # print(f"DEBUG: filterAcceptsRow - Exception parsing 'before' date_added_str '{date_added_str_from_record}': {e}")
+                    passes_before_date_filter = False # Treat error in parsing as not matching
+            else:
+                # date_added_str_from_record is None or not a string, so it cannot satisfy the filter
+                passes_before_date_filter = False
+
+        if not passes_before_date_filter: # Early exit if "before" filter fails
+            return False
 
         # Export Count (kml_export_count) is at index 6 - remains correct
         export_count = record[6] if record[6] is not None else 0
@@ -778,7 +819,7 @@ class MainWindow(QMainWindow):
         if selected_proxy_indexes:
             source_model_index = self.filter_proxy_model.mapToSource(selected_proxy_indexes[0])
             if source_model_index.isValid():
-                db_id_item = self.source_model.data(source_model_index.siblingAtColumn(self.source_model.ID_COL))
+                db_id_item = self.source_model.data(source_model_index.siblingAtColumn(self.source_model.DB_ID_COL))
                 try:
                     db_id = int(db_id_item)
                     polygon_record = self.db_manager.get_polygon_data_by_id(db_id)
