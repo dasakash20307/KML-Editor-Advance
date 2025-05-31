@@ -458,7 +458,7 @@ class MainWindow(QMainWindow):
         data_menu.addAction(self.import_csv_action)
         
         self.fetch_api_action = QAction(QIcon.fromTheme("network-transmit-receive"), "&Fetch from API...", self) 
-        self.fetch_api_action.triggered.connect(self.handle_fetch_from_api)
+        self.fetch_api_action.triggered.connect(lambda: self.handle_fetch_from_api()) # Connect without args for menu/toolbar
         data_menu.addAction(self.fetch_api_action)
 
         self.manage_api_action = QAction(QIcon.fromTheme("preferences-system"),"Manage A&PI Sources...", self)
@@ -512,7 +512,11 @@ class MainWindow(QMainWindow):
         self.api_source_combo_toolbar.setMinimumWidth(150)
         self.refresh_api_source_dropdown() 
         self.toolbar.addWidget(self.api_source_combo_toolbar)
-        self.toolbar.addAction(self.fetch_api_action)
+
+        # Create a new action for toolbar to call handle_fetch_from_api without arguments
+        fetch_api_toolbar_action = QAction(QIcon.fromTheme("network-transmit-receive"), "&Fetch from Selected API", self)
+        fetch_api_toolbar_action.triggered.connect(lambda: self.handle_fetch_from_api()) # Call without args
+        self.toolbar.addAction(fetch_api_toolbar_action)
         
         manage_api_toolbar_action = QAction(QIcon.fromTheme("preferences-system"), "Manage API Sources", self)
         manage_api_toolbar_action.triggered.connect(self.handle_manage_api_sources)
@@ -773,19 +777,50 @@ class MainWindow(QMainWindow):
                 self._process_imported_data(list(reader), f"CSV '{os.path.basename(filepath)}'") 
         except Exception as e: self.log_message(f"Error reading CSV '{filepath}': {e}", "error"); QMessageBox.critical(self, "CSV Error", f"Could not read CSV file:\n{e}")
 
-    def handle_fetch_from_api(self):
-        selected_api_title = self.api_source_combo_toolbar.currentText() 
-        selected_api_url = self.api_source_combo_toolbar.currentData() 
-        if not selected_api_url: QMessageBox.information(self, "API Fetch", "No API source selected or URL is missing."); return
-        self.log_message(f"Fetching from API: {selected_api_title}...", "info") 
+    def handle_fetch_from_api(self, url=None, title=None):
+        selected_api_url = None
+        selected_api_title = None
+
+        if url and title:
+            selected_api_url = url
+            selected_api_title = title
+            self.log_message(f"Fetching directly from API (via dialog): {selected_api_title}...", "info")
+        else:
+            selected_api_title = self.api_source_combo_toolbar.currentText()
+            selected_api_url = self.api_source_combo_toolbar.currentData()
+            if not selected_api_url:
+                QMessageBox.information(self, "API Fetch", "No API source selected from dropdown or URL is missing.")
+                return
+            self.log_message(f"Fetching from selected API (dropdown): {selected_api_title}...", "info")
+
         rows_from_api, error_msg = fetch_data_from_mwater_api(selected_api_url, selected_api_title)
-        if error_msg: self.log_message(f"API Fetch Error ({selected_api_title}): {error_msg}", "error"); QMessageBox.warning(self, "API Fetch Error", error_msg); return
-        if rows_from_api is not None: self._process_imported_data(rows_from_api, selected_api_title) 
-        else: self.log_message(f"No data returned or error for {selected_api_title}.", "info")
+        if error_msg:
+            self.log_message(f"API Fetch Error ({selected_api_title}): {error_msg}", "error")
+            QMessageBox.warning(self, "API Fetch Error", error_msg)
+            return
+
+        if rows_from_api is not None:
+            self._process_imported_data(rows_from_api, selected_api_title)
+        else:
+            self.log_message(f"No data returned or error for {selected_api_title}.", "info")
 
     def _process_imported_data(self, row_list, source_description):
         if not row_list:
             self.log_message(f"No data rows found in {source_description}.", "info")
+            return
+
+        if not self.credential_manager:
+            self.log_message("Credential Manager not available. Cannot process API data for KML generation.", "error")
+            QMessageBox.critical(self, "Error", "Credential Manager not available.")
+            return
+
+        kml_root_path = self.credential_manager.get_kml_folder_path()
+        device_id = self.credential_manager.get_device_id()
+        device_nickname = self.credential_manager.get_device_nickname()
+
+        if not kml_root_path or not device_id:
+            self.log_message("KML root path or device ID not set in credentials. Cannot process data.", "error")
+            QMessageBox.warning(self, "Configuration Error", "KML root path or device ID not set. Please configure them via settings/credentials manager.")
             return
 
         progress_dialog = APIImportProgressDialog(self)
@@ -798,10 +833,14 @@ class MainWindow(QMainWindow):
         
         for i, original_row_dict in enumerate(row_list):
             processed_in_loop += 1
+            current_errors = [] # To accumulate errors for this record
+
             rc_from_row = ""
+            # Ensure CSV_HEADERS["response_code"] is robust for potential BOM characters
+            response_code_header_key = CSV_HEADERS["response_code"]
             for k, v in original_row_dict.items():
-                if k.lstrip('\ufeff') == CSV_HEADERS["response_code"]:
-                    rc_from_row = v.strip()
+                if k.lstrip('\ufeff') == response_code_header_key:
+                    rc_from_row = v.strip() if v else ""
                     break
             
             if not rc_from_row:
@@ -811,8 +850,7 @@ class MainWindow(QMainWindow):
                 if progress_dialog.was_cancelled(): break
                 continue
 
-            is_dup_id = self.db_manager.check_duplicate_response_code(rc_from_row)
-            if is_dup_id:
+            if self.db_manager.check_duplicate_response_code(rc_from_row):
                 self.log_message(f"Skipped duplicate Response Code '{rc_from_row}'.", "info")
                 skipped_in_loop += 1
                 progress_dialog.update_progress(processed_in_loop, skipped_in_loop, new_added_in_loop)
@@ -820,26 +858,83 @@ class MainWindow(QMainWindow):
                 continue
 
             processed_flat = process_csv_row_data(original_row_dict)
-            cur_uuid, cur_rc = processed_flat.get("uuid"), processed_flat.get("response_code")
 
-            if not cur_uuid or not cur_rc:
-                error_detail = processed_flat.get('error_messages', 'Unknown processing error')
-                self.log_message(f"Data processing error for original RC '{rc_from_row}'. Details: {error_detail}", "error")
+            # Ensure uuid is present, as it's crucial for kml_file_name
+            if not processed_flat.get("uuid"):
+                self.log_message(f"Data processing error for RC '{rc_from_row}': UUID missing after processing.", "error")
+                # This is a critical error, so we skip this record for DB and KML.
                 skipped_in_loop += 1
                 progress_dialog.update_progress(processed_in_loop, skipped_in_loop, new_added_in_loop)
                 if progress_dialog.was_cancelled(): break
                 continue
-            
-            processed_flat["last_modified"] = datetime.datetime.now().isoformat()
-            # Always attempt to add, overwrite is False as we skip duplicates now
-            db_result_id = self.db_manager.add_or_update_polygon_data(processed_flat, overwrite=False)
+
+            if processed_flat.get('error_messages'):
+                current_errors.append(f"Data processing issues: {processed_flat.get('error_messages')}")
+
+            kml_file_name = f"{processed_flat['uuid']}.kml"
+            kml_content_ok = False
+            kml_saved_successfully = False
+
+            # Attempt KML generation only if data processing suggests it's valid_for_kml
+            # process_csv_row_data now adds 'status' field.
+            if processed_flat.get('status') == 'valid_for_kml':
+                kml_doc = simplekml.Kml()
+                try:
+                    kml_content_ok = add_polygon_to_kml_object(kml_doc, processed_flat)
+                    if not kml_content_ok:
+                        current_errors.append("Failed to generate KML content (add_polygon_to_kml_object failed).")
+                except Exception as e_kml_gen:
+                    kml_content_ok = False
+                    current_errors.append(f"Exception during KML content generation: {e_kml_gen}")
+                    self.log_message(f"KML Generation Exception for UUID {processed_flat['uuid']}: {e_kml_gen}", "error")
+
+                if kml_content_ok:
+                    full_kml_path = os.path.join(kml_root_path, kml_file_name)
+                    try:
+                        kml_doc.save(full_kml_path)
+                        kml_saved_successfully = True
+                        self.log_message(f"KML file saved: {full_kml_path}", "info")
+                    except Exception as e_kml_save:
+                        kml_saved_successfully = False
+                        error_msg = f"Failed to save KML file '{full_kml_path}': {e_kml_save}"
+                        current_errors.append(error_msg)
+                        self.log_message(error_msg, "error")
+            else: # Not valid_for_kml based on process_csv_row_data
+                msg = f"Skipping KML generation for RC '{rc_from_row}' (UUID {processed_flat['uuid']}) as data status is '{processed_flat.get('status')}'."
+                current_errors.append(msg)
+                self.log_message(msg, "info")
+
+
+            # Prepare data for database
+            db_data = processed_flat.copy()
+            db_data['kml_file_name'] = kml_file_name
+            db_data['kml_file_status'] = "Created" if kml_saved_successfully else "Errored"
+            db_data['device_code'] = device_id
+            db_data['editor_device_id'] = device_id # Current device is creator
+            db_data['editor_device_nickname'] = device_nickname
+
+            # Remove old 'status' field if it exists, replaced by kml_file_status
+            db_data.pop('status', None)
+
+            # Consolidate error messages
+            existing_errors = db_data.get('error_messages', "")
+            if isinstance(existing_errors, list): # if process_csv_row_data put a list
+                existing_errors.extend(current_errors)
+                db_data['error_messages'] = "\n".join(filter(None,existing_errors))
+            else: # if it's a string or None
+                all_errors = "\n".join(filter(None, [existing_errors] + current_errors))
+                db_data['error_messages'] = all_errors if all_errors else None
+
+            db_data["last_modified"] = datetime.datetime.now().isoformat()
+
+            db_result_id = self.db_manager.add_or_update_polygon_data(db_data, overwrite=False)
 
             if db_result_id is not None:
-                if not is_dup_id: # It was a new record if is_dup_id was None/False before DB call
-                    new_added_in_loop += 1
+                new_added_in_loop += 1
+                self.log_message(f"Record for RC '{rc_from_row}' (UUID {db_data['uuid']}) saved to DB with ID {db_result_id}. KML status: {db_data['kml_file_status']}.", "info")
             else:
-                self.log_message(f"Failed to save RC '{cur_rc}' to DB.", "error")
-                skipped_in_loop += 1 # Count as skipped if DB operation failed
+                self.log_message(f"Failed to save RC '{rc_from_row}' (UUID {db_data['uuid']}) to DB.", "error")
+                skipped_in_loop += 1
 
             progress_dialog.update_progress(processed_in_loop, skipped_in_loop, new_added_in_loop)
             if progress_dialog.was_cancelled():
@@ -1000,19 +1095,34 @@ class MainWindow(QMainWindow):
     def handle_show_ge_instructions(self):
         self._show_ge_instructions_popup()
 
-    def log_message(self, message, level="info"): 
-        if hasattr(self, 'log_text_edit_qt_actual'): 
-            color_map = {"info": INFO_COLOR_MW, "error": ERROR_COLOR_MW, "success": SUCCESS_COLOR_MW}
-            self.log_text_edit_qt_actual.setTextColor(QColor(color_map.get(level, FG_COLOR_MW)))
-            self.log_text_edit_qt_actual.append(f"[{level.upper()}] {message}")
-            self.log_text_edit_qt_actual.ensureCursorVisible() 
-        else: print(f"LOG [{level.upper()}]: {message}")
-        if hasattr(self, '_main_status_bar'): self._main_status_bar.showMessage(message, 7000 if level=="info" else 10000) # Corrected: Use the renamed variable
+    def log_message(self, message, level="info"):
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_entry = f"[{timestamp}][{level.upper()}] {message}"
+
+        if hasattr(self, 'log_text_edit_qt_actual'):
+            # Define colors for different log levels (ensure these are valid QColor names or hex codes)
+            color_map = {"INFO": "#0078D7", "ERROR": "#D32F2F", "SUCCESS": "#388E3C", "WARNING": "#FFA500"} # Example colors
+
+            # Use a default color if level is not in map
+            text_color = QColor(color_map.get(level.upper(), "#333333")) # Default to FG_COLOR_MW or similar
+
+            self.log_text_edit_qt_actual.setTextColor(text_color)
+            self.log_text_edit_qt_actual.append(log_entry) # Use the full log_entry with timestamp
+            self.log_text_edit_qt_actual.ensureCursorVisible()
+        else:
+            print(log_entry) # Print the full log_entry to console if UI element isn't ready
+
+        if hasattr(self, '_main_status_bar'):
+            # Show only the message part in status bar, not the full log entry
+            self._main_status_bar.showMessage(message, 7000 if level == "info" else 10000)
             
     def load_data_into_table(self): 
         try:
             polygon_records = self.db_manager.get_all_polygon_data_for_display()
-            self.source_model.update_data(polygon_records) 
+            self.source_model.update_data(polygon_records)
+            # After updating data, also update the filter proxy model if it exists
+            if hasattr(self, 'filter_proxy_model'):
+                self.filter_proxy_model.invalidate() # This ensures filters are reapplied if active
         except Exception as e:
             self.log_message(f"Error loading data into table: {e}", "error")
             QMessageBox.warning(self, "Load Data Error", f"Could not load polygon records: {e}")
