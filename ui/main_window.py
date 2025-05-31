@@ -874,7 +874,7 @@ class MainWindow(QMainWindow):
             kml_file_name = f"{processed_flat['uuid']}.kml"
             kml_content_ok = False
             kml_saved_successfully = False
-            
+
             # Attempt KML generation only if data processing suggests it's valid_for_kml
             # process_csv_row_data now adds 'status' field.
             if processed_flat.get('status') == 'valid_for_kml':
@@ -1115,15 +1115,6 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_main_status_bar'):
             # Show only the message part in status bar, not the full log entry
             self._main_status_bar.showMessage(message, 7000 if level == "info" else 10000)
-
-    def load_data_into_table(self):
-        try:
-            polygon_records = self.db_manager.get_all_polygon_data_for_display()
-            self.log_text_edit_qt_actual.setTextColor(QColor(color_map.get(level, FG_COLOR_MW)))
-            self.log_text_edit_qt_actual.append(f"[{level.upper()}] {message}")
-            self.log_text_edit_qt_actual.ensureCursorVisible() 
-        else: print(f"LOG [{level.upper()}]: {message}")
-        if hasattr(self, '_main_status_bar'): self._main_status_bar.showMessage(message, 7000 if level=="info" else 10000) # Corrected: Use the renamed variable
             
     def load_data_into_table(self): 
         try:
