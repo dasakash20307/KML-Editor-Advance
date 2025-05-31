@@ -102,7 +102,7 @@ class DatabaseManager:
                 )
             ''')
 
-            # Polygon Data Table - Updated for v4 with KML export tracking
+            # Polygon Data Table - Updated for v5
             self.cursor.execute('''
                 CREATE TABLE IF NOT EXISTS polygon_data (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -117,13 +117,19 @@ class DatabaseManager:
                     p2_utm_str TEXT, p2_altitude REAL, p2_easting REAL, p2_northing REAL, p2_zone_num INTEGER, p2_zone_letter TEXT, p2_substituted BOOLEAN DEFAULT 0,
                     p3_utm_str TEXT, p3_altitude REAL, p3_easting REAL, p3_northing REAL, p3_zone_num INTEGER, p3_zone_letter TEXT, p3_substituted BOOLEAN DEFAULT 0,
                     p4_utm_str TEXT, p4_altitude REAL, p4_easting REAL, p4_northing REAL, p4_zone_num INTEGER, p4_zone_letter TEXT, p4_substituted BOOLEAN DEFAULT 0,
-                    status TEXT NOT NULL, -- e.g., 'valid_for_kml', 'error_missing_points', 'error_parsing'
-                    error_messages TEXT,  -- Store as newline-separated string or JSON string
+                    error_messages TEXT,
                     kml_export_count INTEGER DEFAULT 0,
                     last_kml_export_date TIMESTAMP,
                     date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    evaluation_status TEXT DEFAULT 'Not Evaluated Yet'
+                    evaluation_status TEXT DEFAULT 'Not Evaluated Yet',
+                    device_code TEXT,
+                    kml_file_name TEXT NOT NULL,
+                    kml_file_status TEXT, -- E.g., "Created", "Errored", "Edited", "File Deleted", "Pending Deletion"
+                    edit_count INTEGER DEFAULT 0,
+                    last_edit_date TIMESTAMP,
+                    editor_device_id TEXT,
+                    editor_device_nickname TEXT
                 )
             ''')
             self.conn.commit()
@@ -284,10 +290,14 @@ class DatabaseManager:
             return []
         try:
             self.cursor.execute("""
-                SELECT id, status, uuid, farmer_name, village_name, date_added, kml_export_count, last_kml_export_date, evaluation_status
+                SELECT id, uuid, response_code, farmer_name, village_name, date_added,
+                       kml_export_count, last_kml_export_date, evaluation_status,
+                       device_code, kml_file_name, kml_file_status,
+                       edit_count, last_edit_date, editor_device_id, editor_device_nickname,
+                       last_modified
                 FROM polygon_data 
                 ORDER BY date_added DESC
-            """) 
+            """)
             return self.cursor.fetchall()
         except sqlite3.Error as e:
             print(f"DB: Error fetching polygon data for display: {e}")
@@ -416,13 +426,17 @@ if __name__ == '__main__':
     print("\n--- Testing Polygon Data ---")
     sample_poly_data1 = {
         "uuid": "uuid-test-001", "response_code": "rc-test-001", "farmer_name": "Test Farmer 1",
-        "village_name": "Test Village", "status": "valid_for_kml", "evaluation_status": "Eligible", # Added for testing
+        "village_name": "Test Village",
+        "kml_file_name": "test_farmer_1.kml", "kml_file_status": "Created",
+        "evaluation_status": "Eligible", "device_code": "dev001",
         "p1_utm_str": "43Q 123 456", "p1_altitude": 100.0, "p1_easting": 123.0, "p1_northing": 456.0, "p1_zone_num": 43, "p1_zone_letter": "Q",
         # ... (add other point data if needed for full test)
     }
     sample_poly_data2 = {
         "uuid": "uuid-test-002", "response_code": "rc-test-002", "farmer_name": "Test Farmer 2",
-        "village_name": "Another Village", "status": "error_missing_points", "error_messages": "Point 3 missing", "evaluation_status": "Not Evaluated Yet",
+        "village_name": "Another Village",
+        "kml_file_name": "test_farmer_2.kml", "kml_file_status": "Errored",
+        "error_messages": "Point 3 missing", "evaluation_status": "Not Evaluated Yet", "device_code": "dev002",
         # ...
     }
 
