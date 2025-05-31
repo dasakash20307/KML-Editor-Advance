@@ -24,10 +24,11 @@ class LoadingScreenWidget(QWidget):
         self.setWindowTitle("Initializing...")
         # Configure to be modal, frameless, and always-on-top
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Dialog) # Qt.Dialog helps with modality and appearance
+        self.setWindowFlags(Qt.WindowType.Dialog) # Removed Frameless and StaysOnTop
 
         # Define initial size - this can be adjusted
         self.setFixedSize(600, 450) # Or use dynamic sizing based on content
+        self.setAttribute(Qt.WA_StyledBackground, True) # For QSS border-radius
 
         # Main layout
         main_layout = QVBoxLayout(self)
@@ -103,11 +104,11 @@ class LoadingScreenWidget(QWidget):
                 /* font-family: "Segoe UI"; */ /* Already set by individual labels */
             }
             LoadingScreenWidget {
-                background-color: #FFFFFF; /* White background */
                 border: 1px solid #CCCCCC; /* Subtle border */
+                border-radius: 10px; /* Added for rounded corners */
             }
             QLabel {
-                color: #333333; /* Dark gray text */
+                /* color will now be inherited or set by theme */
             }
             QProgressBar {
                 min-height: 20px;

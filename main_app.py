@@ -41,16 +41,11 @@ def perform_non_gui_initialization():
                 "credential_manager": credential_manager # Pass credential_manager for re-setup
             }
 
-        print(f"MainApp: Initializing DatabaseManager with path: {db_path}")
+        print(f"MainApp: Initializing DatabaseManager instance with path: {db_path}") # Message changed slightly
         db_manager = DatabaseManager(db_path=db_path)
-        # Perform a simple check to see if DB connection was successful (e.g., by checking if cursor is created)
-        if db_manager.conn is None or db_manager.cursor is None: # Basic check
-             error_msg = f"Failed to connect to database at {db_path}."
-             print(f"MainApp ERROR: {error_msg}")
-             return {"success": False, "error": error_msg, "db_manager": None, "credential_manager": credential_manager}
+        # The db_manager is now instantiated but not yet connected. Connection will be handled by launcher.
 
-
-        print("MainApp: Non-GUI initialization successful (CredentialManager and DBManager initialized).")
+        print("MainApp: Non-GUI initialization successful (CredentialManager and DBManager instance created).") # Message changed slightly
         return {"success": True, "db_manager": db_manager, "credential_manager": credential_manager, "error": None}
 
     except Exception as e:

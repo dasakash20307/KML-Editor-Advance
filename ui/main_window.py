@@ -417,7 +417,7 @@ class MainWindow(QMainWindow):
     def _create_header(self):
         header_widget = QWidget()
         header_widget.setFixedHeight(60) 
-        header_widget.setStyleSheet("background-color: #F0F0F0; border-bottom: 1px solid #D0D0D0;") 
+        header_widget.setStyleSheet("border-bottom: 1px solid #D0D0D0;")
         
         header_layout = QHBoxLayout(header_widget)
         header_layout.setContentsMargins(5, 5, 5, 5) 

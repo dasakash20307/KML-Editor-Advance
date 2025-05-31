@@ -29,10 +29,36 @@ class DatabaseManager:
 
         self.conn = None
         self.cursor = None
-        self._connect()
-        self._create_tables()
-        self._migrate_schema() # Add migration step
         # print(f"Database initialized at: {self.db_path}") # For debugging
+
+    def connect(self) -> bool:
+        """
+        Establishes the database connection and sets up tables.
+        This must be called on the thread that will be using the database.
+        Returns True on success, False on failure.
+        """
+        try:
+            self._connect() # This will raise an exception on failure
+            # If _connect succeeded, conn and cursor should be set.
+            # The internal methods _create_tables and _migrate_schema already have
+            # checks for self.conn and self.cursor, but it's good practice.
+            if not self.conn or not self.cursor:
+                print(f"DB Error in DatabaseManager.connect: _connect did not establish connection/cursor.")
+                return False
+            self._create_tables()
+            self._migrate_schema()
+            print(f"Database connection successful and tables/schema are ready at: {self.db_path}")
+            return True
+        except sqlite3.Error as e: # Catching sqlite3.Error specifically from _connect or others
+            print(f"DatabaseManager.connect: Failed to connect or setup database: {e}")
+            self.conn = None # Ensure conn and cursor are None if connect fails
+            self.cursor = None
+            return False
+        except Exception as e: # Catch any other unexpected error during connect sequence
+            print(f"DatabaseManager.connect: An unexpected error occurred: {e}")
+            self.conn = None
+            self.cursor = None
+            return False
 
     def _migrate_schema(self):
         """Checks for and applies necessary schema migrations."""
@@ -364,10 +390,14 @@ if __name__ == '__main__':
     # Create a temporary DB for testing or use the default path
     # For isolated testing, you might want to pass a specific test DB name
     db_manager = DatabaseManager(db_path="temp_v5_test.db")
-    print(f"Using database at: {db_manager.db_path}")
-
-    # Test mWater sources
-    print("\n--- Testing mWater Sources ---")
+    print(f"Attempting to connect to database at: {db_manager.db_path}")
+    if not db_manager.connect():
+        print("Failed to connect to the database. Aborting tests.")
+        # Optionally exit: import sys; sys.exit(1)
+    else:
+        print("Database connection successful for testing.")
+        # Test mWater sources
+        print("\n--- Testing mWater Sources ---")
     source_id1 = db_manager.add_mwater_source("Test Source 1", "http://example.com/api1")
     source_id2 = db_manager.add_mwater_source("Test Source 2", "http://example.com/api2")
     print(f"Added source 1 ID: {source_id1}")
@@ -436,7 +466,7 @@ if __name__ == '__main__':
     # print("\nDeleted all polygon data.")
     # print(f"Polygon data after delete all: {db_manager.get_all_polygon_data_for_display()}")
 
-    db_manager.close()
+        db_manager.close() # Ensure close is called if connect was successful
     print("\nDatabaseManager tests finished.")
 
     # To clean up the test database file (if created in current dir):

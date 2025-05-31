@@ -130,7 +130,8 @@ def launch():
     # --- Early settings (before QApplication instantiation) ---
     if platform.system() == "Windows":
         try:
-            ctypes.windll.uxtheme.SetPreferredAppMode(2) # 2 = Dark
+            # ctypes.windll.uxtheme.SetPreferredAppMode(2) # 2 = Dark # Commented out for Phase 1 Theming
+            pass # Keep the try-except structure in case it's re-enabled later
         except Exception as e:
             print(f"Warning (launcher_app): Could not set Windows dark mode: {e}")
 
@@ -142,7 +143,7 @@ def launch():
 
     # --- Post-QApplication instantiation settings ---
     app.setStyle('Fusion')
-    qtmodern.styles.dark(app) # Apply qtmodern dark style first
+    # qtmodern.styles.dark(app) # Apply qtmodern dark style first # Commented out for Phase 1 Theming
 
     # Load global QSS stylesheet
     try:
@@ -262,14 +263,37 @@ def launch():
             return # Keep loading screen open
 
         # Proceed with normal MainWindow creation if everything was successful
+        # (Inside handle_initialization_finished, after CORRUPT_CONFIG and other initial error checks)
+        # This means actual_init_success was True from perform_non_gui_initialization
+
         db_manager = init_data.get("db_manager")
         # Credential_manager already fetched: credential_manager_instance
 
-        if not db_manager or not credential_manager_instance: # Should have been caught by CORRUPT_CONFIG or other errors
-            error_msg = "Critical components (DBManager or CredentialManager) became unavailable unexpectedly."
+        if not db_manager or not credential_manager_instance:
+            error_msg = "Critical components (DBManager or CredentialManager) instance not found after non-GUI init."
             loading_screen.append_log(error_msg, "CRITICAL")
             loading_screen.update_progress(0, "Internal Error!")
             return
+
+        # --- Attempt to connect the DatabaseManager on the main thread ---
+        loading_screen.append_log("Connecting to the main database...", "INFO")
+        # You might want a different progress step, e.g., 80, if 70 was "Ready to create main window"
+        # and 85 is "Creating user interface"
+        loading_screen.update_progress(80, "Connecting database...")
+        QApplication.processEvents()
+
+        if not db_manager.connect(): # Call connect() here
+            # DatabaseManager.connect() should print its own detailed errors to console.
+            # Here, we update the UI.
+            db_conn_error_msg = f"Failed to connect to or initialize the main database. Check console logs for details."
+            loading_screen.append_log(db_conn_error_msg, "CRITICAL")
+            loading_screen.update_progress(0, "DB Setup Failed!")
+            # Ensure loading_screen stays open with the error.
+            return # Halt further execution
+
+        loading_screen.append_log("Database connected and schema verified successfully.", "SUCCESS")
+        # Now proceed to create the main window, db_manager is connected.
+        # ---- End of new DB connection block ----
 
         loading_screen.update_progress(85, "Creating user interface...")
         QApplication.processEvents()
