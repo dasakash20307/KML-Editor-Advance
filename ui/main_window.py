@@ -844,6 +844,9 @@ class MainWindow(QMainWindow):
                 cleaned_row_list.append({k.lstrip('\ufeff'): v for k, v in api_row_original_keys.items()})
             row_list = cleaned_row_list # Replace original row_list with the cleaned one
             self.log_message("Cleaned BOM characters from API data keys.", "info")
+            # Diagnostic logging for API data keys
+            if row_list: # Check if row_list is not empty after cleaning (or if it was empty to begin with)
+                self.log_message(f"API Data Keys (first row after BOM cleaning): {list(row_list[0].keys())}", "info")
 
         if not self.credential_manager:
             self.log_message("Credential Manager not available. Cannot process API data for KML generation.", "error")
