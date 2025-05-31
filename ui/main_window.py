@@ -294,52 +294,60 @@ class PolygonFilterProxyModel(QSortFilterProxyModel):
     def filterAcceptsRow(self, source_row, source_parent):
         source_model = self.sourceModel()
         assert isinstance(source_model, PolygonTableModel), "Source model must be PolygonTableModel"
-        if not source_model or source_row >= len(source_model._data): return False # type: ignore
-        record = source_model._data[source_row] # type: ignore
-        if not record or len(record) < 17: # Ensure record has enough elements for all columns
+        if not source_model or source_row >= len(source_model._data): return False
+        record = source_model._data[source_row]
+        # Ensure record has enough elements for all columns based on the new v5 schema.
+        # The get_all_polygon_data_for_display query fetches 17 columns.
+        if not record or len(record) < 17:
             return False 
 
+        # 1. UUID Filter
         if self.filter_uuid_text:
-            # UUID is at index 1 in the record tuple
-            uuid_val = str(record[1]).lower()
-            if self.filter_uuid_text not in uuid_val: return False
+            uuid_val_from_record = record[1] # UUID is at index 1
+            # Ensure uuid_val_from_record is converted to string before .lower()
+            # and handle if it's None to prevent AttributeError.
+            if uuid_val_from_record is None or self.filter_uuid_text not in str(uuid_val_from_record).lower():
+                return False
         
-        # Date Added is at index 5
-        date_val_from_record = record[5]
-        row_qdate = None
-
-        if isinstance(date_val_from_record, datetime.datetime):
-            row_qdate = QDate(date_val_from_record.year, date_val_from_record.month, date_val_from_record.day)
-        elif isinstance(date_val_from_record, datetime.date):
-            row_qdate = QDate(date_val_from_record.year, date_val_from_record.month, date_val_from_record.day)
-        elif isinstance(date_val_from_record, str) and date_val_from_record:
+        # 2. Date Added Filter (Reverted to simpler version with robust None check)
+        # date_added is at index 5 in the record tuple
+        date_added_str = record[5]
+        if date_added_str and isinstance(date_added_str, str): # Process only if it's a non-empty string
             try:
-                # Attempt to parse the date part, assuming "YYYY-MM-DD" or "YYYY-MM-DD HH:MM:SS"
-                date_part_str = date_val_from_record.split(" ")[0]
-                parsed_qdate = QDate.fromString(date_part_str, "yyyy-MM-dd")
-                if parsed_qdate.isValid():
-                    row_qdate = parsed_qdate
-                # else: print(f"DEBUG: filterAcceptsRow - Could not parse date string: {date_val_from_record} into a valid QDate.")
-            except Exception as e:
-                # print(f"DEBUG: filterAcceptsRow - Exception parsing date string '{date_val_from_record}': {e}")
-                pass # row_qdate remains None
+                # Assuming date_added_str is like "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DD"
+                date_part_to_parse = date_added_str.split(" ")[0]
+                row_qdate = QDate.fromString(date_part_to_parse, "yyyy-MM-dd")
 
-        # Now, use row_qdate for comparisons
-        if self.filter_after_date_added:
-            if row_qdate is None or not row_qdate.isValid() or row_qdate < self.filter_after_date_added:
-                return False # Filter out if no valid date or before the 'after' date
+                if row_qdate.isValid(): # Only compare if the parsed date from record is valid
+                    if self.filter_after_date_added and row_qdate < self.filter_after_date_added:
+                        return False
+                    if self.filter_before_date_added and row_qdate > self.filter_before_date_added:
+                        return False
+                # If row_qdate is not valid (parsing failed), this row will pass the date filter stage.
+            except Exception:
+                # If any error occurs during string splitting or QDate.fromString,
+                # let the row pass this specific date filter stage.
+                # print(f"DEBUG: Exception during date parsing for '{date_added_str}' - row will pass date filter.")
+                pass
+        # If date_added_str is None, empty, or not a string, it also passes this date filter stage.
+        # This means if a date filter is active, rows with no valid date string will NOT be filtered out by date.
 
-        if self.filter_before_date_added:
-            if row_qdate is None or not row_qdate.isValid() or row_qdate > self.filter_before_date_added:
-                return False # Filter out if no valid date or after the 'before' date
+        # 3. Export Status Filter
+        # kml_export_count is at index 6 in the record tuple
+        export_count_from_record = record[6]
+        export_count = export_count_from_record if export_count_from_record is not None else 0
+        if self.filter_export_status == "Exported" and export_count == 0:
+            return False
+        if self.filter_export_status == "Not Exported" and export_count > 0:
+            return False
 
-        # Export Count (kml_export_count) is at index 6 - remains correct
-        export_count = record[6] if record[6] is not None else 0
-        if self.filter_export_status == "Exported" and export_count == 0: return False
-        if self.filter_export_status == "Not Exported" and export_count > 0: return False
+        # 4. KML File Status Filter (Error/Valid)
+        # kml_file_status is at index 11 in the record tuple
+        kml_status_val_from_record = record[11]
+        # Ensure kml_status_val_from_record is converted to string before .lower()
+        # and handle if it's None to prevent AttributeError.
+        kml_status_val = str(kml_status_val_from_record).lower() if kml_status_val_from_record is not None else ""
 
-        # KML File Status is at index 11
-        kml_status_val = str(record[11]).lower()
         if self.filter_error_status == "Error Records":
             if not ("error" in kml_status_val or "deleted" in kml_status_val):
                 return False
