@@ -27,10 +27,19 @@ def perform_non_gui_initialization():
             return {"success": False, "error": error_msg, "db_manager": None, "credential_manager": credential_manager}
 
         db_path = credential_manager.get_db_path()
-        if not db_path:
-            error_msg = "Database path not found in configuration. Setup may be incomplete."
-            print(f"MainApp ERROR: {error_msg}")
-            return {"success": False, "error": error_msg, "db_manager": None, "credential_manager": credential_manager}
+        if not db_path: # This implies not first_run but essential path is missing
+            error_msg = "Critical setting (Database path) not found in configuration. The configuration may be incomplete or corrupted."
+            config_file_location = credential_manager.get_config_file_path()
+            detailed_error_msg = f"{error_msg} Expected location: {config_file_location}"
+            print(f"MainApp ERROR: {detailed_error_msg}")
+            return {
+                "success": False,
+                "status": "CORRUPT_CONFIG", # New status flag
+                "error": error_msg, # User-friendly error
+                "config_path": config_file_location, # Path to config file
+                "db_manager": None,
+                "credential_manager": credential_manager # Pass credential_manager for re-setup
+            }
 
         print(f"MainApp: Initializing DatabaseManager with path: {db_path}")
         db_manager = DatabaseManager(db_path=db_path)

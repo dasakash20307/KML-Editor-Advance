@@ -126,6 +126,10 @@ class CredentialManager:
     def get_kml_folder_path(self) -> str | None:
         return self._kml_folder_path
 
+    def get_config_file_path(self) -> str:
+        """Returns the full path to the device_config.db file."""
+        return self.db_path
+
 if __name__ == '__main__':
     print("--- Test CredentialManager (with platformdirs) ---")
     expected_app_data_dir = platformdirs.user_data_dir(CredentialManager.APP_NAME, CredentialManager.APP_AUTHOR)

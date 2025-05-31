@@ -20,7 +20,10 @@ if platform.system() == "Windows":
 from main_app import perform_non_gui_initialization, create_main_window_instance # New imports
 # Import the new loading screen widget
 from ui.loading_screen_widget import LoadingScreenWidget
+from ui.first_run_setup_dialogs import NicknameDialog, ModeSelectionDialog, PathConfigurationDialog
+from core.credential_manager import CredentialManager
 from core.utils import resource_path # For QSS path
+from PySide6.QtWidgets import QApplication, QMessageBox # Added QMessageBox
 
 # Define constants for loading screen - these could be moved to a config file or core module
 APP_NAME_LAUNCHER = "Dilasa Advance KML Tool"
@@ -49,14 +52,25 @@ class InitializationThread(QThread):
 
             init_result = perform_non_gui_initialization() # from main_app.py
             success_non_gui = init_result.get("success", False)
+            status_non_gui = init_result.get("status")
 
-            if not success_non_gui:
+            if status_non_gui == "CORRUPT_CONFIG":
+                error_msg = init_result.get("error", "Configuration is corrupted or incomplete.")
+                config_path = init_result.get("config_path", "Unknown location")
+                self.log_message.emit(f"Config Issue: {error_msg} (File: {config_path})", "ERROR")
+                self.log_message.emit("Attempting to re-run setup...", "INFO")
+                self.progress_updated.emit(75, "Configuration issue detected...") # Indicate something is happening
+                # Signal that thread completed its check, but main init failed in a specific way
+                self.initialization_complete.emit(True, init_result) # Pass init_result
+                return # Important: exit thread run method here
+
+            if not success_non_gui: # Handles other errors like true first_run from main_app, or DB connection issues
                 error_msg = init_result.get("error", "Unknown non-GUI initialization failure.")
-                detailed_error = init_result.get("detailed_error")
+                detailed_error = init_result.get("detailed_error") # Keep this if detailed_error is part of init_result for other errors
                 # Log messages are already printed by perform_non_gui_initialization,
                 # but we can add a summary here for the launcher log.
                 self.log_message.emit(f"Non-GUI Initialization Summary: {error_msg}", "ERROR")
-                if detailed_error:
+                if detailed_error: # Check if detailed_error exists for this error type
                      # This might be too verbose for loading screen log, better for console/file log
                      # self.log_message.emit(f"Detailed Error (Non-GUI): {detailed_error}", "DEBUG")
                      pass
@@ -165,64 +179,130 @@ def launch():
     thread.progress_updated.connect(loading_screen.update_progress)
     thread.log_message.connect(loading_screen.append_log)
 
+    def _execute_first_run_setup_flow(current_loading_screen, cm_instance: CredentialManager):
+        current_loading_screen.append_log("Starting first-time setup / configuration recovery...", "INFO")
+        QApplication.processEvents()
+
+        nickname_dialog = NicknameDialog(parent=current_loading_screen) # Parent to loading screen
+        if not nickname_dialog.exec():
+            current_loading_screen.append_log("Setup aborted by user at Nickname selection.", "WARNING")
+            return False
+        nickname = nickname_dialog.get_nickname()
+
+        mode_dialog = ModeSelectionDialog(parent=current_loading_screen)
+        if not mode_dialog.exec():
+            current_loading_screen.append_log("Setup aborted by user at Mode selection.", "WARNING")
+            return False
+        app_mode = mode_dialog.get_app_mode()
+
+        path_dialog = PathConfigurationDialog(app_mode=app_mode, parent=current_loading_screen)
+        if not path_dialog.exec():
+            current_loading_screen.append_log("Setup aborted by user at Path configuration.", "WARNING")
+            return False
+        db_path, kml_path = path_dialog.get_paths()
+
+        try:
+            cm_instance.save_settings(nickname, app_mode, db_path, kml_path)
+            current_loading_screen.append_log(f"Configuration saved. Device ID: {cm_instance.get_device_id()}", "SUCCESS")
+            current_loading_screen.append_log("Please restart the application for changes to take full effect.", "INFO")
+            # Update progress to indicate setup is done.
+            current_loading_screen.update_progress(100, "Setup Complete. Please Restart.")
+            QMessageBox.information(current_loading_screen, "Setup Complete", "Initial configuration is complete. Please restart the application.")
+            QApplication.instance().quit() # Add this line to exit
+            return True # Though the quit() might make this return not strictly necessary for flow.
+        except Exception as e_save:
+            error_msg_save = f"Failed to save settings: {e_save}"
+            current_loading_screen.append_log(error_msg_save, "ERROR")
+            QMessageBox.critical(current_loading_screen, "Setup Error", error_msg_save)
+            return False
+
     # --- Handle Initialization Completion ---
-    def handle_initialization_finished(success, data_or_error): # 'data_or_error' from thread
+    def handle_initialization_finished(success_thread, data_from_thread):
         global _main_modern_window
 
-        if success: # Non-GUI initialization was successful
-            # data_or_error here is the init_result dictionary
-            init_data = data_or_error
-            db_manager = init_data.get("db_manager")
-            credential_manager = init_data.get("credential_manager")
+        if not success_thread: # Thread itself crashed
+            loading_screen.append_log(f"Startup aborted due to thread crash: {str(data_from_thread)}", "ERROR")
+            loading_screen.update_progress(0, "Critical Startup Failed!")
+            print(f"Critical error from thread (exception object): {data_from_thread}")
+            return # Keep loading screen open
 
-            if not db_manager or not credential_manager:
-                error_msg = "Critical components (DBManager or CredentialManager) not initialized."
-                loading_screen.append_log(error_msg, "ERROR")
-                loading_screen.update_progress(0, "Startup Failed!")
-                # Handle this critical failure - perhaps by not proceeding further
-                return # Exit if critical components are missing
+        # If thread didn't crash, data_from_thread is init_result dict
+        init_data = data_from_thread
+        actual_init_success = init_data.get("success", False)
+        status_from_init = init_data.get("status")
+        credential_manager_instance = init_data.get("credential_manager")
 
-            loading_screen.update_progress(85, "Creating user interface...")
+        if status_from_init == "CORRUPT_CONFIG":
+            loading_screen.append_log(f"Config Error: {init_data.get('error', 'Corrupted configuration.')}", "ERROR")
+            loading_screen.append_log(f"Config file: {init_data.get('config_path', 'N/A')}", "INFO")
+            loading_screen.append_log("Initiating setup process...", "INFO")
             QApplication.processEvents()
-            try:
-                # Step 2: Create MainWindow instance in the main thread
-                main_window_instance = create_main_window_instance(
-                    db_manager=db_manager,
-                    credential_manager=credential_manager
-                ) # from main_app.py
 
-                if not main_window_instance:
-                    # This should ideally not happen if create_main_window_instance is robust
-                    raise RuntimeError("Failed to create MainWindow instance (returned None).")
+            if credential_manager_instance:
+                # Pass the loading_screen and the credential_manager instance
+                setup_completed = _execute_first_run_setup_flow(loading_screen, credential_manager_instance)
+                if setup_completed:
+                    # Message to restart is shown by _execute_first_run_setup_flow
+                    # Loading screen can be kept open with the restart message.
+                    pass
+                else:
+                    loading_screen.append_log("Setup process was not completed. Application cannot continue.", "ERROR")
+                    loading_screen.update_progress(0, "Setup Incomplete.")
+            else:
+                loading_screen.append_log("Cannot re-run setup: CredentialManager instance not available.", "CRITICAL")
+                loading_screen.update_progress(0, "Internal Error.")
+            return # Halt further normal startup flow
 
-                loading_screen.append_log("Main window created successfully.", "SUCCESS")
-                loading_screen.update_progress(95, "Finalizing UI...")
-                QApplication.processEvents()
-
-                # Close loading screen before showing main window to avoid overlap/flicker
-                # A small delay can ensure messages are visible before close, if necessary.
-                # time.sleep(0.5) # Optional: if logs are too quick to read before close
-                loading_screen.close()
-
-                _main_modern_window = qtmodern.windows.ModernWindow(main_window_instance)
-                _main_modern_window.show()
-
-            except Exception as e:
-                # Handle errors during main window creation or display
-                error_message = f"Failed to create or show main window: {str(e)}"
-                import traceback
-                detailed_error = traceback.format_exc()
-                loading_screen.append_log(error_message, "ERROR")
-                loading_screen.append_log(f"Details: {detailed_error}", "DEBUG")
-                loading_screen.update_progress(0, "UI Creation Failed!")
-                # Keep loading_screen open to show the error
-        else:
-            # Non-GUI Initialization failed, error already logged by the thread.
-            # 'data_or_error' here is the exception from the thread.
-            loading_screen.append_log(f"Startup aborted due to non-GUI initialization failure: {str(data_or_error)}", "ERROR")
+        # Handle other cases (true first run that wasn't caught by launcher, other non-GUI errors)
+        if not actual_init_success:
+            error_msg = init_data.get("error", "Unknown non-GUI initialization failure.")
+            loading_screen.append_log(f"Startup aborted: {error_msg}", "ERROR")
             loading_screen.update_progress(0, "Startup Failed!")
-            # Keep loading screen open to show error messages.
-            print(f"Error during non-GUI initialization (passed to main thread): {data_or_error}")
+            print(f"Non-GUI initialization failed (error from init_data): {error_msg}")
+            return # Keep loading screen open
+
+        # Proceed with normal MainWindow creation if everything was successful
+        db_manager = init_data.get("db_manager")
+        # Credential_manager already fetched: credential_manager_instance
+
+        if not db_manager or not credential_manager_instance: # Should have been caught by CORRUPT_CONFIG or other errors
+            error_msg = "Critical components (DBManager or CredentialManager) became unavailable unexpectedly."
+            loading_screen.append_log(error_msg, "CRITICAL")
+            loading_screen.update_progress(0, "Internal Error!")
+            return
+
+        loading_screen.update_progress(85, "Creating user interface...")
+        QApplication.processEvents()
+        try:
+            # Step 2: Create MainWindow instance in the main thread
+            main_window_instance = create_main_window_instance(
+                db_manager=db_manager,
+                credential_manager=credential_manager_instance # Use the fetched instance
+            ) # from main_app.py
+
+            if not main_window_instance:
+                # This should ideally not happen if create_main_window_instance is robust
+                raise RuntimeError("Failed to create MainWindow instance (returned None).")
+
+            loading_screen.append_log("Main window created successfully.", "SUCCESS")
+            loading_screen.update_progress(95, "Finalizing UI...")
+            QApplication.processEvents()
+
+            # Close loading screen before showing main window to avoid overlap/flicker
+            loading_screen.close()
+
+            _main_modern_window = qtmodern.windows.ModernWindow(main_window_instance)
+            _main_modern_window.show()
+
+        except Exception as e:
+            # Handle errors during main window creation or display
+            error_message = f"Failed to create or show main window: {str(e)}"
+            import traceback
+            detailed_error = traceback.format_exc()
+            loading_screen.append_log(error_message, "ERROR")
+            loading_screen.append_log(f"Details: {detailed_error}", "DEBUG")
+            loading_screen.update_progress(0, "UI Creation Failed!")
+            # Keep loading_screen open to show the error
 
     thread.initialization_complete.connect(handle_initialization_finished)
     thread.start()
