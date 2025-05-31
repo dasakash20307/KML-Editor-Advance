@@ -2,13 +2,23 @@
 
 ## Overview
 
-The **Dilasa Advance KML Tool** is a Windows desktop application developed for Dilasa Janvikash Pratishthan. It's designed to simplify the management of farmer field data, facilitate KML polygon generation (now with a KML-first approach in v5), and integrate with Google Earth for enhanced data visualization and verification.
+The **Dilasa Advance KML Tool** is a Windows desktop application developed for Dilasa Janvikash Pratishthan. It's designed to simplify the management of farmer field data by importing from CSV files or directly from mWater APIs, facilitating KML polygon generation with a KML-first approach (v5), and integrating with Google Earth for enhanced data visualization and verification.
 
 ## Core Features
 
 *   **Data Management:**
-    *   Import farmer and plot data via CSV files or directly from mWater APIs, generating persistent KML files for each valid record.
-    *   Store and manage metadata in a user-configurable SQLite database, linked to these KML files. The database tracks KML status, edit history, and device information.
+    *   **Data Ingestion (KML-First):**
+        *   Import farmer and plot data via user-provided CSV files or by fetching directly from configured mWater API sources.
+        *   **Immediate KML Generation:** For each valid record from an import, a KML file is immediately generated with a dynamic description (based on record data) and stored persistently in the user-configured KML storage folder. This KML file becomes the primary representation of the plot's geographic data.
+        *   **Duplicate Handling:** The system checks for duplicate records based on `response_code` during the import process and skips already existing entries, logging the action.
+    *   **Comprehensive Metadata Storage:**
+        *   Alongside each KML file, detailed metadata is saved to the main SQLite database.
+        *   This metadata includes:
+            *   Essential identifiers: `uuid` (also used for KML filename), `response_code`.
+            *   KML file details: `kml_file_name` and `kml_file_status` (e.g., "Created", "Errored" if KML generation/saving failed).
+            *   Temporal information: `date_added` (can be from API source or processing time), `last_modified`.
+            *   Source/Creator information: `device_code` (either from API data or the current application's device ID), `editor_device_id`, and `editor_device_nickname` (identifying the application instance that performed the import).
+        *   The database is also designed to track KML export history and evaluation status for each record.
 *   **KML Generation:**
     *   KML files are automatically generated and stored upon data import (API/CSV) as part of the KML-first workflow.
     *   Create KML polygon files from selected records for use in GIS software.
@@ -50,7 +60,7 @@ The **Dilasa Advance KML Tool** is a Windows desktop application developed for D
 
 The ongoing update to Version 5 introduces significant architectural improvements:
 
-*   **KML-First Data Model:** The application now employs a KML-first approach. When data is imported (via API or CSV), a KML file is immediately generated and stored persistently for each valid record. This KML file becomes the primary source of truth for the geographic data and its description. The SQLite database primarily stores metadata, including a reference to the KML filename (`kml_file_name`), its status (`kml_file_status` e.g., "Created", "Edited", "Errored"), edit history (`edit_count`, `last_edit_date`), and information about the device that created/edited the record (`device_code`, `editor_device_id`, `editor_device_nickname`).
+*   **KML-First Data Model:** The application now employs a KML-first approach. When data is imported (via API or CSV), a KML file is immediately generated and stored persistently for each valid record. This KML file becomes the primary source of truth for the geographic data and its description. The SQLite database primarily stores metadata, including a reference to the KML filename (`kml_file_name`), its status (`kml_file_status` e.g., "Created", "Edited", "Errored"), edit history (`edit_count`, `last_edit_date`), and information about the device that created/edited the record (`device_code`, `editor_device_id`, `editor_device_nickname`). `date_added` is also stored to track when the record was first introduced into the system.
 
 *   **User-Defined Configuration (`CredentialManager`):**
     *   A new `CredentialManager` component manages application configuration, which is set by the user on the first run:
