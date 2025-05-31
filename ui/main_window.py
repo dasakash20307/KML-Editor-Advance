@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, Q
                                QAbstractItemView, QHeaderView, QMessageBox, QFileDialog, QComboBox,
                                QSizePolicy, QTextEdit, QInputDialog, QLineEdit, QDateEdit, QGridLayout,
                                QCheckBox, QGroupBox, QStackedWidget, QApplication, QStyledItemDelegate,
-                               QDialog, QProgressBar) # Added QDialog, QProgressBar
+                               QDialog, QProgressBar, QStyle) # Added QStyle
 from PySide6.QtGui import QPixmap, QIcon, QAction, QStandardItemModel, QStandardItem, QFont, QColor
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QTimer, QSize, QSortFilterProxyModel, QDate
 
@@ -60,13 +60,6 @@ API_FIELD_TO_DB_FIELD_MAP = {
     "Point 3 (altitude)": "p3_altitude",
     "Point 4 (UTM)": "p4_utm_str",
     "Point 4 (altitude)": "p4_altitude",
-    # Based on the provided header, there's no direct field for 'device_code' or 'survey_date'
-    # So, we remove the previous example mappings:
-    # "survey_device_code": "device_code", (Removed)
-    # "survey_date": "date_added", (Removed)
-    # 'device_code' and 'date_added' will be handled by downstream logic in _process_imported_data
-    # (e.g., device_code from CredentialManager, date_added as processing time)
-    # if not found in processed_flat from the map.
 }
 
 # --- Table Model with Checkbox Support ---
@@ -85,7 +78,7 @@ class PolygonTableModel(QAbstractTableModel):
     LAST_EDIT_DATE_COL = 11
     EDITOR_DEVICE_ID_COL = 12
     EDITOR_NICKNAME_COL = 13
-    DEVICE_CODE_COL = 14 # This corresponds to "Device Code (Creator)"
+    DEVICE_CODE_COL = 14
     EXPORT_COUNT_COL = 15
     LAST_EXPORTED_COL = 16
     LAST_MODIFIED_COL = 17
@@ -114,7 +107,6 @@ class PolygonTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.DisplayRole:
             if col == self.CHECKBOX_COL: return None
             value = None
-            # Map new column constants to the correct indices in the 'record' tuple
             if col == self.DB_ID_COL: value = record[0]
             elif col == self.UUID_COL: value = record[1]
             elif col == self.RESPONSE_CODE_COL: value = record[2]
@@ -128,7 +120,7 @@ class PolygonTableModel(QAbstractTableModel):
             elif col == self.LAST_EDIT_DATE_COL: value = record[13]
             elif col == self.EDITOR_DEVICE_ID_COL: value = record[14]
             elif col == self.EDITOR_NICKNAME_COL: value = record[15]
-            elif col == self.DEVICE_CODE_COL: value = record[9] # Creator's device code
+            elif col == self.DEVICE_CODE_COL: value = record[9]
             elif col == self.EXPORT_COUNT_COL: value = record[6]
             elif col == self.LAST_EXPORTED_COL: value = record[7]
             elif col == self.LAST_MODIFIED_COL: value = record[16]
@@ -141,26 +133,15 @@ class PolygonTableModel(QAbstractTableModel):
             return str(value) if value is not None else ""
 
         elif role == Qt.ItemDataRole.BackgroundRole:
-            # Apply row-wide background color based on evaluation_status
-            # evaluation_status is at index 8 in the record tuple - this remains correct
             status_value = record[8]
-            if status_value == "Eligible":
-                color = QColor(144, 238, 144, int(255 * 0.7)) # Light Green
-                return color
-            elif status_value == "Not Eligible":
-                color = QColor(255, 182, 193, int(255 * 0.7)) # Light Pink/Red
-                return color
-            elif status_value == "Not Evaluated Yet":
-                color = QColor(255, 255, 255) # White
-                return color
-            else: # Other or unexpected status, default to white
-                color = QColor(255, 255, 255) # White
-                return color
+            if status_value == "Eligible": return QColor(144, 238, 144, int(255 * 0.7))
+            elif status_value == "Not Eligible": return QColor(255, 182, 193, int(255 * 0.7))
+            elif status_value == "Not Evaluated Yet": return QColor(255, 255, 255)
+            else: return QColor(255, 255, 255)
             
         elif role == Qt.ItemDataRole.TextAlignmentRole:
             return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter if col != self.CHECKBOX_COL else Qt.AlignmentFlag.AlignCenter
         elif role == Qt.ItemDataRole.ForegroundRole:
-            # KML File Status is at record[11]
             if col == self.KML_FILE_STATUS_COL and record[11] and \
                ("error" in str(record[11]).lower() or "deleted" in str(record[11]).lower()):
                 return QColor("red")
@@ -172,7 +153,6 @@ class PolygonTableModel(QAbstractTableModel):
         if not index.isValid(): return False
         row, col = index.row(), index.column()
         if row >= len(self._data) or not self._data[row]: return False
-        # db_id is record[0] (the first element of the tuple from the database)
         db_id = self._data[row][0]
 
         if role == Qt.ItemDataRole.CheckStateRole and col == self.CHECKBOX_COL:
@@ -181,45 +161,28 @@ class PolygonTableModel(QAbstractTableModel):
             return True
         
         if role == Qt.ItemDataRole.EditRole and col == self.EVALUATION_STATUS_COL:
-            print(f"[TableModel.setData] Entered for EVALUATION_STATUS_COL. Row: {row}, Col: {col}, New Value: '{value}'")
             new_status = str(value)
-            
-            # db_id is already correctly assigned from self._data[row][0]
-            print(f"[TableModel.setData] DB ID: {db_id}")
-
             if self.db_manager and hasattr(self.db_manager, 'update_evaluation_status'):
-                print(f"[TableModel.setData] Attempting DB update for ID {db_id} to status '{new_status}'")
                 update_success = self.db_manager.update_evaluation_status(db_id, new_status) 
-                print(f"[TableModel.setData] DB update_success: {update_success}")
-
                 if update_success:
-                    print(f"[TableModel.setData] Before internal update: self._data[{row}] = {self._data[row]}")
                     updated_record_list = list(self._data[row])
-                    updated_record_list[8] = new_status # evaluation_status is at index 8 in the DB tuple
+                    updated_record_list[8] = new_status
                     self._data[row] = tuple(updated_record_list)
-                    print(f"[TableModel.setData] After internal update: self._data[{row}] = {self._data[row]}")
-                    
-                    # Emit dataChanged for the entire row to ensure all cells are refreshed
                     row_start_index = self.index(row, 0)
                     row_end_index = self.index(row, self.columnCount() - 1)
                     self.dataChanged.emit(row_start_index, row_end_index) 
-                    print(f"[TableModel.setData] Emitted dataChanged for entire row {row}")
-                    
                     parent_main_window = self.parent()
-                    # Ensure parent is an instance of MainWindow before calling log_message
                     if isinstance(parent_main_window, MainWindow) and hasattr(parent_main_window, 'log_message'):
                          parent_main_window.log_message(f"Evaluation status for ID {db_id} updated to '{new_status}'.", "info")
                     return True
                 else:
                     error_msg = f"DB update failed for record ID {db_id} with status {new_status}"
-                    print(f"[TableModel.setData] {error_msg}")
                     parent_main_window = self.parent()
                     if isinstance(parent_main_window, MainWindow) and hasattr(parent_main_window, 'log_message'): 
                         parent_main_window.log_message(error_msg, "error")
                     return False
-            else:
+            else: # Should not happen if db_manager is always provided
                 error_msg = f"Error: self.db_manager not available or missing update_evaluation_status method for record ID {db_id}"
-                print(f"[TableModel.setData] {error_msg}")
                 parent_main_window = self.parent()
                 if isinstance(parent_main_window, MainWindow) and hasattr(parent_main_window, 'log_message'): 
                     parent_main_window.log_message(error_msg, "error")
@@ -228,22 +191,15 @@ class PolygonTableModel(QAbstractTableModel):
 
     def flags(self, index):
         flags = super().flags(index)
-        if index.column() == self.CHECKBOX_COL:
-            flags |= Qt.ItemFlag.ItemIsUserCheckable
+        if index.column() == self.CHECKBOX_COL: flags |= Qt.ItemFlag.ItemIsUserCheckable
         elif index.column() == self.EVALUATION_STATUS_COL:
-            flags |= Qt.ItemFlag.ItemIsEditable
-            flags |= Qt.ItemFlag.ItemIsSelectable 
-            flags |= Qt.ItemFlag.ItemIsEnabled
-        else:
-            flags |= Qt.ItemFlag.ItemIsSelectable 
-            flags |= Qt.ItemFlag.ItemIsEnabled
+            flags |= Qt.ItemFlag.ItemIsEditable | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
+        else: flags |= Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
         return flags
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
-        if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
-            return self._headers[section]
-        if role == Qt.ItemDataRole.FontRole and orientation == Qt.Orientation.Horizontal: 
-            return QFont("Segoe UI", 9, QFont.Weight.Bold)
+        if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal: return self._headers[section]
+        if role == Qt.ItemDataRole.FontRole and orientation == Qt.Orientation.Horizontal: return QFont("Segoe UI", 9, QFont.Weight.Bold)
         return None
 
     def update_data(self, new_data_list):
@@ -253,15 +209,12 @@ class PolygonTableModel(QAbstractTableModel):
         self._check_states = {db_id: state for db_id, state in self._check_states.items() if db_id in current_ids}
         self.endResetModel()
 
-    def get_checked_item_db_ids(self):
-        return [db_id for db_id, state in self._check_states.items() if state == Qt.CheckState.Checked]
+    def get_checked_item_db_ids(self): return [db_id for db_id, state in self._check_states.items() if state == Qt.CheckState.Checked]
 
     def set_all_checkboxes(self, state=Qt.CheckState.Checked):
         self.beginResetModel() 
         for row_data in self._data:
-            if row_data and len(row_data) > 0: 
-                 db_id = row_data[0] 
-                 self._check_states[db_id] = state
+            if row_data and len(row_data) > 0: self._check_states[row_data[0]] = state
         self.endResetModel()
 
 # --- Filter Proxy Model ---
@@ -269,166 +222,62 @@ class PolygonFilterProxyModel(QSortFilterProxyModel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.filter_uuid_text = ""
-        # self.filter_after_date_added = None  # REMOVED
-        # self.filter_before_date_added = None # REMOVED
         self.filter_export_status = "All" 
         self.filter_error_status = "All"  
 
-    def set_uuid_filter(self, text):
-        self.filter_uuid_text = text.lower()
-        self.invalidateFilter()
-        
-    def set_export_status_filter(self, status): 
-        self.filter_export_status = status
-        self.invalidateFilter()
-
-    def set_error_status_filter(self, status): 
-        self.filter_error_status = status
-        self.invalidateFilter()
+    def set_uuid_filter(self, text): self.filter_uuid_text = text.lower(); self.invalidateFilter()
+    def set_export_status_filter(self, status): self.filter_export_status = status; self.invalidateFilter()
+    def set_error_status_filter(self, status): self.filter_error_status = status; self.invalidateFilter()
 
     def filterAcceptsRow(self, source_row, source_parent):
         source_model = self.sourceModel()
-        assert isinstance(source_model, PolygonTableModel), "Source model must be PolygonTableModel"
-        if not source_model or source_row >= len(source_model._data):
-            return False
+        assert isinstance(source_model, PolygonTableModel)
+        if not source_model or source_row >= len(source_model._data): return False
         record = source_model._data[source_row]
-        if not record or len(record) < 17:
-            return False
+        if not record or len(record) < 17: return False
 
-        # 1. UUID Filter
         if self.filter_uuid_text:
-            uuid_val_from_record = record[1] # UUID is at index 1
-            if uuid_val_from_record is None or self.filter_uuid_text not in str(uuid_val_from_record).lower():
-                return False
+            uuid_val_from_record = record[1]
+            if uuid_val_from_record is None or self.filter_uuid_text not in str(uuid_val_from_record).lower(): return False
 
-        # 2. Date Added Filter (Logic remains commented out)
-        # date_val_from_record = record[5]
-        # row_qdate = None
-        # if isinstance(date_val_from_record, datetime.datetime):
-        #     row_qdate = QDate(date_val_from_record.year, date_val_from_record.month, date_val_from_record.day)
-        # elif isinstance(date_val_from_record, datetime.date): # Python date object
-        #     row_qdate = QDate(date_val_from_record.year, date_val_from_record.month, date_val_from_record.day)
-        # elif isinstance(date_val_from_record, str) and date_val_from_record.strip(): # Non-empty string
-        #     date_str_to_parse = date_val_from_record.strip()
-        #     # Try parsing directly as "yyyy-MM-dd"
-        #     parsed_qdate = QDate.fromString(date_str_to_parse, "yyyy-MM-dd")
-        #     if not parsed_qdate.isValid():
-        #         # If direct parse fails, try splitting space (in case of "YYYY-MM-DD HH:MM:SS")
-        #         try:
-        #             date_part_str = date_str_to_parse.split(" ")[0]
-        #             parsed_qdate = QDate.fromString(date_part_str, "yyyy-MM-dd")
-        #         except IndexError: # No space found, parsing already attempted on full string
-        #             parsed_qdate = QDate() # Ensure it's an invalid QDate
-        #
-        #     if parsed_qdate.isValid():
-        #         row_qdate = parsed_qdate
-        # # Filter logic (relies on the updated row_qdate above)
-        # if self.filter_after_date_added:
-        #     if row_qdate is None or not row_qdate.isValid() or row_qdate < self.filter_after_date_added:
-        #         return False
-        # if self.filter_before_date_added:
-        #     if row_qdate is None or not row_qdate.isValid() or row_qdate > self.filter_before_date_added:
-        #         return False
-
-        # 3. Export Status Filter
-        export_count_from_record = record[6] # kml_export_count is at index 6
+        export_count_from_record = record[6]
         export_count = export_count_from_record if export_count_from_record is not None else 0
-        if self.filter_export_status == "Exported" and export_count == 0:
-            return False
-        if self.filter_export_status == "Not Exported" and export_count > 0:
-            return False
+        if self.filter_export_status == "Exported" and export_count == 0: return False
+        if self.filter_export_status == "Not Exported" and export_count > 0: return False
 
-        # 4. KML File Status Filter (Error/Valid)
-        kml_status_val_from_record = record[11] # kml_file_status is at index 11
+        kml_status_val_from_record = record[11]
         kml_status_val = str(kml_status_val_from_record).lower() if kml_status_val_from_record is not None else ""
-        if self.filter_error_status == "Error Records":
-            if not ("error" in kml_status_val or "deleted" in kml_status_val):
-                return False
-        elif self.filter_error_status == "Valid Records":
-            if "error" in kml_status_val or "deleted" in kml_status_val:
-                return False
+        if self.filter_error_status == "Error Records" and not ("error" in kml_status_val or "deleted" in kml_status_val): return False
+        elif self.filter_error_status == "Valid Records" and ("error" in kml_status_val or "deleted" in kml_status_val): return False
 
         return True
 
 # --- Delegate for Evaluation Status ComboBox ---
 class EvaluationStatusDelegate(QStyledItemDelegate):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.options = ["Not Evaluated Yet", "Eligible", "Not Eligible"]
-
-    def createEditor(self, parent_widget, option, index): 
-        editor = QComboBox(parent_widget)
-        editor.addItems(self.options)
-        return editor
-
+    def __init__(self, parent=None): super().__init__(parent); self.options = ["Not Evaluated Yet", "Eligible", "Not Eligible"]
+    def createEditor(self, parent_widget, option, index): editor = QComboBox(parent_widget); editor.addItems(self.options); return editor
     def setEditorData(self, editor, index):
         value = index.model().data(index, Qt.ItemDataRole.DisplayRole)
-        if value in self.options:
-            editor.setCurrentText(value)
-        else: 
-            editor.setCurrentText("Not Evaluated Yet")
-
-    def setModelData(self, editor, model, index):
-        value = editor.currentText()
-        print(f"[Delegate.setModelData] Called for index ({index.row()},{index.column()}). Value: {value}")
-        model.setData(index, value, Qt.ItemDataRole.EditRole)
+        editor.setCurrentText(value if value in self.options else "Not Evaluated Yet")
+    def setModelData(self, editor, model, index): model.setData(index, editor.currentText(), Qt.ItemDataRole.EditRole)
 
 # --- API Import Progress Dialog ---
 class APIImportProgressDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("API Import Progress")
-        self.setModal(True)
-        self.setMinimumWidth(400) 
-        self._was_cancelled = False
-
+        self.setWindowTitle("API Import Progress"); self.setModal(True); self.setMinimumWidth(400); self._was_cancelled = False
         layout = QVBoxLayout(self)
-
-        self.total_label = QLabel("Total Records to Process: 0")
-        layout.addWidget(self.total_label)
-
-        self.processed_label = QLabel("Records Processed (Attempted): 0") 
-        layout.addWidget(self.processed_label)
-        
-        self.new_added_label = QLabel("New Records Added: 0")
-        layout.addWidget(self.new_added_label)
-
-        self.skipped_label = QLabel("Records Skipped (Duplicates/Errors): 0")
-        layout.addWidget(self.skipped_label)
-
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 0) 
-        self.progress_bar.setValue(0)
-        layout.addWidget(self.progress_bar)
-
-        self.cancel_button = QPushButton("Cancel")
-        self.cancel_button.clicked.connect(self._perform_cancel)
-        layout.addWidget(self.cancel_button)
-
+        self.total_label = QLabel("Total Records to Process: 0"); layout.addWidget(self.total_label)
+        self.processed_label = QLabel("Records Processed (Attempted): 0"); layout.addWidget(self.processed_label)
+        self.new_added_label = QLabel("New Records Added: 0"); layout.addWidget(self.new_added_label)
+        self.skipped_label = QLabel("Records Skipped (Duplicates/Errors): 0"); layout.addWidget(self.skipped_label)
+        self.progress_bar = QProgressBar(); self.progress_bar.setRange(0, 0); self.progress_bar.setValue(0); layout.addWidget(self.progress_bar)
+        self.cancel_button = QPushButton("Cancel"); self.cancel_button.clicked.connect(self._perform_cancel); layout.addWidget(self.cancel_button)
         self.setLayout(layout)
-
-    def _perform_cancel(self):
-        self._was_cancelled = True
-        self.reject() 
-
-    def set_total_records(self, count):
-        self.total_label.setText(f"Total Records to Process: {count}")
-        if count > 0:
-            self.progress_bar.setRange(0, count)
-        else:
-            self.progress_bar.setRange(0, 100) 
-
-    def update_progress(self, processed_count, skipped_count, new_added_count):
-        self.processed_label.setText(f"Records Processed (Attempted): {processed_count}")
-        self.new_added_label.setText(f"New Records Added: {new_added_count}")
-        self.skipped_label.setText(f"Records Skipped (Duplicates/Errors): {skipped_count}")
-        
-        self.progress_bar.setValue(processed_count) 
-        QApplication.processEvents() 
-
-    def was_cancelled(self):
-        return self._was_cancelled 
-
+    def _perform_cancel(self): self._was_cancelled = True; self.reject()
+    def set_total_records(self, count): self.total_label.setText(f"Total Records to Process: {count}"); self.progress_bar.setRange(0, count if count > 0 else 100)
+    def update_progress(self,p,s,n): self.processed_label.setText(f"Records Processed (Attempted): {p}"); self.new_added_label.setText(f"New Records Added: {n}"); self.skipped_label.setText(f"Records Skipped (Duplicates/Errors): {s}"); self.progress_bar.setValue(p); QApplication.processEvents()
+    def was_cancelled(self): return self._was_cancelled
 
 class MainWindow(QMainWindow):
     def __init__(self, db_manager, credential_manager):
@@ -436,174 +285,66 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME_MW} - {APP_VERSION_MW}")
         self.app_icon_path = resource_path(APP_ICON_FILE_NAME_MW) 
         if os.path.exists(self.app_icon_path): self.setWindowIcon(QIcon(self.app_icon_path))
-        else: print(f"Warning: Main window icon '{self.app_icon_path}' not found.")
-
-        self.db_manager = db_manager
-        self.credential_manager = credential_manager # Store credential_manager
-
-        if self.db_manager is None:
-            QMessageBox.critical(self, "Initialization Error", "Database Manager not provided. Application cannot start.")
-            # In a real scenario, you might want to exit or disable features.
-            # For now, this will likely cause issues later if not handled,
-            # but the launcher should prevent this if db_manager is None.
-            # Consider sys.exit(1) if this is truly unrecoverable.
-            # For now, let's assume launcher prevents None db_manager.
-            print("CRITICAL: MainWindow initialized with None db_manager!")
-            # Simulating an exit for safety, as the app would be broken.
-            # QApplication.instance().quit() # This might be too abrupt here.
-            # For now, just log and proceed, assuming launcher caught it.
-            # A proper solution might be for create_main_window_instance to not return if db_manager is None.
-
-        if self.credential_manager is None:
-            QMessageBox.critical(self, "Initialization Error", "Credential Manager not provided. Application cannot start.")
-            print("CRITICAL: MainWindow initialized with None credential_manager!")
-            # Similar handling as db_manager being None.
-        
+        self.db_manager = db_manager; self.credential_manager = credential_manager
+        if self.db_manager is None: QMessageBox.critical(self, "Initialization Error", "Database Manager not provided."); sys.exit(1) # Ensure exit
+        if self.credential_manager is None: QMessageBox.critical(self, "Initialization Error", "Credential Manager not provided."); sys.exit(1) # Ensure exit
         self.resize(1200, 800); self._center_window() 
-        self._create_main_layout()
-        self._create_header() 
-        self._create_menus_and_toolbar() 
-        self._create_status_bar() # Corrected: Call the renamed method
-        
-        self.current_temp_kml_path = None
-        self.show_ge_instructions_popup_again = True
-
-        self._setup_main_content_area() 
-        self.load_data_into_table() 
-        
+        self._create_main_layout(); self._create_header(); self._create_menus_and_toolbar(); self._create_status_bar()
+        self.current_temp_kml_path = None; self.show_ge_instructions_popup_again = True
+        self._setup_main_content_area(); self.load_data_into_table()
         self.log_message(f"{APP_NAME_MW} {APP_VERSION_MW} started. DB at: {self.db_manager.db_path}", "info")
-
 
     def _center_window(self):
         if self.screen(): screen_geo = self.screen().geometry(); self.move((screen_geo.width()-self.width())//2, (screen_geo.height()-self.height())//2)
-    
-    def _create_main_layout(self):
-        self.central_widget = QWidget(); self.setCentralWidget(self.central_widget)
-        self.main_layout = QVBoxLayout(self.central_widget)
-        self.main_layout.setContentsMargins(0,0,0,0); self.main_layout.setSpacing(0) 
-
+    def _create_main_layout(self): self.central_widget = QWidget(); self.setCentralWidget(self.central_widget); self.main_layout = QVBoxLayout(self.central_widget); self.main_layout.setContentsMargins(0,0,0,0); self.main_layout.setSpacing(0)
     def _create_header(self):
-        header_widget = QWidget()
-        header_widget.setFixedHeight(60) 
-        header_widget.setStyleSheet("border-bottom: 1px solid #D0D0D0;")
-        
-        header_layout = QHBoxLayout(header_widget)
-        header_layout.setContentsMargins(5, 5, 5, 5) 
-        header_layout.setSpacing(5) 
-
+        header_widget = QWidget(); header_widget.setFixedHeight(60); header_widget.setStyleSheet("border-bottom: 1px solid #D0D0D0;")
+        header_layout = QHBoxLayout(header_widget); header_layout.setContentsMargins(5,5,5,5); header_layout.setSpacing(5)
         logo_path = resource_path(LOGO_FILE_NAME_MW)
-        if os.path.exists(logo_path):
-            pixmap = QPixmap(logo_path); logo_label = QLabel()
-            logo_label.setPixmap(pixmap.scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)) 
-            header_layout.addWidget(logo_label, 0, Qt.AlignmentFlag.AlignVCenter) 
+        if os.path.exists(logo_path): pixmap=QPixmap(logo_path);logo_label=QLabel();logo_label.setPixmap(pixmap.scaled(40,40,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)); header_layout.addWidget(logo_label,0,Qt.AlignmentFlag.AlignVCenter)
         else: header_layout.addWidget(QLabel("[L]"))
-        
-        title_label = QLabel(APP_NAME_MW); title_label.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold)) 
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        header_layout.addWidget(title_label, 1) 
-
-        version_label = QLabel(APP_VERSION_MW); version_label.setFont(QFont("Segoe UI", 8, QFont.Weight.Normal, True)) 
-        version_label.setStyleSheet(f"color: {INFO_COLOR_MW};")
-        header_layout.addWidget(version_label, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
-        
+        title_label=QLabel(APP_NAME_MW);title_label.setFont(QFont("Segoe UI",16,QFont.Weight.Bold));title_label.setAlignment(Qt.AlignmentFlag.AlignCenter);header_layout.addWidget(title_label,1)
+        version_label=QLabel(APP_VERSION_MW);version_label.setFont(QFont("Segoe UI",8,QFont.Weight.Normal,True));version_label.setStyleSheet(f"color:{INFO_COLOR_MW};");header_layout.addWidget(version_label,0,Qt.AlignmentFlag.AlignVCenter|Qt.AlignmentFlag.AlignRight)
         self.main_layout.addWidget(header_widget) 
-
-
     def _create_menus_and_toolbar(self): 
-        menubar = self.menuBar()
-        file_menu = menubar.addMenu("&File")
-        self.export_data_action = QAction(QIcon.fromTheme("document-save-as", QIcon(self.app_icon_path)), "Export Displayed Data as &CSV...", self)
-        self.export_data_action.triggered.connect(self.handle_export_displayed_data_csv)
-        file_menu.addAction(self.export_data_action)
-        file_menu.addSeparator()
-        exit_action = QAction(QIcon.fromTheme("application-exit"), "E&xit", self) 
-        exit_action.setShortcut("Ctrl+Q"); exit_action.setStatusTip("Exit application")
-        exit_action.triggered.connect(self.close); file_menu.addAction(exit_action)
-        
-        data_menu = menubar.addMenu("&Data")
-        self.import_csv_action = QAction(QIcon.fromTheme("document-open"),"Import &CSV...", self)
-        self.import_csv_action.triggered.connect(self.handle_import_csv)
-        data_menu.addAction(self.import_csv_action)
-        
-        self.fetch_api_action = QAction(QIcon.fromTheme("network-transmit-receive"), "&Fetch from API...", self) 
-        self.fetch_api_action.triggered.connect(lambda: self.handle_fetch_from_api()) # Connect without args for menu/toolbar
-        data_menu.addAction(self.fetch_api_action)
-
-        self.manage_api_action = QAction(QIcon.fromTheme("preferences-system"),"Manage A&PI Sources...", self)
-        self.manage_api_action.triggered.connect(self.handle_manage_api_sources)
-        data_menu.addAction(self.manage_api_action)
-        data_menu.addSeparator()
-        self.delete_checked_action = QAction(QIcon.fromTheme("edit-delete"),"Delete Checked Rows...", self) 
-        self.delete_checked_action.triggered.connect(self.handle_delete_checked_rows) 
-        data_menu.addAction(self.delete_checked_action)
-        self.clear_all_data_action = QAction(QIcon.fromTheme("edit-clear-all"),"Clear All Polygon Data...", self)
-        self.clear_all_data_action.triggered.connect(self.handle_clear_all_data) 
-        data_menu.addAction(self.clear_all_data_action)
-
-        kml_menu = menubar.addMenu("&KML")
-        self.generate_kml_action = QAction(QIcon.fromTheme("document-export"),"&Generate KML for Checked Rows...", self) 
-        self.generate_kml_action.triggered.connect(self.handle_generate_kml) 
-        kml_menu.addAction(self.generate_kml_action)
-
-        self.view_menu = menubar.addMenu("&View")
-        self.toggle_ge_view_action = QAction("Google Earth View", self)
-        self.toggle_ge_view_action.setCheckable(True)
-        self.toggle_ge_view_action.toggled.connect(self._handle_ge_view_toggle)
-        self.view_menu.addAction(self.toggle_ge_view_action)
-
-        help_menu = menubar.addMenu("&Help"); 
-        self.about_action = QAction(QIcon.fromTheme("help-about"),"&About", self)
-        self.about_action.triggered.connect(self.handle_about)
-        help_menu.addAction(self.about_action)
-
-        self.ge_instructions_action = QAction("GE &Instructions", self)
-        self.ge_instructions_action.triggered.connect(self.handle_show_ge_instructions)
-        help_menu.addAction(self.ge_instructions_action)
-        
-        self.toolbar = QToolBar("Main Toolbar") 
-        self.toolbar.setIconSize(QSize(20,20)) 
-        self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon) 
-        self.toolbar.setMovable(True) 
-        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.toolbar)
-        
-        self.toolbar.addAction(self.import_csv_action) 
-        self.toolbar.addSeparator() 
-
-        self.toggle_ge_view_button = QPushButton("GE View: OFF")
-        self.toggle_ge_view_button.setCheckable(True)
-        self.toggle_ge_view_button.toggled.connect(self._handle_ge_view_toggle)
-        self.toolbar.addWidget(self.toggle_ge_view_button)
-        self.toolbar.addSeparator()
-        
-        self.toolbar.addWidget(QLabel(" API Source: ")) 
-        self.api_source_combo_toolbar = QComboBox() 
-        self.api_source_combo_toolbar.setMinimumWidth(150)
-        self.refresh_api_source_dropdown() 
-        self.toolbar.addWidget(self.api_source_combo_toolbar)
-
-        # Create a new action for toolbar to call handle_fetch_from_api without arguments
-        fetch_api_toolbar_action = QAction(QIcon.fromTheme("network-transmit-receive"), "&Fetch from Selected API", self)
-        fetch_api_toolbar_action.triggered.connect(lambda: self.handle_fetch_from_api()) # Call without args
-        self.toolbar.addAction(fetch_api_toolbar_action)
-        
-        manage_api_toolbar_action = QAction(QIcon.fromTheme("preferences-system"), "Manage API Sources", self)
-        manage_api_toolbar_action.triggered.connect(self.handle_manage_api_sources)
-        self.toolbar.addAction(manage_api_toolbar_action)
-
-        self.toolbar.addSeparator()
-        self.toolbar.addAction(self.generate_kml_action)
-        self.toolbar.addAction(self.delete_checked_action) 
-
-
-    def _create_status_bar(self):
-        self._main_status_bar = QStatusBar() # Corrected: Renamed instance variable
-        self.setStatusBar(self._main_status_bar) # Corrected: Use the renamed variable
-        self._main_status_bar.showMessage("Ready.", 3000) # Corrected: Use the renamed variable
+        menubar=self.menuBar();file_menu=menubar.addMenu("&File")
+        self.export_data_action=QAction(QIcon.fromTheme("document-save-as",QIcon(self.app_icon_path)),"Export Displayed Data as &CSV...",self);self.export_data_action.triggered.connect(self.handle_export_displayed_data_csv);file_menu.addAction(self.export_data_action)
+        file_menu.addSeparator();exit_action=QAction(QIcon.fromTheme("application-exit"),"E&xit",self);exit_action.setShortcut("Ctrl+Q");exit_action.setStatusTip("Exit application");exit_action.triggered.connect(self.close);file_menu.addAction(exit_action)
+        data_menu=menubar.addMenu("&Data");self.import_csv_action=QAction(QIcon.fromTheme("document-open"),"Import &CSV...",self);self.import_csv_action.triggered.connect(self.handle_import_csv);data_menu.addAction(self.import_csv_action)
+        self.fetch_api_action=QAction(QIcon.fromTheme("network-transmit-receive"),"&Fetch from API...",self);self.fetch_api_action.triggered.connect(lambda:self.handle_fetch_from_api());data_menu.addAction(self.fetch_api_action)
+        self.manage_api_action=QAction(QIcon.fromTheme("preferences-system"),"Manage A&PI Sources...",self);self.manage_api_action.triggered.connect(self.handle_manage_api_sources);data_menu.addAction(self.manage_api_action);data_menu.addSeparator()
+        self.delete_checked_action=QAction(QIcon.fromTheme("edit-delete"),"Delete Checked Rows...",self);self.delete_checked_action.triggered.connect(self.handle_delete_checked_rows);data_menu.addAction(self.delete_checked_action)
+        self.clear_all_data_action=QAction(QIcon.fromTheme("edit-clear-all"),"Clear All Polygon Data...",self);self.clear_all_data_action.triggered.connect(self.handle_clear_all_data);data_menu.addAction(self.clear_all_data_action)
+        kml_menu=menubar.addMenu("&KML");self.generate_kml_action=QAction(QIcon.fromTheme("document-export"),"&Generate KML for Checked Rows...",self);self.generate_kml_action.triggered.connect(self.handle_generate_kml);kml_menu.addAction(self.generate_kml_action)
+        self.view_menu=menubar.addMenu("&View");self.toggle_ge_view_action=QAction("Google Earth View",self);self.toggle_ge_view_action.setCheckable(True);self.toggle_ge_view_action.toggled.connect(self._handle_ge_view_toggle);self.view_menu.addAction(self.toggle_ge_view_action)
+        help_menu=menubar.addMenu("&Help");self.about_action=QAction(QIcon.fromTheme("help-about"),"&About",self);self.about_action.triggered.connect(self.handle_about);help_menu.addAction(self.about_action)
+        self.ge_instructions_action=QAction("GE &Instructions",self);self.ge_instructions_action.triggered.connect(self.handle_show_ge_instructions);help_menu.addAction(self.ge_instructions_action)
+        self.toolbar=QToolBar("Main Toolbar");self.toolbar.setIconSize(QSize(20,20));self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon);self.toolbar.setMovable(True);self.addToolBar(Qt.ToolBarArea.TopToolBarArea,self.toolbar)
+        self.toolbar.addAction(self.import_csv_action);self.toolbar.addSeparator()
+        self.toggle_ge_view_button=QPushButton("GE View: OFF");self.toggle_ge_view_button.setCheckable(True);self.toggle_ge_view_button.toggled.connect(self._handle_ge_view_toggle);self.toolbar.addWidget(self.toggle_ge_view_button);self.toolbar.addSeparator()
+        self.toolbar.addWidget(QLabel(" API Source: "));self.api_source_combo_toolbar=QComboBox();self.api_source_combo_toolbar.setMinimumWidth(150);self.refresh_api_source_dropdown();self.toolbar.addWidget(self.api_source_combo_toolbar)
+        fetch_api_toolbar_action=QAction(QIcon.fromTheme("network-transmit-receive"),"&Fetch from Selected API",self);fetch_api_toolbar_action.triggered.connect(lambda:self.handle_fetch_from_api());self.toolbar.addAction(fetch_api_toolbar_action)
+        manage_api_toolbar_action=QAction(QIcon.fromTheme("preferences-system"),"Manage API Sources",self);manage_api_toolbar_action.triggered.connect(self.handle_manage_api_sources);self.toolbar.addAction(manage_api_toolbar_action)
+        self.toolbar.addSeparator();self.toolbar.addAction(self.generate_kml_action);self.toolbar.addAction(self.delete_checked_action)
+    def _create_status_bar(self): self._main_status_bar=QStatusBar();self.setStatusBar(self._main_status_bar);self._main_status_bar.showMessage("Ready.",3000)
 
     def _setup_filter_panel(self):
         self.filter_groupbox = QGroupBox("Filters") 
-        self.filter_groupbox.setCheckable(True)
-        self.filter_groupbox.setChecked(False) 
+        self.filter_groupbox.setCheckable(False)
+        self.filter_groupbox.setStyleSheet("""
+            QGroupBox {
+                border: 1px solid #B0B0B0; /* Lighter border than default */
+                border-radius: 8px; /* Rounded edges */
+                margin-top: 7px; /* Space for title */
+                background-color: #F0F0F0; /* Slightly darker than typical window background */
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 5px 0 5px;
+                /* background-color: transparent; */ /* Often needed */
+            }
+        """)
 
         self.filter_widgets_container = QWidget() 
         filter_layout = QGridLayout(self.filter_widgets_container)
@@ -612,655 +353,302 @@ class MainWindow(QMainWindow):
         
         filter_layout.addWidget(QLabel("Filter UUID:"), 0, 0)
         self.uuid_filter_edit = QLineEdit(); self.uuid_filter_edit.setPlaceholderText("Contains...")
-        self.uuid_filter_edit.textChanged.connect(self.apply_filters)
         filter_layout.addWidget(self.uuid_filter_edit, 0, 1, 1, 3) 
 
-        filter_layout.addWidget(QLabel("Export Status:"), 1, 0) # Changed row index from 2 to 1
+        filter_layout.addWidget(QLabel("Export Status:"), 1, 0)
         self.export_status_combo = QComboBox(); self.export_status_combo.addItems(["All", "Exported", "Not Exported"])
-        self.export_status_combo.currentIndexChanged.connect(self.apply_filters)
-        filter_layout.addWidget(self.export_status_combo, 1, 1) # Changed row index from 2 to 1
+        filter_layout.addWidget(self.export_status_combo, 1, 1)
 
-        filter_layout.addWidget(QLabel("Record Status:"), 1, 2) # Changed row index from 2 to 1
+        filter_layout.addWidget(QLabel("Record Status:"), 1, 2)
         self.error_status_combo = QComboBox(); self.error_status_combo.addItems(["All", "Valid Records", "Error Records"])
-        self.error_status_combo.currentIndexChanged.connect(self.apply_filters)
-        filter_layout.addWidget(self.error_status_combo, 1, 3) # Changed row index from 2 to 1
+        filter_layout.addWidget(self.error_status_combo, 1, 3)
 
-        clear_filters_button = QPushButton("Clear Filters")
-        clear_filters_button.clicked.connect(self.clear_filters)
-        filter_layout.addWidget(clear_filters_button, 0, 4, Qt.AlignmentFlag.AlignRight) 
-        
+        self.apply_filters_button = QPushButton("Apply Filters")
+        self.apply_filters_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton))
+        self.apply_filters_button.setStyleSheet("""
+            QPushButton {
+                background-color: #E0EFFF; border: 1px solid #A0CFFF;
+                padding: 5px 10px; border-radius: 5px;
+            }
+            QPushButton:hover { background-color: #C0DFFF; }
+            QPushButton:pressed { background-color: #A0CFFF; }
+        """)
+        self.apply_filters_button.clicked.connect(self.apply_filters)
+        filter_layout.addWidget(self.apply_filters_button, 2, 0, 1, 2)
+
+        self.clear_filters_button = QPushButton("Clear Filters")
+        self.clear_filters_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogResetButton))
+        self.clear_filters_button.setStyleSheet("""
+            QPushButton {
+                background-color: #E0EFFF; border: 1px solid #A0CFFF;
+                padding: 5px 10px; border-radius: 5px;
+            }
+            QPushButton:hover { background-color: #C0DFFF; }
+            QPushButton:pressed { background-color: #A0CFFF; }
+        """)
+        self.clear_filters_button.clicked.connect(self.clear_filters)
+        filter_layout.addWidget(self.clear_filters_button, 2, 2, 1, 2)
+
         filter_layout.setColumnStretch(1, 1); filter_layout.setColumnStretch(3, 1)
         
         groupbox_main_layout = QVBoxLayout(self.filter_groupbox)
         groupbox_main_layout.setContentsMargins(0,5,0,0) 
         groupbox_main_layout.addWidget(self.filter_widgets_container)
         
-        self.filter_groupbox.toggled.connect(self.filter_widgets_container.setVisible)
-        self.filter_widgets_container.setVisible(self.filter_groupbox.isChecked()) 
-
+        self.filter_groupbox.setVisible(False)
         return self.filter_groupbox
 
+    def _toggle_filter_panel_visibility(self):
+        if hasattr(self, 'filter_groupbox'):
+            is_visible = self.filter_groupbox.isVisible()
+            self.filter_groupbox.setVisible(not is_visible)
 
     def apply_filters(self):
         if not hasattr(self, 'filter_proxy_model'): return
         self.filter_proxy_model.set_uuid_filter(self.uuid_filter_edit.text())
-        
-        # Date filter lines removed
-        
         self.filter_proxy_model.set_export_status_filter(self.export_status_combo.currentText())
         self.filter_proxy_model.set_error_status_filter(self.error_status_combo.currentText())
-
+        if hasattr(self, 'filter_groupbox') and self.filter_groupbox.isVisible():
+            self.filter_groupbox.setVisible(False)
 
     def clear_filters(self):
         self.uuid_filter_edit.clear()
-
         self.export_status_combo.setCurrentIndex(0) 
         self.error_status_combo.setCurrentIndex(0)
         self.apply_filters()
 
     def _setup_main_content_area(self):
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal) 
-        
-        self.map_view_widget = MapViewWidget(self) 
-        self.map_view_widget.setMinimumWidth(300) 
-
-        self.google_earth_view_widget = GoogleEarthWebViewWidget(self)
-        self.google_earth_view_widget.setMinimumWidth(300)
-
-        self.map_stack = QStackedWidget(self)
-        self.map_stack.addWidget(self.map_view_widget) 
-        self.map_stack.addWidget(self.google_earth_view_widget) 
-        
+        self.map_view_widget = MapViewWidget(self); self.map_view_widget.setMinimumWidth(300)
+        self.google_earth_view_widget = GoogleEarthWebViewWidget(self); self.google_earth_view_widget.setMinimumWidth(300)
+        self.map_stack = QStackedWidget(self); self.map_stack.addWidget(self.map_view_widget); self.map_stack.addWidget(self.google_earth_view_widget)
         self.main_splitter.addWidget(self.map_stack)
+        right_pane_widget = QWidget(); right_pane_layout = QVBoxLayout(right_pane_widget); right_pane_layout.setContentsMargins(10,0,10,10)
 
-        right_pane_widget = QWidget()
-        right_pane_layout = QVBoxLayout(right_pane_widget)
-        right_pane_layout.setContentsMargins(10,0,10,10) 
+        self.table_editors_strip = QWidget()
+        strip_layout = QHBoxLayout(self.table_editors_strip)
+        strip_layout.setContentsMargins(0,0,0,0); strip_layout.addStretch()
+        self.toggle_filter_panel_button = QPushButton(" Filters")
+        self.toggle_filter_panel_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
+        self.toggle_filter_panel_button.setStyleSheet("padding: 3px;")
+        self.toggle_filter_panel_button.clicked.connect(self._toggle_filter_panel_visibility)
+        strip_layout.addWidget(self.toggle_filter_panel_button)
+        right_pane_layout.addWidget(self.table_editors_strip)
 
         filter_panel_widget = self._setup_filter_panel()
         right_pane_layout.addWidget(filter_panel_widget)
 
-
         self.right_splitter = QSplitter(Qt.Orientation.Vertical) 
-        table_container = QWidget()
-        table_layout = QVBoxLayout(table_container)
-        table_layout.setContentsMargins(0,0,0,0) 
-        
-        checkbox_header_layout = QHBoxLayout()
-        self.select_all_checkbox = QCheckBox("Select/Deselect All")
-        self.select_all_checkbox.stateChanged.connect(self.toggle_all_checkboxes)
-        checkbox_header_layout.addWidget(self.select_all_checkbox)
-        checkbox_header_layout.addStretch()
-        table_layout.addLayout(checkbox_header_layout)
-        
-        self.table_view = QTableView()
-        # self.db_manager is initialized in MainWindow.__init__
-        # Pass the db_manager instance to the PolygonTableModel constructor
-        self.source_model = PolygonTableModel(parent=self, db_manager_instance=self.db_manager) 
-        self.filter_proxy_model = PolygonFilterProxyModel(self)
-        self.filter_proxy_model.setSourceModel(self.source_model)
-        self.table_view.setModel(self.filter_proxy_model)
+        table_container = QWidget(); table_layout = QVBoxLayout(table_container); table_layout.setContentsMargins(0,0,0,0)
+        checkbox_header_layout = QHBoxLayout(); self.select_all_checkbox = QCheckBox("Select/Deselect All"); self.select_all_checkbox.stateChanged.connect(self.toggle_all_checkboxes); checkbox_header_layout.addWidget(self.select_all_checkbox); checkbox_header_layout.addStretch(); table_layout.addLayout(checkbox_header_layout)
+        self.table_view = QTableView(); self.source_model = PolygonTableModel(parent=self, db_manager_instance=self.db_manager); self.filter_proxy_model = PolygonFilterProxyModel(self); self.filter_proxy_model.setSourceModel(self.source_model); self.table_view.setModel(self.filter_proxy_model)
+        self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows); self.table_view.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked|QAbstractItemView.EditTrigger.SelectedClicked); self.table_view.horizontalHeader().setStretchLastSection(True); self.table_view.setAlternatingRowColors(False); self.table_view.setSortingEnabled(True); self.table_view.sortByColumn(self.source_model.DATE_ADDED_COL,Qt.SortOrder.DescendingOrder)
+        evaluation_delegate = EvaluationStatusDelegate(self.table_view); self.table_view.setItemDelegateForColumn(self.source_model.EVALUATION_STATUS_COL, evaluation_delegate)
+        self.table_view.setColumnWidth(self.source_model.CHECKBOX_COL,30); self.table_view.setColumnWidth(self.source_model.DB_ID_COL,50); self.table_view.setColumnWidth(self.source_model.UUID_COL,130); self.table_view.setColumnWidth(self.source_model.RESPONSE_CODE_COL,120); self.table_view.setColumnWidth(self.source_model.EVALUATION_STATUS_COL,150); self.table_view.setColumnWidth(self.source_model.FARMER_NAME_COL,150); self.table_view.setColumnWidth(self.source_model.VILLAGE_COL,120); self.table_view.setColumnWidth(self.source_model.DATE_ADDED_COL,140); self.table_view.setColumnWidth(self.source_model.KML_FILE_NAME_COL,150); self.table_view.setColumnWidth(self.source_model.KML_FILE_STATUS_COL,110); self.table_view.setColumnWidth(self.source_model.EDIT_COUNT_COL,90); self.table_view.setColumnWidth(self.source_model.LAST_EDIT_DATE_COL,140); self.table_view.setColumnWidth(self.source_model.EDITOR_DEVICE_ID_COL,130); self.table_view.setColumnWidth(self.source_model.EDITOR_NICKNAME_COL,130); self.table_view.setColumnWidth(self.source_model.DEVICE_CODE_COL,140); self.table_view.setColumnWidth(self.source_model.EXPORT_COUNT_COL,100); self.table_view.setColumnWidth(self.source_model.LAST_EXPORTED_COL,140); self.table_view.setColumnWidth(self.source_model.LAST_MODIFIED_COL,140)
+        table_layout.addWidget(self.table_view); self.right_splitter.addWidget(table_container); self.table_view.selectionModel().selectionChanged.connect(self.on_table_selection_changed)
+        log_container = QWidget(); log_layout = QVBoxLayout(log_container); log_layout.setContentsMargins(0,10,0,0); log_label = QLabel("Status and Logs:"); log_layout.addWidget(log_label); self.log_text_edit_qt_actual = QTextEdit(); self.log_text_edit_qt_actual.setReadOnly(True); self.log_text_edit_qt_actual.setFont(QFont("Segoe UI",9)); log_layout.addWidget(self.log_text_edit_qt_actual); self.right_splitter.addWidget(log_container)
+        self.right_splitter.setStretchFactor(0,3); self.right_splitter.setStretchFactor(1,1); right_pane_layout.addWidget(self.right_splitter,1); self.main_splitter.addWidget(right_pane_widget)
+        self.main_splitter.setStretchFactor(0,1); self.main_splitter.setStretchFactor(1,2); self.main_layout.addWidget(self.main_splitter,1)
 
-        self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        # Allow editing specifically for delegate-managed columns, triggered by DoubleClicked or SelectedClicked
-        self.table_view.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.SelectedClicked)
-        self.table_view.horizontalHeader().setStretchLastSection(True)
-        self.table_view.setAlternatingRowColors(False) # Changed to False
-        self.table_view.setSortingEnabled(True) 
-        # Sort by Date Added (column index 7 after new column) by default
-        self.table_view.sortByColumn(self.source_model.DATE_ADDED_COL, Qt.SortOrder.DescendingOrder) 
-
-        # Setup Delegate for Evaluation Status Column
-        evaluation_delegate = EvaluationStatusDelegate(self.table_view) # Pass table_view as parent
-        self.table_view.setItemDelegateForColumn(self.source_model.EVALUATION_STATUS_COL, evaluation_delegate)
-
-        # Temporarily remove stylesheet for debugging background colors
-        # self.table_view.setStyleSheet("""
-        #     QTableView {
-        #         border: 1px solid #D0D0D0; gridline-color: #E0E0E0;
-        #         selection-background-color: #AED6F1; selection-color: black;
-        #     }
-        #     QTableView::item { padding: 5px; border-bottom: 1px solid #E0E0E0; border-right: none; }
-        #     QTableView::item:selected { background-color: #AED6F1; color: black; }
-        #     QHeaderView::section { background-color: #EAEAEA; padding: 6px;
-        #                            border: none; border-bottom: 1px solid #C0C0C0; font-weight: bold; }
-        #     QHeaderView { border: none; }
-        # """)
-
-        self.table_view.setColumnWidth(self.source_model.CHECKBOX_COL, 30)
-        self.table_view.setColumnWidth(self.source_model.DB_ID_COL, 50)
-        self.table_view.setColumnWidth(self.source_model.UUID_COL, 130)
-        self.table_view.setColumnWidth(self.source_model.RESPONSE_CODE_COL, 120)
-        self.table_view.setColumnWidth(self.source_model.EVALUATION_STATUS_COL, 150)
-        self.table_view.setColumnWidth(self.source_model.FARMER_NAME_COL, 150)
-        self.table_view.setColumnWidth(self.source_model.VILLAGE_COL, 120)
-        self.table_view.setColumnWidth(self.source_model.DATE_ADDED_COL, 140)
-        self.table_view.setColumnWidth(self.source_model.KML_FILE_NAME_COL, 150)
-        self.table_view.setColumnWidth(self.source_model.KML_FILE_STATUS_COL, 110)
-        self.table_view.setColumnWidth(self.source_model.EDIT_COUNT_COL, 90)
-        self.table_view.setColumnWidth(self.source_model.LAST_EDIT_DATE_COL, 140)
-        self.table_view.setColumnWidth(self.source_model.EDITOR_DEVICE_ID_COL, 130)
-        self.table_view.setColumnWidth(self.source_model.EDITOR_NICKNAME_COL, 130)
-        self.table_view.setColumnWidth(self.source_model.DEVICE_CODE_COL, 140)
-        self.table_view.setColumnWidth(self.source_model.EXPORT_COUNT_COL, 100)
-        self.table_view.setColumnWidth(self.source_model.LAST_EXPORTED_COL, 140)
-        self.table_view.setColumnWidth(self.source_model.LAST_MODIFIED_COL, 140)
-
-        table_layout.addWidget(self.table_view) 
-        self.right_splitter.addWidget(table_container)
-        self.table_view.selectionModel().selectionChanged.connect(self.on_table_selection_changed)
-
-        log_container = QWidget()
-        log_layout = QVBoxLayout(log_container)
-        log_layout.setContentsMargins(0,10,0,0) 
-        log_label = QLabel("Status and Logs:")
-        log_layout.addWidget(log_label)
-        self.log_text_edit_qt_actual = QTextEdit() 
-        self.log_text_edit_qt_actual.setReadOnly(True)
-        self.log_text_edit_qt_actual.setFont(QFont("Segoe UI", 9))
-        log_layout.addWidget(self.log_text_edit_qt_actual) 
-        self.right_splitter.addWidget(log_container)
-        
-        self.right_splitter.setStretchFactor(0, 3) 
-        self.right_splitter.setStretchFactor(1, 1) 
-
-        right_pane_layout.addWidget(self.right_splitter, 1) 
-        self.main_splitter.addWidget(right_pane_widget) 
-        
-        self.main_splitter.setStretchFactor(0, 1) 
-        self.main_splitter.setStretchFactor(1, 2) 
-        
-        self.main_layout.addWidget(self.main_splitter, 1) 
-        
-
-    def toggle_all_checkboxes(self, state_int):
-        check_state = Qt.CheckState(state_int)
-        self.source_model.set_all_checkboxes(check_state)
-
-    def on_table_selection_changed(self, selected, deselected):
-        selected_proxy_indexes = self.table_view.selectionModel().selectedRows()
-        polygon_record = None # Initialize polygon_record
-
+    def toggle_all_checkboxes(self,state_int): self.source_model.set_all_checkboxes(Qt.CheckState(state_int))
+    def on_table_selection_changed(self,selected,deselected):
+        selected_proxy_indexes=self.table_view.selectionModel().selectedRows(); polygon_record=None
         if selected_proxy_indexes:
-            source_model_index = self.filter_proxy_model.mapToSource(selected_proxy_indexes[0])
+            source_model_index=self.filter_proxy_model.mapToSource(selected_proxy_indexes[0])
             if source_model_index.isValid():
-                db_id_item = self.source_model.data(source_model_index.siblingAtColumn(self.source_model.DB_ID_COL))
-                try:
-                    db_id = int(db_id_item)
-                    polygon_record = self.db_manager.get_polygon_data_by_id(db_id)
-                except (ValueError, TypeError):
-                    self.log_message(f"Map/GE: Invalid ID for selected row.", "error")
-                    polygon_record = None # Ensure it's None on error
-                except Exception as e:
-                    self.log_message(f"Map/GE: Error fetching record: {e}", "error")
-                    polygon_record = None # Ensure it's None on error
-        
-        # Logic for Google Earth View
-        if self.map_stack.currentIndex() == 1: # Google Earth View is active
-            if polygon_record and polygon_record.get('status') == 'valid_for_kml':
-                self._trigger_ge_polygon_upload(polygon_record)
-            else:
-                # Clear map if no valid selection or record not valid for KML
-                # self.google_earth_view_widget.clear_polygon_highlight() # Assuming such a method might exist
-                self.log_message("GE View: No valid polygon record selected or record not valid for KML upload.", "warning")
-        # Logic for original MapViewWidget
+                db_id_item=self.source_model.data(source_model_index.siblingAtColumn(self.source_model.DB_ID_COL))
+                try: db_id=int(db_id_item); polygon_record=self.db_manager.get_polygon_data_by_id(db_id)
+                except(ValueError,TypeError):self.log_message(f"Map/GE: Invalid ID for selected row.","error");polygon_record=None
+                except Exception as e:self.log_message(f"Map/GE: Error fetching record: {e}","error");polygon_record=None
+        if self.map_stack.currentIndex()==1:
+            if polygon_record and polygon_record.get('status')=='valid_for_kml': self._trigger_ge_polygon_upload(polygon_record)
+            else: self.log_message("GE View: No valid polygon record selected or record not valid for KML upload.","warning")
         else:
-            if polygon_record and polygon_record.get('status') == 'valid_for_kml':
-                coords_lat_lon, utm_valid = [], True
+            if polygon_record and polygon_record.get('status')=='valid_for_kml':
+                coords_lat_lon,utm_valid=[],True
                 for i in range(1,5):
-                    e,n=polygon_record.get(f'p{i}_easting'),polygon_record.get(f'p{i}_northing')
-                    zn,zl=polygon_record.get(f'p{i}_zone_num'),polygon_record.get(f'p{i}_zone_letter')
-                    if None in [e,n,zn,zl]: utm_valid=False; break
-                    try: lat,lon=utm.to_latlon(e,n,zn,zl); coords_lat_lon.append((lat,lon)) 
-                    except Exception as e_conv: self.log_message(f"Map: UTM conv fail {polygon_record.get('uuid')}, P{i}: {e_conv}","error"); utm_valid=False; break
-                if utm_valid and len(coords_lat_lon)==4: self.map_view_widget.display_polygon(coords_lat_lon,coords_lat_lon[0])
-                elif hasattr(self,'map_view_widget'): self.map_view_widget.clear_map()
-            else: # No valid selection or record not suitable for map
-                if hasattr(self,'map_view_widget'): self.map_view_widget.clear_map()
-
+                    e,n=polygon_record.get(f'p{i}_easting'),polygon_record.get(f'p{i}_northing');zn,zl=polygon_record.get(f'p{i}_zone_num'),polygon_record.get(f'p{i}_zone_letter')
+                    if None in[e,n,zn,zl]:utm_valid=False;break
+                    try:lat,lon=utm.to_latlon(e,n,zn,zl);coords_lat_lon.append((lat,lon))
+                    except Exception as e_conv:self.log_message(f"Map: UTM conv fail {polygon_record.get('uuid')},P{i}:{e_conv}","error");utm_valid=False;break
+                if utm_valid and len(coords_lat_lon)==4:self.map_view_widget.display_polygon(coords_lat_lon,coords_lat_lon[0])
+                elif hasattr(self,'map_view_widget'):self.map_view_widget.clear_map()
+            elif hasattr(self,'map_view_widget'):self.map_view_widget.clear_map()
     def refresh_api_source_dropdown(self):
-        if hasattr(self, 'api_source_combo_toolbar'):
-            current_text = self.api_source_combo_toolbar.currentText()
-            self.api_source_combo_toolbar.clear()
-            sources = self.db_manager.get_mwater_sources()
-            for sid, title, url in sources: self.api_source_combo_toolbar.addItem(title, userData=url) 
-            index = self.api_source_combo_toolbar.findText(current_text)
-            if index != -1: self.api_source_combo_toolbar.setCurrentIndex(index)
-            elif sources: self.api_source_combo_toolbar.setCurrentIndex(0)
-
-    def handle_manage_api_sources(self):
-        dialog = APISourcesDialog(self, self.db_manager); dialog.exec(); self.refresh_api_source_dropdown() 
-
+        if hasattr(self,'api_source_combo_toolbar'):
+            current_text=self.api_source_combo_toolbar.currentText();self.api_source_combo_toolbar.clear();sources=self.db_manager.get_mwater_sources()
+            for sid,title,url in sources:self.api_source_combo_toolbar.addItem(title,userData=url)
+            index=self.api_source_combo_toolbar.findText(current_text)
+            if index!=-1:self.api_source_combo_toolbar.setCurrentIndex(index)
+            elif sources:self.api_source_combo_toolbar.setCurrentIndex(0)
+    def handle_manage_api_sources(self):dialog=APISourcesDialog(self,self.db_manager);dialog.exec();self.refresh_api_source_dropdown()
     def handle_import_csv(self):
-        filepath, _ = QFileDialog.getOpenFileName(self, "Select CSV File", os.path.expanduser("~/Documents"), "CSV files (*.csv);;All files (*.*)")
-        if not filepath: return
-        self.log_message(f"Loading CSV: {filepath}", "info")
+        filepath,_=QFileDialog.getOpenFileName(self,"Select CSV File",os.path.expanduser("~/Documents"),"CSV files (*.csv);;All files (*.*)")
+        if not filepath:return;self.log_message(f"Loading CSV: {filepath}","info")
         try:
-            with open(filepath, mode='r', encoding='utf-8-sig') as csvfile:
-                reader = csv.DictReader(csvfile)
-                self._process_imported_data(list(reader), f"CSV '{os.path.basename(filepath)}'") 
-        except Exception as e: self.log_message(f"Error reading CSV '{filepath}': {e}", "error"); QMessageBox.critical(self, "CSV Error", f"Could not read CSV file:\n{e}")
-
-    def handle_fetch_from_api(self, url=None, title=None):
-        selected_api_url = None
-        selected_api_title = None
-
-        if url and title:
-            selected_api_url = url
-            selected_api_title = title
-            self.log_message(f"Fetching directly from API (via dialog): {selected_api_title}...", "info")
+            with open(filepath,mode='r',encoding='utf-8-sig')as csvfile:reader=csv.DictReader(csvfile);self._process_imported_data(list(reader),f"CSV '{os.path.basename(filepath)}'")
+        except Exception as e:self.log_message(f"Error reading CSV '{filepath}': {e}","error");QMessageBox.critical(self,"CSV Error",f"Could not read CSV file:\n{e}")
+    def handle_fetch_from_api(self,url=None,title=None):
+        selected_api_url,selected_api_title=None,None
+        if url and title:selected_api_url,selected_api_title=url,title;self.log_message(f"Fetching directly from API (via dialog):{selected_api_title}...","info")
         else:
-            selected_api_title = self.api_source_combo_toolbar.currentText()
-            selected_api_url = self.api_source_combo_toolbar.currentData()
-            if not selected_api_url:
-                QMessageBox.information(self, "API Fetch", "No API source selected from dropdown or URL is missing.")
-                return
-            self.log_message(f"Fetching from selected API (dropdown): {selected_api_title}...", "info")
-
-        rows_from_api, error_msg = fetch_data_from_mwater_api(selected_api_url, selected_api_title)
-        if error_msg:
-            self.log_message(f"API Fetch Error ({selected_api_title}): {error_msg}", "error")
-            QMessageBox.warning(self, "API Fetch Error", error_msg)
-            return
-
-        if rows_from_api is not None:
-            # Pass is_api_data=True and the map
-            self._process_imported_data(rows_from_api, selected_api_title, is_api_data=True, api_map=API_FIELD_TO_DB_FIELD_MAP)
-        else:
-            self.log_message(f"No data returned or error for {selected_api_title}.", "info")
-
-    def _process_imported_data(self, row_list, source_description, is_api_data=False, api_map=None):
-        if not row_list:
-            self.log_message(f"No data rows found in {source_description}.", "info")
-            return
-
-        if is_api_data and not api_map:
-            self.log_message(f"API data processing aborted: api_map not provided for {source_description}.", "error")
-            QMessageBox.critical(self, "Processing Error", "API map is missing for API data processing.")
-            return
-
-        # BOM Character Cleaning for API data keys
+            selected_api_title=self.api_source_combo_toolbar.currentText();selected_api_url=self.api_source_combo_toolbar.currentData()
+            if not selected_api_url:QMessageBox.information(self,"API Fetch","No API source selected from dropdown or URL is missing.");return
+            self.log_message(f"Fetching from selected API (dropdown):{selected_api_title}...","info")
+        rows_from_api,error_msg=fetch_data_from_mwater_api(selected_api_url,selected_api_title)
+        if error_msg:self.log_message(f"API Fetch Error ({selected_api_title}):{error_msg}","error");QMessageBox.warning(self,"API Fetch Error",error_msg);return
+        if rows_from_api is not None:self._process_imported_data(rows_from_api,selected_api_title,is_api_data=True,api_map=API_FIELD_TO_DB_FIELD_MAP)
+        else:self.log_message(f"No data returned or error for {selected_api_title}.","info")
+    def _process_imported_data(self,row_list,source_description,is_api_data=False,api_map=None):
+        if not row_list:self.log_message(f"No data rows found in {source_description}.","info");return
+        if is_api_data and not api_map:self.log_message(f"API data processing aborted: api_map not provided for {source_description}.","error");QMessageBox.critical(self,"Processing Error","API map is missing for API data processing.");return
         if is_api_data:
-            cleaned_row_list = []
-            # Use a different variable name for the items in the original row_list
-            # to avoid confusion with original_row_dict used later in the main processing loop.
-            for api_row_original_keys in row_list:
-                cleaned_row_list.append({k.lstrip('\ufeff'): v for k, v in api_row_original_keys.items()})
-            row_list = cleaned_row_list # Replace original row_list with the cleaned one
-            self.log_message("Cleaned BOM characters from API data keys.", "info")
-            # Diagnostic logging for API data keys
-            if row_list: # Check if row_list is not empty after cleaning (or if it was empty to begin with)
-                self.log_message(f"API Data Keys (first row after BOM cleaning): {list(row_list[0].keys())}", "info")
-
-        if not self.credential_manager:
-            self.log_message("Credential Manager not available. Cannot process API data for KML generation.", "error")
-            QMessageBox.critical(self, "Error", "Credential Manager not available.")
-            return
-
-        kml_root_path = self.credential_manager.get_kml_folder_path()
-        device_id = self.credential_manager.get_device_id()
-        device_nickname = self.credential_manager.get_device_nickname()
-
-        if not kml_root_path or not device_id:
-            self.log_message("KML root path or device ID not set in credentials. Cannot process data.", "error")
-            QMessageBox.warning(self, "Configuration Error", "KML root path or device ID not set. Please configure them via settings/credentials manager.")
-            return
-
-        progress_dialog = APIImportProgressDialog(self)
-        progress_dialog.set_total_records(len(row_list))
-        progress_dialog.show()
-
-        processed_in_loop = 0
-        skipped_in_loop = 0
-        new_added_in_loop = 0
-        
-        for i, original_row_dict in enumerate(row_list):
-            processed_in_loop += 1
-            current_errors = [] # To accumulate errors for this record
-
-            rc_from_row = ""
-            # Determine response_code for duplicate check and logging
-            rc_from_row = ""
+            cleaned_row_list=[]
+            for api_row_original_keys in row_list:cleaned_row_list.append({k.lstrip('\ufeff'):v for k,v in api_row_original_keys.items()})
+            row_list=cleaned_row_list;self.log_message("Cleaned BOM characters from API data keys.","info")
+            if row_list:self.log_message(f"API Data Keys (first row after BOM cleaning):{list(row_list[0].keys())}","info")
+        if not self.credential_manager:self.log_message("Credential Manager not available.","error");QMessageBox.critical(self,"Error","Credential Manager not available.");return
+        kml_root_path,device_id,device_nickname=self.credential_manager.get_kml_folder_path(),self.credential_manager.get_device_id(),self.credential_manager.get_device_nickname()
+        if not kml_root_path or not device_id:self.log_message("KML root path or device ID not set.","error");QMessageBox.warning(self,"Configuration Error","KML root path or device ID not set.");return
+        progress_dialog=APIImportProgressDialog(self);progress_dialog.set_total_records(len(row_list));progress_dialog.show()
+        processed_in_loop,skipped_in_loop,new_added_in_loop=0,0,0
+        for i,original_row_dict in enumerate(row_list):
+            processed_in_loop+=1;current_errors=[];rc_from_row=""
             if is_api_data and api_map:
-                # Find the API key that maps to "response_code"
-                api_rc_key = None
-                for k, v in api_map.items():
-                    if v == "response_code":
-                        api_rc_key = k
-                        break
-                if api_rc_key:
-                    rc_from_row = original_row_dict.get(api_rc_key, "").strip()
-            else: # CSV data
-                response_code_header_key = CSV_HEADERS["response_code"]
-                for k, v_csv in original_row_dict.items(): # Renamed v to v_csv to avoid conflict
-                    if k.lstrip('\ufeff') == response_code_header_key:
-                        rc_from_row = v_csv.strip() if v_csv else ""
-                        break
-            
-            if not rc_from_row:
-                self.log_message(f"Row {i+1} from {source_description} skipped: Missing Response Code.", "error")
-                current_errors.append("Missing Response Code.") # Add to current_errors for this row
-                skipped_in_loop += 1
-                progress_dialog.update_progress(processed_in_loop, skipped_in_loop, new_added_in_loop)
-                if progress_dialog.was_cancelled(): break
-                continue # Skip this iteration
-
-            if self.db_manager.check_duplicate_response_code(rc_from_row):
-                self.log_message(f"Skipped duplicate Response Code '{rc_from_row}'.", "info")
-                skipped_in_loop += 1
-                progress_dialog.update_progress(processed_in_loop, skipped_in_loop, new_added_in_loop)
-                if progress_dialog.was_cancelled(): break
-                continue # Skip this iteration
-
-            # Data Processing Call
-            if is_api_data and api_map:
-                processed_flat = process_api_row_data(original_row_dict, api_map)
+                api_rc_key=next((k for k,v in api_map.items()if v=="response_code"),None)
+                if api_rc_key:rc_from_row=original_row_dict.get(api_rc_key,"").strip()
             else:
-                processed_flat = process_csv_row_data(original_row_dict)
-
-            # UUID Handling: Ensure uuid is present, generate if missing
-            if not processed_flat.get("uuid"):
-                generated_uuid = str(uuid.uuid4())
-                log_msg_uuid = f"UUID missing for RC '{rc_from_row}' (source: {'API' if is_api_data else 'CSV'}). Generated new UUID: {generated_uuid}"
-                self.log_message(log_msg_uuid, "warning")
-                current_errors.append(f"UUID missing, generated: {generated_uuid}")
-                processed_flat["uuid"] = generated_uuid
-
-            # Accumulate errors from data processing
+                response_code_header_key=CSV_HEADERS["response_code"]
+                for k,v_csv in original_row_dict.items():
+                    if k.lstrip('\ufeff')==response_code_header_key:rc_from_row=v_csv.strip()if v_csv else"";break
+            if not rc_from_row:self.log_message(f"Row {i+1} from {source_description} skipped: Missing Response Code.","error");current_errors.append("Missing Response Code.");skipped_in_loop+=1;progress_dialog.update_progress(processed_in_loop,skipped_in_loop,new_added_in_loop);
+            if progress_dialog.was_cancelled():break;continue
+            if self.db_manager.check_duplicate_response_code(rc_from_row):self.log_message(f"Skipped duplicate RC '{rc_from_row}'.","info");skipped_in_loop+=1;progress_dialog.update_progress(processed_in_loop,skipped_in_loop,new_added_in_loop);
+            if progress_dialog.was_cancelled():break;continue
+            processed_flat=process_api_row_data(original_row_dict,api_map)if is_api_data and api_map else process_csv_row_data(original_row_dict)
+            if not processed_flat.get("uuid"):generated_uuid=str(uuid.uuid4());self.log_message(f"UUID missing for RC '{rc_from_row}'. Generated: {generated_uuid}","warning");current_errors.append(f"UUID missing,generated:{generated_uuid}");processed_flat["uuid"]=generated_uuid
             if processed_flat.get('error_messages'):
-                # Ensure it's treated as a list for consistent appending
-                if isinstance(processed_flat['error_messages'], str):
-                    current_errors.append(f"Data processing issues: {processed_flat['error_messages']}")
-                elif isinstance(processed_flat['error_messages'], list): # Should not happen based on processor
-                    current_errors.extend(processed_flat['error_messages'])
-
-            kml_file_name = f"{processed_flat['uuid']}.kml"
-            kml_content_ok = False
-            kml_saved_successfully = False
-
-            # Attempt KML generation only if data processing suggests it's valid_for_kml
-            # process_csv_row_data now adds 'status' field.
-            if processed_flat.get('status') == 'valid_for_kml':
-                kml_doc = simplekml.Kml()
+                if isinstance(processed_flat['error_messages'],str):current_errors.append(f"Data processing issues:{processed_flat['error_messages']}")
+                elif isinstance(processed_flat['error_messages'],list):current_errors.extend(processed_flat['error_messages'])
+            kml_file_name,kml_content_ok,kml_saved_successfully=f"{processed_flat['uuid']}.kml",False,False
+            if processed_flat.get('status')=='valid_for_kml':
+                kml_doc=simplekml.Kml()
                 try:
-                    kml_content_ok = add_polygon_to_kml_object(kml_doc, processed_flat)
-                    if not kml_content_ok:
-                        current_errors.append("Failed to generate KML content (add_polygon_to_kml_object failed).")
-                except Exception as e_kml_gen:
-                    kml_content_ok = False
-                    current_errors.append(f"Exception during KML content generation: {e_kml_gen}")
-                    self.log_message(f"KML Generation Exception for UUID {processed_flat['uuid']}: {e_kml_gen}", "error")
-
+                    kml_content_ok=add_polygon_to_kml_object(kml_doc,processed_flat)
+                    if not kml_content_ok:current_errors.append("Failed KML content gen.")
+                except Exception as e_kml_gen:kml_content_ok=False;current_errors.append(f"KML gen exception:{e_kml_gen}");self.log_message(f"KML Gen Ex for {processed_flat['uuid']}:{e_kml_gen}","error")
                 if kml_content_ok:
-                    full_kml_path = os.path.join(kml_root_path, kml_file_name)
-                    try:
-                        kml_doc.save(full_kml_path)
-                        kml_saved_successfully = True
-                        self.log_message(f"KML file saved: {full_kml_path}", "info")
-                    except Exception as e_kml_save:
-                        kml_saved_successfully = False
-                        error_msg = f"Failed to save KML file '{full_kml_path}': {e_kml_save}"
-                        current_errors.append(error_msg)
-                        self.log_message(error_msg, "error")
-            else: # Not valid_for_kml based on process_csv_row_data
-                msg = f"Skipping KML generation for RC '{rc_from_row}' (UUID {processed_flat['uuid']}) as data status is '{processed_flat.get('status')}'."
-                current_errors.append(msg)
-                self.log_message(msg, "info")
-
-
-            # Prepare data for database
-            db_data = processed_flat.copy() # Start with all processed data
-            db_data['kml_file_name'] = kml_file_name
-            db_data['kml_file_status'] = "Created" if kml_saved_successfully else "Errored"
-
-            # Device code: Prefer API's if available, else use current app's device_id
-            # processed_flat.get('device_code') would come from process_api_row_data if mapped
-            api_device_code = processed_flat.get('device_code')
-            db_data['device_code'] = api_device_code if api_device_code else device_id
-
-            db_data['editor_device_id'] = device_id # Current app is the creator/editor initially
-            db_data['editor_device_nickname'] = device_nickname
-
-            # Remove the 'status' field from processed_flat as it's superseded by kml_file_status and error messages
-            db_data.pop('status', None)
-
-            # Consolidate error messages: errors from processing + KML generation/saving
-            # current_errors already contains processing errors (if any, prepended with "Data processing issues:")
-            # and KML generation errors.
-            final_error_messages = "\n".join(filter(None, current_errors))
-            db_data['error_messages'] = final_error_messages if final_error_messages else None
-
-            # Date handling:
-            # last_modified is always now.
-            db_data["last_modified"] = datetime.datetime.now().isoformat()
-            # date_added: Use from processed_flat if available (e.g., mapped from API), else now.
-            # Ensure it's in correct ISO format if coming from processed_flat.
-            # For now, assume process_api_row_data/process_csv_row_data doesn't yet format date_added.
-            # This might need refinement if date_added from source is in a different format.
-            # For simplicity, if 'date_added' is in processed_flat and is a non-empty string, use it, else now.
-            existing_date_added = processed_flat.get("date_added")
-            if existing_date_added and isinstance(existing_date_added, str) and existing_date_added.strip():
-                 # TODO: Potentially parse and reformat existing_date_added to ensure ISO format
-                 # For now, assume it's either correctly formatted or needs to be.
-                 # If it's from our API processor, it's just a stripped string.
-                 # This part might need a utility if dates from API are not ISO.
-                db_data["date_added"] = existing_date_added
-            else:
-                db_data["date_added"] = datetime.datetime.now().isoformat()
-
-
-            db_result_id = self.db_manager.add_or_update_polygon_data(db_data, overwrite=False)
-
-            if db_result_id is not None:
-                new_added_in_loop += 1
-                self.log_message(f"Record for RC '{rc_from_row}' (UUID {db_data['uuid']}) saved to DB with ID {db_result_id}. KML status: {db_data['kml_file_status']}.", "info")
-            else:
-                self.log_message(f"Failed to save RC '{rc_from_row}' (UUID {db_data['uuid']}) to DB.", "error")
-                skipped_in_loop += 1
-
-            progress_dialog.update_progress(processed_in_loop, skipped_in_loop, new_added_in_loop)
-            if progress_dialog.was_cancelled():
-                self.log_message("Import cancelled by user.", "info")
-                break
-        
-        progress_dialog.close()
-        self.load_data_into_table()
-        self.log_message(
-            f"Import from {source_description}: "
-            f"Attempted: {processed_in_loop}, "
-            f"New Added: {new_added_in_loop}, "
-            f"Skipped (Duplicates/Errors): {skipped_in_loop}.",
-            "info"
-        )
-
+                    full_kml_path=os.path.join(kml_root_path,kml_file_name)
+                    try:kml_doc.save(full_kml_path);kml_saved_successfully=True;self.log_message(f"KML saved:{full_kml_path}","info")
+                    except Exception as e_kml_save:kml_saved_successfully=False;error_msg=f"Failed KML save'{full_kml_path}':{e_kml_save}";current_errors.append(error_msg);self.log_message(error_msg,"error")
+            else:msg=f"Skipping KML gen for RC'{rc_from_row}'(UUID {processed_flat['uuid']}),status:'{processed_flat.get('status')}'";current_errors.append(msg);self.log_message(msg,"info")
+            db_data=processed_flat.copy();db_data['kml_file_name']=kml_file_name;db_data['kml_file_status']="Created"if kml_saved_successfully else"Errored"
+            api_device_code=processed_flat.get('device_code');db_data['device_code']=api_device_code if api_device_code else device_id
+            db_data['editor_device_id']=device_id;db_data['editor_device_nickname']=device_nickname;db_data.pop('status',None)
+            final_error_messages="\n".join(filter(None,current_errors));db_data['error_messages']=final_error_messages if final_error_messages else None
+            db_data["last_modified"]=datetime.datetime.now().isoformat()
+            existing_date_added=processed_flat.get("date_added")
+            if existing_date_added and isinstance(existing_date_added,str)and existing_date_added.strip():db_data["date_added"]=existing_date_added
+            else:db_data["date_added"]=datetime.datetime.now().isoformat()
+            db_result_id=self.db_manager.add_or_update_polygon_data(db_data,overwrite=False)
+            if db_result_id is not None:new_added_in_loop+=1;self.log_message(f"RC'{rc_from_row}'(UUID {db_data['uuid']})saved to DB ID {db_result_id}.KML:{db_data['kml_file_status']}.","info")
+            else:self.log_message(f"Failed to save RC'{rc_from_row}'(UUID {db_data['uuid']})to DB.","error");skipped_in_loop+=1
+            progress_dialog.update_progress(processed_in_loop,skipped_in_loop,new_added_in_loop)
+            if progress_dialog.was_cancelled():self.log_message("Import cancelled by user.","info");break
+        progress_dialog.close();self.load_data_into_table();self.log_message(f"Import from {source_description}:Attempted:{processed_in_loop},New Added:{new_added_in_loop},Skipped:{skipped_in_loop}.","info")
     def handle_export_displayed_data_csv(self): 
-        model_to_export = self.table_view.model() 
-        if not model_to_export or model_to_export.rowCount() == 0: QMessageBox.information(self, "Export Data", "No data displayed to export."); return
-        filepath, _ = QFileDialog.getSaveFileName(self, "Save Displayed Data As CSV", os.path.expanduser("~/Documents/dilasa_displayed_data.csv"), "CSV Files (*.csv)")
-        if not filepath: return
+        model_to_export=self.table_view.model()
+        if not model_to_export or model_to_export.rowCount()==0:QMessageBox.information(self,"Export Data","No data to export.");return
+        filepath,_=QFileDialog.getSaveFileName(self,"Save Displayed Data As CSV",os.path.expanduser("~/Documents/dilasa_displayed_data.csv"),"CSV Files (*.csv)")
+        if not filepath:return
         try:
-            headers = self.source_model._headers 
-            with open(filepath, 'w', newline='', encoding='utf-8-sig') as csvfile:
-                writer = csv.writer(csvfile); writer.writerow(headers[1:]) 
-                for row in range(model_to_export.rowCount()):
-                    row_data = [model_to_export.data(model_to_export.index(row, col)) for col in range(1, model_to_export.columnCount())] 
-                    writer.writerow(row_data)
-            self.log_message(f"Data exported to {filepath}", "success")
-            QMessageBox.information(self, "Export Successful", f"{model_to_export.rowCount()} displayed records exported to:\n{filepath}")
-        except Exception as e: self.log_message(f"Error exporting displayed data to CSV: {e}", "error"); QMessageBox.critical(self, "Export Error", f"Could not export displayed data: {e}")
-
+            headers=self.source_model._headers
+            with open(filepath,'w',newline='',encoding='utf-8-sig')as csvfile:
+                writer=csv.writer(csvfile);writer.writerow(headers[1:])
+                for row in range(model_to_export.rowCount()):row_data=[model_to_export.data(model_to_export.index(row,col))for col in range(1,model_to_export.columnCount())];writer.writerow(row_data)
+            self.log_message(f"Data exported to {filepath}","success");QMessageBox.information(self,"Export Successful",f"{model_to_export.rowCount()} displayed records exported to:\n{filepath}")
+        except Exception as e:self.log_message(f"Error exporting CSV:{e}","error");QMessageBox.critical(self,"Export Error",f"Could not export data:{e}")
     def handle_delete_checked_rows(self): 
-        checked_ids = self.source_model.get_checked_item_db_ids()
-        if not checked_ids: QMessageBox.information(self, "Delete Checked", "No records checked for deletion."); return
-        if QMessageBox.question(self, "Confirm Delete", f"Delete {len(checked_ids)} checked record(s) permanently?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
-            if self.db_manager.delete_polygon_data(checked_ids):
-                self.log_message(f"{len(checked_ids)} checked record(s) deleted.", "info"); self.load_data_into_table() 
-            else: self.log_message("Failed to delete checked records.", "error"); QMessageBox.warning(self, "DB Error", "Could not delete records.")
-
+        checked_ids=self.source_model.get_checked_item_db_ids()
+        if not checked_ids:QMessageBox.information(self,"Delete Checked","No records checked.");return
+        if QMessageBox.question(self,"Confirm Delete",f"Delete {len(checked_ids)}checked record(s) permanently?",QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,QMessageBox.StandardButton.No)==QMessageBox.StandardButton.Yes:
+            if self.db_manager.delete_polygon_data(checked_ids):self.log_message(f"{len(checked_ids)}checked record(s)deleted.","info");self.load_data_into_table()
+            else:self.log_message("Failed to delete records.","error");QMessageBox.warning(self,"DB Error","Could not delete records.")
     def handle_clear_all_data(self):
-        if QMessageBox.question(self, "Confirm Clear All", "Delete ALL polygon data records permanently?\nThis cannot be undone.", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
-            if self.db_manager.delete_all_polygon_data():
-                self.log_message("All polygon data records deleted.", "info"); self.source_model._check_states.clear(); self.load_data_into_table()
-            else: self.log_message("Failed to clear data.", "error"); QMessageBox.warning(self, "DB Error", "Could not clear data.")
-    
+        if QMessageBox.question(self,"Confirm Clear All","Delete ALL polygon data permanently?\nThis cannot be undone.",QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,QMessageBox.StandardButton.No)==QMessageBox.StandardButton.Yes:
+            if self.db_manager.delete_all_polygon_data():self.log_message("All polygon data deleted.","info");self.source_model._check_states.clear();self.load_data_into_table()
+            else:self.log_message("Failed to clear data.","error");QMessageBox.warning(self,"DB Error","Could not clear data.")
     def handle_generate_kml(self): 
-        checked_ids = self.source_model.get_checked_item_db_ids()
-        if not checked_ids: QMessageBox.information(self, "Generate KML", "No records checked for KML generation."); return
-        records_data = [self.db_manager.get_polygon_data_by_id(db_id) for db_id in checked_ids]
-        valid_for_kml = [r for r in records_data if r and r.get('status') == 'valid_for_kml']
-        if not valid_for_kml: QMessageBox.information(self, "Generate KML", "Checked records are not valid for KML."); return
-        output_folder = QFileDialog.getExistingDirectory(self, "Select Output Folder", os.path.expanduser("~/Documents"))
-        if not output_folder: self.log_message("KML generation cancelled.", "info"); return
-        output_mode_dialog = OutputModeDialog(self); kml_output_mode = output_mode_dialog.get_selected_mode()
-        if not kml_output_mode: self.log_message("KML gen cancelled (mode selection).", "info"); return
-        self.log_message(f"Generating KMLs to: {output_folder} (Mode: {kml_output_mode})", "info")
-        files_gen, ids_gen = 0, []
+        checked_ids=self.source_model.get_checked_item_db_ids()
+        if not checked_ids:QMessageBox.information(self,"Generate KML","No records checked.");return
+        records_data=[self.db_manager.get_polygon_data_by_id(db_id)for db_id in checked_ids];valid_for_kml=[r for r in records_data if r and r.get('status')=='valid_for_kml']
+        if not valid_for_kml:QMessageBox.information(self,"Generate KML","Checked records not valid for KML.");return
+        output_folder=QFileDialog.getExistingDirectory(self,"Select Output Folder",os.path.expanduser("~/Documents"))
+        if not output_folder:self.log_message("KML generation cancelled.","info");return
+        output_mode_dialog=OutputModeDialog(self);kml_output_mode=output_mode_dialog.get_selected_mode()
+        if not kml_output_mode:self.log_message("KML gen cancelled(mode selection).","info");return
+        self.log_message(f"Generating KMLs to:{output_folder}(Mode:{kml_output_mode})","info");files_gen,ids_gen=0,[]
         try:
-            if kml_output_mode == "single":
-                ts=datetime.datetime.now().strftime('%d.%m.%y'); fn=f"Consolidate_ALL_KML_{ts}_{len(valid_for_kml)}.kml"
-                doc=simplekml.Kml(name=f"Consolidated - {ts}")
-                for pd in valid_for_kml: 
-                    if add_polygon_to_kml_object(doc, pd): ids_gen.append(pd['id'])
-                if doc.features: doc.save(os.path.join(output_folder,fn)); files_gen=1
-            elif kml_output_mode == "multiple":
+            if kml_output_mode=="single":
+                ts=datetime.datetime.now().strftime('%d.%m.%y');fn=f"Consolidate_ALL_KML_{ts}_{len(valid_for_kml)}.kml";doc=simplekml.Kml(name=f"Consolidated - {ts}")
                 for pd in valid_for_kml:
-                    doc=simplekml.Kml(name=pd['uuid'])
-                    if add_polygon_to_kml_object(doc, pd): doc.save(os.path.join(output_folder,f"{pd['uuid']}.kml")); ids_gen.append(pd['id']); files_gen+=1
-            for rid in ids_gen: self.db_manager.update_kml_export_status(rid)
-            if ids_gen: self.load_data_into_table()
-            msg=f"{files_gen} KMLs generated for {len(ids_gen)} records." if files_gen > 0 else "No KMLs generated."
-            self.log_message(msg,"success" if files_gen>0 else "info"); QMessageBox.information(self,"KML Generation",msg)
-        except Exception as e: self.log_message(f"KML Gen Error: {e}","error"); QMessageBox.critical(self,"KML Error",f"Error:\n{e}")
-
-    def _trigger_ge_polygon_upload(self, polygon_record):
-        self.log_message(f"GE View: Processing polygon UUID {polygon_record.get('uuid')} for Google Earth upload.", "info")
-
-        kml_doc = simplekml.Kml(name=str(polygon_record.get('uuid', 'Polygon')))
-        if add_polygon_to_kml_object(kml_doc, polygon_record):
+                    if add_polygon_to_kml_object(doc,pd):ids_gen.append(pd['id'])
+                if doc.features:doc.save(os.path.join(output_folder,fn));files_gen=1
+            elif kml_output_mode=="multiple":
+                for pd in valid_for_kml:doc=simplekml.Kml(name=pd['uuid']);
+                if add_polygon_to_kml_object(doc,pd):doc.save(os.path.join(output_folder,f"{pd['uuid']}.kml"));ids_gen.append(pd['id']);files_gen+=1
+            for rid in ids_gen:self.db_manager.update_kml_export_status(rid)
+            if ids_gen:self.load_data_into_table()
+            msg=f"{files_gen}KMLs generated for {len(ids_gen)}records."if files_gen>0 else"No KMLs generated.";self.log_message(msg,"success"if files_gen>0 else"info");QMessageBox.information(self,"KML Generation",msg)
+        except Exception as e:self.log_message(f"KML Gen Error:{e}","error");QMessageBox.critical(self,"KML Error",f"Error:\n{e}")
+    def _trigger_ge_polygon_upload(self,polygon_record):
+        self.log_message(f"GE View:Processing polygon UUID {polygon_record.get('uuid')}for GE upload.","info");kml_doc=simplekml.Kml(name=str(polygon_record.get('uuid','Polygon')))
+        if add_polygon_to_kml_object(kml_doc,polygon_record):
             try:
-                # Delete old temp KML if it exists
                 if self.current_temp_kml_path and os.path.exists(self.current_temp_kml_path):
-                    try:
-                        os.remove(self.current_temp_kml_path)
-                        self.log_message(f"Old temporary KML file deleted: {self.current_temp_kml_path}", "info")
-                    except FileNotFoundError:
-                        self.log_message(f"Old temporary KML file not found for deletion: {self.current_temp_kml_path}", "warning")
-                    except PermissionError:
-                        self.log_message(f"Permission denied while deleting old temporary KML file: {self.current_temp_kml_path}", "error")
-                    except Exception as e_del:
-                        self.log_message(f"Error deleting old temporary KML file {self.current_temp_kml_path}: {e_del}", "error")
-                
-                fd, temp_kml_path = tempfile.mkstemp(suffix=".kml", prefix="ge_poly_")
-                os.close(fd) 
-                kml_doc.save(temp_kml_path)
-                self.current_temp_kml_path = temp_kml_path # Store new path
-                self.log_message(f"Temporary KML saved to: {self.current_temp_kml_path}", "info")
-
-                QApplication.clipboard().setText(self.current_temp_kml_path)
-                self.log_message("KML file path copied to clipboard.", "info")
-
-                if self.show_ge_instructions_popup_again:
-                    self._show_ge_instructions_popup()
-
-            except Exception as e_kml_save:
-                self.log_message(f"Error saving temporary KML or copying to clipboard: {e_kml_save}", "error")
-                QMessageBox.warning(self, "KML Error", f"Could not save KML or copy path: {e_kml_save}")
-        else:
-            self.log_message(f"Failed to generate KML content for polygon UUID {polygon_record.get('uuid')}.", "error")
-            QMessageBox.warning(self, "KML Generation Failed", "Could not generate KML content for the selected polygon.")
-
+                    try:os.remove(self.current_temp_kml_path);self.log_message(f"Old temp KML deleted:{self.current_temp_kml_path}","info")
+                    except FileNotFoundError:self.log_message(f"Old temp KML not found:{self.current_temp_kml_path}","warning")
+                    except PermissionError:self.log_message(f"Permission denied deleting old temp KML:{self.current_temp_kml_path}","error")
+                    except Exception as e_del:self.log_message(f"Error deleting old temp KML {self.current_temp_kml_path}:{e_del}","error")
+                fd,temp_kml_path=tempfile.mkstemp(suffix=".kml",prefix="ge_poly_");os.close(fd);kml_doc.save(temp_kml_path);self.current_temp_kml_path=temp_kml_path;self.log_message(f"Temp KML saved to:{self.current_temp_kml_path}","info")
+                QApplication.clipboard().setText(self.current_temp_kml_path);self.log_message("KML path copied.","info")
+                if self.show_ge_instructions_popup_again:self._show_ge_instructions_popup()
+            except Exception as e_kml_save:self.log_message(f"Error saving temp KML:{e_kml_save}","error");QMessageBox.warning(self,"KML Error",f"Could not save KML:{e_kml_save}")
+        else:self.log_message(f"Failed KML content gen for UUID {polygon_record.get('uuid')}.","error");QMessageBox.warning(self,"KML Generation Failed","Could not generate KML content.")
     def _show_ge_instructions_popup(self):
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("Google Earth Instructions")
-        msg_box.setTextFormat(Qt.TextFormat.PlainText) # Ensure plain text interpretation for newlines
-        msg_box.setText("Instructions:\n"
-                        "1. Click on the Google Earth window to focus.\n"
-                        "2. Press Ctrl+I to open the import dialog.\n"
-                        "3. Press Ctrl+V to paste the KML file path.\n"
-                        "4. Press Enter to load the KML.\n"
-                        "5. Press Ctrl+H for historical imagery view.")
-        
-        checkbox = QCheckBox("Do not show this popup again")
-        msg_box.setCheckBox(checkbox)
-        
-        msg_box.exec()
-        
-        if msg_box.checkBox().isChecked():
-            self.show_ge_instructions_popup_again = False
-            self.log_message("Google Earth instructions popup will not be shown again for this session.", "info")
-
-    def _handle_ge_view_toggle(self, checked):
-        original_action_blocked = self.toggle_ge_view_action.signalsBlocked()
-        original_button_blocked = self.toggle_ge_view_button.signalsBlocked()
-
-        self.toggle_ge_view_action.blockSignals(True)
-        self.toggle_ge_view_button.blockSignals(True)
-
-        self.toggle_ge_view_action.setChecked(checked)
-        self.toggle_ge_view_button.setChecked(checked)
-        self.toggle_ge_view_button.setText(f"GE View: {'ON' if checked else 'OFF'}")
-
-        self.toggle_ge_view_action.blockSignals(original_action_blocked)
-        self.toggle_ge_view_button.blockSignals(original_button_blocked)
-
-        if checked:
-            self.map_stack.setCurrentIndex(1)
-            self.google_earth_view_widget.set_focus_on_webview()
-        else:
-            self.map_stack.setCurrentIndex(0)
-
-        self.log_message(f"Google Earth View Toggled: {'ON' if checked else 'OFF'}", "info")
-
-    def handle_about(self):
-        QMessageBox.about(self, f"About {APP_NAME_MW}", f"<b>{APP_NAME_MW}</b><br>Version: {APP_VERSION_MW}<br><br>{ORGANIZATION_TAGLINE_MW}<br><br>Processes geographic data for KML generation.")
-
-    def handle_show_ge_instructions(self):
-        self._show_ge_instructions_popup()
-
-    def log_message(self, message, level="info"):
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_entry = f"[{timestamp}][{level.upper()}] {message}"
-
-        if hasattr(self, 'log_text_edit_qt_actual'):
-            # Define colors for different log levels (ensure these are valid QColor names or hex codes)
-            color_map = {"INFO": "#0078D7", "ERROR": "#D32F2F", "SUCCESS": "#388E3C", "WARNING": "#FFA500"} # Example colors
-
-            # Use a default color if level is not in map
-            text_color = QColor(color_map.get(level.upper(), "#333333")) # Default to FG_COLOR_MW or similar
-
-            self.log_text_edit_qt_actual.setTextColor(text_color)
-            self.log_text_edit_qt_actual.append(log_entry) # Use the full log_entry with timestamp
-            self.log_text_edit_qt_actual.ensureCursorVisible()
-        else:
-            print(log_entry) # Print the full log_entry to console if UI element isn't ready
-
-        if hasattr(self, '_main_status_bar'):
-            # Show only the message part in status bar, not the full log entry
-            self._main_status_bar.showMessage(message, 7000 if level == "info" else 10000)
-            
+        msg_box=QMessageBox(self);msg_box.setWindowTitle("Google Earth Instructions");msg_box.setTextFormat(Qt.TextFormat.PlainText)
+        msg_box.setText("Instructions:\n1.Click GE window to focus.\n2.Ctrl+I to open import.\n3.Ctrl+V to paste path.\n4.Enter to load.\n5.Ctrl+H for history.");checkbox=QCheckBox("Do not show again");msg_box.setCheckBox(checkbox);msg_box.exec()
+        if msg_box.checkBox().isChecked():self.show_ge_instructions_popup_again=False;self.log_message("GE instructions popup disabled for session.","info")
+    def _handle_ge_view_toggle(self,checked):
+        original_action_blocked,original_button_blocked=self.toggle_ge_view_action.signalsBlocked(),self.toggle_ge_view_button.signalsBlocked()
+        self.toggle_ge_view_action.blockSignals(True);self.toggle_ge_view_button.blockSignals(True)
+        self.toggle_ge_view_action.setChecked(checked);self.toggle_ge_view_button.setChecked(checked);self.toggle_ge_view_button.setText(f"GE View:{'ON'if checked else'OFF'}")
+        self.toggle_ge_view_action.blockSignals(original_action_blocked);self.toggle_ge_view_button.blockSignals(original_button_blocked)
+        if checked:self.map_stack.setCurrentIndex(1);self.google_earth_view_widget.set_focus_on_webview()
+        else:self.map_stack.setCurrentIndex(0)
+        self.log_message(f"Google Earth View Toggled:{'ON'if checked else'OFF'}","info")
+    def handle_about(self):QMessageBox.about(self,f"About {APP_NAME_MW}",f"<b>{APP_NAME_MW}</b><br>Version:{APP_VERSION_MW}<br><br>{ORGANIZATION_TAGLINE_MW}<br><br>Processes geographic data for KML generation.")
+    def handle_show_ge_instructions(self):self._show_ge_instructions_popup()
+    def log_message(self,message,level="info"):
+        timestamp=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S");log_entry=f"[{timestamp}][{level.upper()}] {message}"
+        if hasattr(self,'log_text_edit_qt_actual'):
+            color_map={"INFO":"#0078D7","ERROR":"#D32F2F","SUCCESS":"#388E3C","WARNING":"#FFA500"}
+            text_color=QColor(color_map.get(level.upper(),"#333333"))
+            self.log_text_edit_qt_actual.setTextColor(text_color);self.log_text_edit_qt_actual.append(log_entry);self.log_text_edit_qt_actual.ensureCursorVisible()
+        else:print(log_entry)
+        if hasattr(self,'_main_status_bar'):self._main_status_bar.showMessage(message,7000 if level=="info"else 10000)
     def load_data_into_table(self): 
         try:
-            polygon_records = self.db_manager.get_all_polygon_data_for_display()
-            self.source_model.update_data(polygon_records)
-            # After updating data, also update the filter proxy model if it exists
-            if hasattr(self, 'filter_proxy_model'):
-                self.filter_proxy_model.invalidate() # This ensures filters are reapplied if active
-        except Exception as e:
-            self.log_message(f"Error loading data into table: {e}", "error")
-            QMessageBox.warning(self, "Load Data Error", f"Could not load polygon records: {e}")
-
-    def closeEvent(self, event):
-        if hasattr(self, 'map_view_widget') and self.map_view_widget: self.map_view_widget.cleanup()
-        if hasattr(self, 'google_earth_view_widget') and hasattr(self.google_earth_view_widget, 'cleanup'):
-             self.google_earth_view_widget.cleanup() 
-        if hasattr(self, 'db_manager') and self.db_manager: self.db_manager.close()
-
-        # Clean up the last temporary KML file if it exists
+            polygon_records=self.db_manager.get_all_polygon_data_for_display();self.source_model.update_data(polygon_records)
+            if hasattr(self,'filter_proxy_model'):self.filter_proxy_model.invalidate()
+        except Exception as e:self.log_message(f"Error loading data into table:{e}","error");QMessageBox.warning(self,"Load Data Error",f"Could not load records:{e}")
+    def closeEvent(self,event):
+        if hasattr(self,'map_view_widget')and self.map_view_widget:self.map_view_widget.cleanup()
+        if hasattr(self,'google_earth_view_widget')and hasattr(self.google_earth_view_widget,'cleanup'):self.google_earth_view_widget.cleanup()
+        if hasattr(self,'db_manager')and self.db_manager:self.db_manager.close()
         if self.current_temp_kml_path and os.path.exists(self.current_temp_kml_path):
-            try:
-                os.remove(self.current_temp_kml_path)
-                self.log_message(f"Temporary KML file deleted on exit: {self.current_temp_kml_path}", "info")
-            except Exception as e:
-                self.log_message(f"Error deleting temporary KML file {self.current_temp_kml_path} on exit: {e}", "error")
-        
+            try:os.remove(self.current_temp_kml_path);self.log_message(f"Temp KML deleted:{self.current_temp_kml_path}","info")
+            except Exception as e:self.log_message(f"Error deleting temp KML {self.current_temp_kml_path}:{e}","error")
         super().closeEvent(event)
+
+[end of ui/main_window.py]
