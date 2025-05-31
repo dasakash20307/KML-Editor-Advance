@@ -293,80 +293,73 @@ class PolygonFilterProxyModel(QSortFilterProxyModel):
 
     def filterAcceptsRow(self, source_row, source_parent):
         source_model = self.sourceModel()
-        assert isinstance(source_model, PolygonTableModel), "Source model must be PolygonTableModel"
-        if not source_model or source_row >= len(source_model._data): return False
+        assert isinstance(source_model, PolygonTableModel), "Source model must be PolygonTableModel" # You can keep or comment out the assert
+        if not source_model or source_row >= len(source_model._data):
+            return False
         record = source_model._data[source_row]
-        # Ensure record has enough elements for all columns based on the new v5 schema.
-        # The get_all_polygon_data_for_display query fetches 17 columns.
         if not record or len(record) < 17:
-            return False 
-
-        # 1. UUID Filter
-        if self.filter_uuid_text:
-            uuid_val_from_record = record[1] # UUID is at index 1
-            # Ensure uuid_val_from_record is converted to string before .lower()
-            # and handle if it's None to prevent AttributeError.
-            if uuid_val_from_record is None or self.filter_uuid_text not in str(uuid_val_from_record).lower():
-                return False
-        
-        # 2. Date Added Filter
-        # Date Added is at index 5
-        date_val_from_record = record[5]
-        row_qdate = None
-
-        if isinstance(date_val_from_record, datetime.datetime):
-            row_qdate = QDate(date_val_from_record.year, date_val_from_record.month, date_val_from_record.day)
-        elif isinstance(date_val_from_record, datetime.date): # Python date object
-            row_qdate = QDate(date_val_from_record.year, date_val_from_record.month, date_val_from_record.day)
-        elif isinstance(date_val_from_record, str) and date_val_from_record.strip(): # Non-empty string
-            date_str_to_parse = date_val_from_record.strip()
-            # Try parsing directly as "yyyy-MM-dd"
-            parsed_qdate = QDate.fromString(date_str_to_parse, "yyyy-MM-dd")
-            if not parsed_qdate.isValid():
-                # If direct parse fails, try splitting space (in case of "YYYY-MM-DD HH:MM:SS")
-                try:
-                    date_part_str = date_str_to_parse.split(" ")[0]
-                    parsed_qdate = QDate.fromString(date_part_str, "yyyy-MM-dd")
-                except IndexError: # No space found, parsing already attempted on full string
-                    parsed_qdate = QDate() # Ensure it's an invalid QDate
-
-            if parsed_qdate.isValid():
-                row_qdate = parsed_qdate
-            # else: print(f"DEBUG: filterAcceptsRow - Could not parse date string: {date_val_from_record}")
-        # If date_val_from_record is None, or not a recognized type, or parsing failed, row_qdate remains None or invalid.
-
-        # Filter logic (relies on the updated row_qdate above)
-        if self.filter_after_date_added:
-            if row_qdate is None or not row_qdate.isValid() or row_qdate < self.filter_after_date_added:
-                return False
-
-        if self.filter_before_date_added:
-            if row_qdate is None or not row_qdate.isValid() or row_qdate > self.filter_before_date_added:
-                return False
-
-        # 3. Export Status Filter
-        # kml_export_count is at index 6 in the record tuple
-        export_count_from_record = record[6]
-        export_count = export_count_from_record if export_count_from_record is not None else 0
-        if self.filter_export_status == "Exported" and export_count == 0:
-            return False
-        if self.filter_export_status == "Not Exported" and export_count > 0:
+            # print(f"DEBUG: Row {source_row} failed record validity check.") # Optional debug
             return False
 
-        # 4. KML File Status Filter (Error/Valid)
-        # kml_file_status is at index 11 in the record tuple
-        kml_status_val_from_record = record[11]
-        # Ensure kml_status_val_from_record is converted to string before .lower()
-        # and handle if it's None to prevent AttributeError.
-        kml_status_val = str(kml_status_val_from_record).lower() if kml_status_val_from_record is not None else ""
+        # --- ALL ACTUAL FILTER LOGIC COMMENTED OUT FOR DEBUGGING ---
 
-        if self.filter_error_status == "Error Records":
-            if not ("error" in kml_status_val or "deleted" in kml_status_val):
-                return False
-        elif self.filter_error_status == "Valid Records":
-            if "error" in kml_status_val or "deleted" in kml_status_val:
-                return False
-            
+        # 1. UUID Filter (Example of commenting out)
+        # if self.filter_uuid_text:
+        #     uuid_val_from_record = record[1]
+        #     if uuid_val_from_record is None or self.filter_uuid_text not in str(uuid_val_from_record).lower():
+        #         # print(f"DEBUG: Row {source_row} failed UUID filter.") # Optional debug
+        #         return False
+
+        # 2. Date Added Filter (Example of commenting out)
+        # date_val_from_record = record[5]
+        # row_qdate = None
+        # if isinstance(date_val_from_record, datetime.datetime):
+        #     row_qdate = QDate(date_val_from_record.year, date_val_from_record.month, date_val_from_record.day)
+        # elif isinstance(date_val_from_record, datetime.date):
+        #     row_qdate = QDate(date_val_from_record.year, date_val_from_record.month, date_val_from_record.day)
+        # elif isinstance(date_val_from_record, str) and date_val_from_record.strip():
+        #     date_str_to_parse = date_val_from_record.strip()
+        #     parsed_qdate = QDate.fromString(date_str_to_parse, "yyyy-MM-dd")
+        #     if not parsed_qdate.isValid():
+        #         try:
+        #             date_part_str = date_str_to_parse.split(" ")[0]
+        #             parsed_qdate = QDate.fromString(date_part_str, "yyyy-MM-dd")
+        #         except IndexError:
+        #             parsed_qdate = QDate()
+        #     if parsed_qdate.isValid():
+        #         row_qdate = parsed_qdate
+        # if self.filter_after_date_added:
+        #     if row_qdate is None or not row_qdate.isValid() or row_qdate < self.filter_after_date_added:
+        #         # print(f"DEBUG: Row {source_row} failed 'after_date' filter. Date: {row_qdate}, Filter: {self.filter_after_date_added}") # Optional debug
+        #         return False
+        # if self.filter_before_date_added:
+        #     if row_qdate is None or not row_qdate.isValid() or row_qdate > self.filter_before_date_added:
+        #         # print(f"DEBUG: Row {source_row} failed 'before_date' filter. Date: {row_qdate}, Filter: {self.filter_before_date_added}") # Optional debug
+        #         return False
+
+        # 3. Export Status Filter (Example of commenting out)
+        # export_count_from_record = record[6]
+        # export_count = export_count_from_record if export_count_from_record is not None else 0
+        # if self.filter_export_status == "Exported" and export_count == 0:
+        #     # print(f"DEBUG: Row {source_row} failed 'Exported' filter.") # Optional debug
+        #     return False
+        # if self.filter_export_status == "Not Exported" and export_count > 0:
+        #     # print(f"DEBUG: Row {source_row} failed 'Not Exported' filter.") # Optional debug
+        #     return False
+
+        # 4. KML File Status Filter (Error/Valid) (Example of commenting out)
+        # kml_status_val_from_record = record[11]
+        # kml_status_val = str(kml_status_val_from_record).lower() if kml_status_val_from_record is not None else ""
+        # if self.filter_error_status == "Error Records":
+        #     if not ("error" in kml_status_val or "deleted" in kml_status_val):
+        #         # print(f"DEBUG: Row {source_row} failed 'Error Records' filter.") # Optional debug
+        #         return False
+        # elif self.filter_error_status == "Valid Records":
+        #     if "error" in kml_status_val or "deleted" in kml_status_val:
+        #         # print(f"DEBUG: Row {source_row} failed 'Valid Records' filter.") # Optional debug
+        #         return False
+
+        # print(f"DEBUG: Row {source_row} passed with all filters (effectively) inactive.") # Optional debug
         return True
 
 # --- Delegate for Evaluation Status ComboBox ---
