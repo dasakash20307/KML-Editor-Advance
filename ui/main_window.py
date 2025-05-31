@@ -683,11 +683,15 @@ class MainWindow(QMainWindow):
 
     def clear_filters(self):
         self.uuid_filter_edit.clear()
-        self.date_added_after_edit.clear(); self.date_added_after_edit.setSpecialValueText(" ")
-        self.date_added_before_edit.clear(); self.date_added_before_edit.setSpecialValueText(" ")      
+
+        # Explicitly set to a null QDate
+        null_q_date = QDate() # Or QDate() directly if preferred in setDate
+        self.date_added_after_edit.setDate(null_q_date)
+        self.date_added_before_edit.setDate(null_q_date)
+
         self.export_status_combo.setCurrentIndex(0) 
         self.error_status_combo.setCurrentIndex(0)
-        self.apply_filters() # Added this line
+        self.apply_filters()
 
     def _setup_main_content_area(self):
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal) 
