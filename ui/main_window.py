@@ -814,7 +814,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", "Credential Manager not available.")
             return
 
-        kml_root_path = self.credential_manager.get_kml_root_path()
+        kml_root_path = self.credential_manager.get_kml_folder_path()
         device_id = self.credential_manager.get_device_id()
         device_nickname = self.credential_manager.get_device_nickname()
 
