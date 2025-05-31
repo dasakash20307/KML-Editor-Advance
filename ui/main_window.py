@@ -72,23 +72,30 @@ API_FIELD_TO_DB_FIELD_MAP = {
 # --- Table Model with Checkbox Support ---
 class PolygonTableModel(QAbstractTableModel):
     CHECKBOX_COL = 0
-    ID_COL = 1
-    EVALUATION_STATUS_COL = 2  # New column
-    STATUS_COL = 3             # Was 2
-    UUID_COL = 4               # Was 3
-    FARMER_COL = 5             # Was 4
-    VILLAGE_COL = 6            # Was 5
-    DATE_ADDED_COL = 7         # Was 6
-    EXPORT_COUNT_COL = 8       # Was 7
-    LAST_EXPORTED_COL = 9      # Was 8
+    DB_ID_COL = 1
+    UUID_COL = 2
+    RESPONSE_CODE_COL = 3
+    EVALUATION_STATUS_COL = 4
+    FARMER_NAME_COL = 5
+    VILLAGE_COL = 6
+    DATE_ADDED_COL = 7
+    KML_FILE_NAME_COL = 8
+    KML_FILE_STATUS_COL = 9
+    EDIT_COUNT_COL = 10
+    LAST_EDIT_DATE_COL = 11
+    EDITOR_DEVICE_ID_COL = 12
+    EDITOR_NICKNAME_COL = 13
+    DEVICE_CODE_COL = 14 # This corresponds to "Device Code (Creator)"
+    EXPORT_COUNT_COL = 15
+    LAST_EXPORTED_COL = 16
+    LAST_MODIFIED_COL = 17
 
     def __init__(self, data_list=None, parent=None, db_manager_instance=None): 
         super().__init__(parent)
         self.db_manager = db_manager_instance 
         self._data = []
         self._check_states = {}
-        self._headers = ["", "ID", "Evaluation Status", "Status", "UUID", "Farmer Name", "Village",
-                         "Date Added", "Export Count", "Last Exported"]
+        self._headers = ["", "DB ID", "UUID", "Response Code", "Evaluation Status", "Farmer Name", "Village", "Date Added", "KML File Name", "KML File Status", "Times Edited", "Last Edit Date", "Editor Device ID", "Editor Nickname", "Device Code (Creator)", "Export Count", "Last Exported", "Last Modified"]
         if data_list: self.update_data(data_list)
 
     def rowCount(self, parent=QModelIndex()): return len(self._data)
@@ -107,27 +114,36 @@ class PolygonTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.DisplayRole:
             if col == self.CHECKBOX_COL: return None
             value = None
-            if col == self.ID_COL: value = record[0]
-            elif col == self.EVALUATION_STATUS_COL: value = record[8] 
-            elif col == self.STATUS_COL: value = record[1]
-            elif col == self.UUID_COL: value = record[2]
-            elif col == self.FARMER_COL: value = record[3]
+            # Map new column constants to the correct indices in the 'record' tuple
+            if col == self.DB_ID_COL: value = record[0]
+            elif col == self.UUID_COL: value = record[1]
+            elif col == self.RESPONSE_CODE_COL: value = record[2]
+            elif col == self.EVALUATION_STATUS_COL: value = record[8]
+            elif col == self.FARMER_NAME_COL: value = record[3]
             elif col == self.VILLAGE_COL: value = record[4]
             elif col == self.DATE_ADDED_COL: value = record[5]
+            elif col == self.KML_FILE_NAME_COL: value = record[10]
+            elif col == self.KML_FILE_STATUS_COL: value = record[11]
+            elif col == self.EDIT_COUNT_COL: value = record[12]
+            elif col == self.LAST_EDIT_DATE_COL: value = record[13]
+            elif col == self.EDITOR_DEVICE_ID_COL: value = record[14]
+            elif col == self.EDITOR_NICKNAME_COL: value = record[15]
+            elif col == self.DEVICE_CODE_COL: value = record[9] # Creator's device code
             elif col == self.EXPORT_COUNT_COL: value = record[6]
             elif col == self.LAST_EXPORTED_COL: value = record[7]
+            elif col == self.LAST_MODIFIED_COL: value = record[16]
             else: return None
 
-            if col == self.EXPORT_COUNT_COL and value is None: return "0" 
-            if col == self.LAST_EXPORTED_COL and value is None: return ""  
-            if isinstance(value, (datetime.datetime, datetime.date)): 
+            if col == self.EXPORT_COUNT_COL and value is None: return "0"
+            if col == self.LAST_EXPORTED_COL and value is None: return ""
+            if isinstance(value, (datetime.datetime, datetime.date)):
                 return value.strftime("%Y-%m-%d %H:%M:%S") if isinstance(value, datetime.datetime) else value.strftime("%Y-%m-%d")
             return str(value) if value is not None else ""
 
         elif role == Qt.ItemDataRole.BackgroundRole:
             # Apply row-wide background color based on evaluation_status
-            # evaluation_status is at index 8 in the record tuple
-            status_value = record[8] 
+            # evaluation_status is at index 8 in the record tuple - this remains correct
+            status_value = record[8]
             if status_value == "Eligible":
                 color = QColor(144, 238, 144, int(255 * 0.7)) # Light Green
                 return color
@@ -143,10 +159,12 @@ class PolygonTableModel(QAbstractTableModel):
             
         elif role == Qt.ItemDataRole.TextAlignmentRole:
             return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter if col != self.CHECKBOX_COL else Qt.AlignmentFlag.AlignCenter
-        elif role == Qt.ItemDataRole.ForegroundRole: 
-            if col == self.STATUS_COL and record[1] and "error" in str(record[1]).lower():
+        elif role == Qt.ItemDataRole.ForegroundRole:
+            # KML File Status is at record[11]
+            if col == self.KML_FILE_STATUS_COL and record[11] and \
+               ("error" in str(record[11]).lower() or "deleted" in str(record[11]).lower()):
                 return QColor("red")
-        elif role == Qt.ItemDataRole.FontRole and col != self.CHECKBOX_COL: 
+        elif role == Qt.ItemDataRole.FontRole and col != self.CHECKBOX_COL:
              return QFont("Segoe UI", 9)
         return None
 
@@ -278,15 +296,15 @@ class PolygonFilterProxyModel(QSortFilterProxyModel):
         assert isinstance(source_model, PolygonTableModel), "Source model must be PolygonTableModel"
         if not source_model or source_row >= len(source_model._data): return False # type: ignore
         record = source_model._data[source_row] # type: ignore
-        if not record or len(record) < 9: # Ensure record has enough elements for all columns including evaluation_status
+        if not record or len(record) < 17: # Ensure record has enough elements for all columns
             return False 
 
         if self.filter_uuid_text:
-            # UUID is at index 2 in the record tuple (id, status, uuid, ...)
-            uuid_val = str(record[2]).lower() 
+            # UUID is at index 1 in the record tuple
+            uuid_val = str(record[1]).lower()
             if self.filter_uuid_text not in uuid_val: return False
         
-        # Date Added is at index 5
+        # Date Added is at index 5 - remains correct
         date_added_str = record[5]
         if date_added_str:
             try:
@@ -296,15 +314,19 @@ class PolygonFilterProxyModel(QSortFilterProxyModel):
                     if self.filter_before_date_added and row_date_added > self.filter_before_date_added: return False
             except Exception: pass 
 
-        # Export Count is at index 6
+        # Export Count (kml_export_count) is at index 6 - remains correct
         export_count = record[6] if record[6] is not None else 0
         if self.filter_export_status == "Exported" and export_count == 0: return False
         if self.filter_export_status == "Not Exported" and export_count > 0: return False
 
-        # Status (error/valid) is at index 1
-        status_val = str(record[1]).lower()
-        if self.filter_error_status == "Error Records" and "error" not in status_val: return False
-        if self.filter_error_status == "Valid Records" and "error" in status_val: return False
+        # KML File Status is at index 11
+        kml_status_val = str(record[11]).lower()
+        if self.filter_error_status == "Error Records":
+            if not ("error" in kml_status_val or "deleted" in kml_status_val):
+                return False
+        elif self.filter_error_status == "Valid Records":
+            if "error" in kml_status_val or "deleted" in kml_status_val:
+                return False
             
         return True
 
@@ -700,13 +722,23 @@ class MainWindow(QMainWindow):
         # """)
 
         self.table_view.setColumnWidth(self.source_model.CHECKBOX_COL, 30)
-        self.table_view.setColumnWidth(self.source_model.ID_COL, 50)
-        self.table_view.setColumnWidth(self.source_model.EVALUATION_STATUS_COL, 150) # New column width
-        self.table_view.setColumnWidth(self.source_model.STATUS_COL, 100)
-        self.table_view.setColumnWidth(self.source_model.UUID_COL, 120) # Example, adjust as needed
-        self.table_view.setColumnWidth(self.source_model.FARMER_COL, 150) # Example, adjust as needed
-        self.table_view.setColumnWidth(self.source_model.VILLAGE_COL, 120) # Example, adjust as needed
-        # DATE_ADDED_COL, EXPORT_COUNT_COL, LAST_EXPORTED_COL can use default or be set too
+        self.table_view.setColumnWidth(self.source_model.DB_ID_COL, 50)
+        self.table_view.setColumnWidth(self.source_model.UUID_COL, 130)
+        self.table_view.setColumnWidth(self.source_model.RESPONSE_CODE_COL, 120)
+        self.table_view.setColumnWidth(self.source_model.EVALUATION_STATUS_COL, 150)
+        self.table_view.setColumnWidth(self.source_model.FARMER_NAME_COL, 150)
+        self.table_view.setColumnWidth(self.source_model.VILLAGE_COL, 120)
+        self.table_view.setColumnWidth(self.source_model.DATE_ADDED_COL, 140)
+        self.table_view.setColumnWidth(self.source_model.KML_FILE_NAME_COL, 150)
+        self.table_view.setColumnWidth(self.source_model.KML_FILE_STATUS_COL, 110)
+        self.table_view.setColumnWidth(self.source_model.EDIT_COUNT_COL, 90)
+        self.table_view.setColumnWidth(self.source_model.LAST_EDIT_DATE_COL, 140)
+        self.table_view.setColumnWidth(self.source_model.EDITOR_DEVICE_ID_COL, 130)
+        self.table_view.setColumnWidth(self.source_model.EDITOR_NICKNAME_COL, 130)
+        self.table_view.setColumnWidth(self.source_model.DEVICE_CODE_COL, 140)
+        self.table_view.setColumnWidth(self.source_model.EXPORT_COUNT_COL, 100)
+        self.table_view.setColumnWidth(self.source_model.LAST_EXPORTED_COL, 140)
+        self.table_view.setColumnWidth(self.source_model.LAST_MODIFIED_COL, 140)
 
         table_layout.addWidget(self.table_view) 
         self.right_splitter.addWidget(table_container)
