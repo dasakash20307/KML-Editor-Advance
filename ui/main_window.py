@@ -269,18 +269,13 @@ class PolygonFilterProxyModel(QSortFilterProxyModel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.filter_uuid_text = ""
-        self.filter_after_date_added = None 
-        self.filter_before_date_added = None 
+        # self.filter_after_date_added = None  # REMOVED
+        # self.filter_before_date_added = None # REMOVED
         self.filter_export_status = "All" 
         self.filter_error_status = "All"  
 
     def set_uuid_filter(self, text):
         self.filter_uuid_text = text.lower()
-        self.invalidateFilter()
-
-    def set_date_added_filter(self, after_date, before_date): 
-        self.filter_after_date_added = after_date if after_date and after_date.isValid() else None
-        self.filter_before_date_added = before_date if before_date and before_date.isValid() else None
         self.invalidateFilter()
         
     def set_export_status_filter(self, status): 
@@ -293,73 +288,66 @@ class PolygonFilterProxyModel(QSortFilterProxyModel):
 
     def filterAcceptsRow(self, source_row, source_parent):
         source_model = self.sourceModel()
-        assert isinstance(source_model, PolygonTableModel), "Source model must be PolygonTableModel" # You can keep or comment out the assert
+        assert isinstance(source_model, PolygonTableModel), "Source model must be PolygonTableModel"
         if not source_model or source_row >= len(source_model._data):
             return False
         record = source_model._data[source_row]
         if not record or len(record) < 17:
-            # print(f"DEBUG: Row {source_row} failed record validity check.") # Optional debug
             return False
 
-        # --- ALL ACTUAL FILTER LOGIC COMMENTED OUT FOR DEBUGGING ---
+        # 1. UUID Filter
+        if self.filter_uuid_text:
+            uuid_val_from_record = record[1] # UUID is at index 1
+            if uuid_val_from_record is None or self.filter_uuid_text not in str(uuid_val_from_record).lower():
+                return False
 
-        # 1. UUID Filter (Example of commenting out)
-        # if self.filter_uuid_text:
-        #     uuid_val_from_record = record[1]
-        #     if uuid_val_from_record is None or self.filter_uuid_text not in str(uuid_val_from_record).lower():
-        #         # print(f"DEBUG: Row {source_row} failed UUID filter.") # Optional debug
-        #         return False
-
-        # 2. Date Added Filter (Example of commenting out)
+        # 2. Date Added Filter (Logic remains commented out)
         # date_val_from_record = record[5]
         # row_qdate = None
         # if isinstance(date_val_from_record, datetime.datetime):
         #     row_qdate = QDate(date_val_from_record.year, date_val_from_record.month, date_val_from_record.day)
-        # elif isinstance(date_val_from_record, datetime.date):
+        # elif isinstance(date_val_from_record, datetime.date): # Python date object
         #     row_qdate = QDate(date_val_from_record.year, date_val_from_record.month, date_val_from_record.day)
-        # elif isinstance(date_val_from_record, str) and date_val_from_record.strip():
+        # elif isinstance(date_val_from_record, str) and date_val_from_record.strip(): # Non-empty string
         #     date_str_to_parse = date_val_from_record.strip()
+        #     # Try parsing directly as "yyyy-MM-dd"
         #     parsed_qdate = QDate.fromString(date_str_to_parse, "yyyy-MM-dd")
         #     if not parsed_qdate.isValid():
+        #         # If direct parse fails, try splitting space (in case of "YYYY-MM-DD HH:MM:SS")
         #         try:
         #             date_part_str = date_str_to_parse.split(" ")[0]
         #             parsed_qdate = QDate.fromString(date_part_str, "yyyy-MM-dd")
-        #         except IndexError:
-        #             parsed_qdate = QDate()
+        #         except IndexError: # No space found, parsing already attempted on full string
+        #             parsed_qdate = QDate() # Ensure it's an invalid QDate
+        #
         #     if parsed_qdate.isValid():
         #         row_qdate = parsed_qdate
+        # # Filter logic (relies on the updated row_qdate above)
         # if self.filter_after_date_added:
         #     if row_qdate is None or not row_qdate.isValid() or row_qdate < self.filter_after_date_added:
-        #         # print(f"DEBUG: Row {source_row} failed 'after_date' filter. Date: {row_qdate}, Filter: {self.filter_after_date_added}") # Optional debug
         #         return False
         # if self.filter_before_date_added:
         #     if row_qdate is None or not row_qdate.isValid() or row_qdate > self.filter_before_date_added:
-        #         # print(f"DEBUG: Row {source_row} failed 'before_date' filter. Date: {row_qdate}, Filter: {self.filter_before_date_added}") # Optional debug
         #         return False
 
-        # 3. Export Status Filter (Example of commenting out)
-        # export_count_from_record = record[6]
-        # export_count = export_count_from_record if export_count_from_record is not None else 0
-        # if self.filter_export_status == "Exported" and export_count == 0:
-        #     # print(f"DEBUG: Row {source_row} failed 'Exported' filter.") # Optional debug
-        #     return False
-        # if self.filter_export_status == "Not Exported" and export_count > 0:
-        #     # print(f"DEBUG: Row {source_row} failed 'Not Exported' filter.") # Optional debug
-        #     return False
+        # 3. Export Status Filter
+        export_count_from_record = record[6] # kml_export_count is at index 6
+        export_count = export_count_from_record if export_count_from_record is not None else 0
+        if self.filter_export_status == "Exported" and export_count == 0:
+            return False
+        if self.filter_export_status == "Not Exported" and export_count > 0:
+            return False
 
-        # 4. KML File Status Filter (Error/Valid) (Example of commenting out)
-        # kml_status_val_from_record = record[11]
-        # kml_status_val = str(kml_status_val_from_record).lower() if kml_status_val_from_record is not None else ""
-        # if self.filter_error_status == "Error Records":
-        #     if not ("error" in kml_status_val or "deleted" in kml_status_val):
-        #         # print(f"DEBUG: Row {source_row} failed 'Error Records' filter.") # Optional debug
-        #         return False
-        # elif self.filter_error_status == "Valid Records":
-        #     if "error" in kml_status_val or "deleted" in kml_status_val:
-        #         # print(f"DEBUG: Row {source_row} failed 'Valid Records' filter.") # Optional debug
-        #         return False
+        # 4. KML File Status Filter (Error/Valid)
+        kml_status_val_from_record = record[11] # kml_file_status is at index 11
+        kml_status_val = str(kml_status_val_from_record).lower() if kml_status_val_from_record is not None else ""
+        if self.filter_error_status == "Error Records":
+            if not ("error" in kml_status_val or "deleted" in kml_status_val):
+                return False
+        elif self.filter_error_status == "Valid Records":
+            if "error" in kml_status_val or "deleted" in kml_status_val:
+                return False
 
-        # print(f"DEBUG: Row {source_row} passed with all filters (effectively) inactive.") # Optional debug
         return True
 
 # --- Delegate for Evaluation Status ComboBox ---
@@ -627,31 +615,15 @@ class MainWindow(QMainWindow):
         self.uuid_filter_edit.textChanged.connect(self.apply_filters)
         filter_layout.addWidget(self.uuid_filter_edit, 0, 1, 1, 3) 
 
-        filter_layout.addWidget(QLabel("Date Added After:"), 1, 0)
-        self.date_added_after_edit = QDateEdit(); self.date_added_after_edit.setCalendarPopup(True)
-        self.date_added_after_edit.setDisplayFormat("yyyy-MM-dd"); self.date_added_after_edit.clear() 
-        self.date_added_after_edit.setSpecialValueText(" "); self.date_added_after_edit.dateChanged.connect(self.apply_filters)
-        filter_layout.addWidget(self.date_added_after_edit, 1, 1)
-
-        filter_layout.addWidget(QLabel("Before:"), 1, 2)
-        self.date_added_before_edit = QDateEdit(); self.date_added_before_edit.setCalendarPopup(True)
-        self.date_added_before_edit.setDisplayFormat("yyyy-MM-dd")
-        # Set default to current date + 1 day
-        default_before_date = QDate.currentDate().addDays(1)
-        self.date_added_before_edit.setDate(default_before_date)
-        self.date_added_before_edit.setSpecialValueText(" ") # Keep this if you want null dates to show as " "
-        self.date_added_before_edit.dateChanged.connect(self.apply_filters)
-        filter_layout.addWidget(self.date_added_before_edit, 1, 3)
-
-        filter_layout.addWidget(QLabel("Export Status:"), 2, 0)
+        filter_layout.addWidget(QLabel("Export Status:"), 1, 0) # Changed row index from 2 to 1
         self.export_status_combo = QComboBox(); self.export_status_combo.addItems(["All", "Exported", "Not Exported"])
         self.export_status_combo.currentIndexChanged.connect(self.apply_filters)
-        filter_layout.addWidget(self.export_status_combo, 2, 1)
+        filter_layout.addWidget(self.export_status_combo, 1, 1) # Changed row index from 2 to 1
 
-        filter_layout.addWidget(QLabel("Record Status:"), 2, 2)
+        filter_layout.addWidget(QLabel("Record Status:"), 1, 2) # Changed row index from 2 to 1
         self.error_status_combo = QComboBox(); self.error_status_combo.addItems(["All", "Valid Records", "Error Records"])
         self.error_status_combo.currentIndexChanged.connect(self.apply_filters)
-        filter_layout.addWidget(self.error_status_combo, 2, 3)
+        filter_layout.addWidget(self.error_status_combo, 1, 3) # Changed row index from 2 to 1
 
         clear_filters_button = QPushButton("Clear Filters")
         clear_filters_button.clicked.connect(self.clear_filters)
@@ -673,9 +645,7 @@ class MainWindow(QMainWindow):
         if not hasattr(self, 'filter_proxy_model'): return
         self.filter_proxy_model.set_uuid_filter(self.uuid_filter_edit.text())
         
-        after_date = self.date_added_after_edit.date() if self.date_added_after_edit.text().strip() and self.date_added_after_edit.date().isValid() else None
-        before_date = self.date_added_before_edit.date() if self.date_added_before_edit.text().strip() and self.date_added_before_edit.date().isValid() else None
-        self.filter_proxy_model.set_date_added_filter(after_date, before_date)
+        # Date filter lines removed
         
         self.filter_proxy_model.set_export_status_filter(self.export_status_combo.currentText())
         self.filter_proxy_model.set_error_status_filter(self.error_status_combo.currentText())
@@ -683,11 +653,6 @@ class MainWindow(QMainWindow):
 
     def clear_filters(self):
         self.uuid_filter_edit.clear()
-
-        # Explicitly set to a null QDate
-        null_q_date = QDate() # Or QDate() directly if preferred in setDate
-        self.date_added_after_edit.setDate(null_q_date)
-        self.date_added_before_edit.setDate(null_q_date)
 
         self.export_status_combo.setCurrentIndex(0) 
         self.error_status_combo.setCurrentIndex(0)
