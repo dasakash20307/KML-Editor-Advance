@@ -309,28 +309,40 @@ class PolygonFilterProxyModel(QSortFilterProxyModel):
             if uuid_val_from_record is None or self.filter_uuid_text not in str(uuid_val_from_record).lower():
                 return False
         
-        # 2. Date Added Filter (Reverted to simpler version with robust None check)
-        # date_added is at index 5 in the record tuple
-        date_added_str = record[5]
-        if date_added_str and isinstance(date_added_str, str): # Process only if it's a non-empty string
-            try:
-                # Assuming date_added_str is like "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DD"
-                date_part_to_parse = date_added_str.split(" ")[0]
-                row_qdate = QDate.fromString(date_part_to_parse, "yyyy-MM-dd")
+        # 2. Date Added Filter
+        # Date Added is at index 5
+        date_val_from_record = record[5]
+        row_qdate = None
 
-                if row_qdate.isValid(): # Only compare if the parsed date from record is valid
-                    if self.filter_after_date_added and row_qdate < self.filter_after_date_added:
-                        return False
-                    if self.filter_before_date_added and row_qdate > self.filter_before_date_added:
-                        return False
-                # If row_qdate is not valid (parsing failed), this row will pass the date filter stage.
-            except Exception:
-                # If any error occurs during string splitting or QDate.fromString,
-                # let the row pass this specific date filter stage.
-                # print(f"DEBUG: Exception during date parsing for '{date_added_str}' - row will pass date filter.")
-                pass
-        # If date_added_str is None, empty, or not a string, it also passes this date filter stage.
-        # This means if a date filter is active, rows with no valid date string will NOT be filtered out by date.
+        if isinstance(date_val_from_record, datetime.datetime):
+            row_qdate = QDate(date_val_from_record.year, date_val_from_record.month, date_val_from_record.day)
+        elif isinstance(date_val_from_record, datetime.date): # Python date object
+            row_qdate = QDate(date_val_from_record.year, date_val_from_record.month, date_val_from_record.day)
+        elif isinstance(date_val_from_record, str) and date_val_from_record.strip(): # Non-empty string
+            date_str_to_parse = date_val_from_record.strip()
+            # Try parsing directly as "yyyy-MM-dd"
+            parsed_qdate = QDate.fromString(date_str_to_parse, "yyyy-MM-dd")
+            if not parsed_qdate.isValid():
+                # If direct parse fails, try splitting space (in case of "YYYY-MM-DD HH:MM:SS")
+                try:
+                    date_part_str = date_str_to_parse.split(" ")[0]
+                    parsed_qdate = QDate.fromString(date_part_str, "yyyy-MM-dd")
+                except IndexError: # No space found, parsing already attempted on full string
+                    parsed_qdate = QDate() # Ensure it's an invalid QDate
+
+            if parsed_qdate.isValid():
+                row_qdate = parsed_qdate
+            # else: print(f"DEBUG: filterAcceptsRow - Could not parse date string: {date_val_from_record}")
+        # If date_val_from_record is None, or not a recognized type, or parsing failed, row_qdate remains None or invalid.
+
+        # Filter logic (relies on the updated row_qdate above)
+        if self.filter_after_date_added:
+            if row_qdate is None or not row_qdate.isValid() or row_qdate < self.filter_after_date_added:
+                return False
+
+        if self.filter_before_date_added:
+            if row_qdate is None or not row_qdate.isValid() or row_qdate > self.filter_before_date_added:
+                return False
 
         # 3. Export Status Filter
         # kml_export_count is at index 6 in the record tuple
@@ -630,8 +642,12 @@ class MainWindow(QMainWindow):
 
         filter_layout.addWidget(QLabel("Before:"), 1, 2)
         self.date_added_before_edit = QDateEdit(); self.date_added_before_edit.setCalendarPopup(True)
-        self.date_added_before_edit.setDisplayFormat("yyyy-MM-dd"); self.date_added_before_edit.clear()
-        self.date_added_before_edit.setSpecialValueText(" "); self.date_added_before_edit.dateChanged.connect(self.apply_filters)
+        self.date_added_before_edit.setDisplayFormat("yyyy-MM-dd")
+        # Set default to current date + 1 day
+        default_before_date = QDate.currentDate().addDays(1)
+        self.date_added_before_edit.setDate(default_before_date)
+        self.date_added_before_edit.setSpecialValueText(" ") # Keep this if you want null dates to show as " "
+        self.date_added_before_edit.dateChanged.connect(self.apply_filters)
         filter_layout.addWidget(self.date_added_before_edit, 1, 3)
 
         filter_layout.addWidget(QLabel("Export Status:"), 2, 0)
