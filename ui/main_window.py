@@ -18,11 +18,12 @@ from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QTimer, QSize, 
 
 from database.db_manager import DatabaseManager
 from core.utils import resource_path
-from core.data_processor import process_csv_row_data, CSV_HEADERS 
+from core.data_processor import process_csv_row_data, CSV_HEADERS, process_api_row_data
 from core.api_handler import fetch_data_from_mwater_api
 from core.kml_generator import add_polygon_to_kml_object 
 import simplekml # Already present, used for KML generation
 import datetime 
+import uuid # Added for UUID generation
 
 # Assuming dialogs are in their own files and correctly imported
 from .dialogs.api_sources_dialog import APISourcesDialog 
@@ -42,6 +43,25 @@ ERROR_COLOR_MW = "#D32F2F"
 SUCCESS_COLOR_MW = "#388E3C"   
 FG_COLOR_MW = "#333333"        
 ORGANIZATION_TAGLINE_MW = "Developed by Dilasa Janvikash Pratishthan to support community upliftment"
+
+API_FIELD_TO_DB_FIELD_MAP = {
+    "uuid": "uuid",  # Assuming API provides 'uuid' directly
+    "response_code": "response_code",  # Assuming API provides 'response_code' directly
+    "farmer_name": "farmer_name", # Example: API uses "farmer_name"
+    "village_name": "village_name", # Example: API uses "village_name"
+    "block_name": "block", # Example: API uses "block_name"
+    "district_name": "district", # Example: API uses "district_name"
+    "area_gps": "proposed_area_acre", # Example: API uses "area_gps"
+    "point_1_utm": "p1_utm_str", "point_1_altitude": "p1_altitude",
+    "point_2_utm": "p2_utm_str", "point_2_altitude": "p2_altitude",
+    "point_3_utm": "p3_utm_str", "point_3_altitude": "p3_altitude",
+    "point_4_utm": "p4_utm_str", "point_4_altitude": "p4_altitude",
+    "survey_device_code": "device_code", # API might provide its own device identifier
+    "survey_date": "date_added", # API might provide a survey date as date_added
+    # Add any other relevant direct mappings for data to be stored or processed
+    # "notes_from_api": "notes",
+    # "photo_url_api": "photo_url",
+}
 
 # --- Table Model with Checkbox Support ---
 class PolygonTableModel(QAbstractTableModel):
@@ -800,13 +820,19 @@ class MainWindow(QMainWindow):
             return
 
         if rows_from_api is not None:
-            self._process_imported_data(rows_from_api, selected_api_title)
+            # Pass is_api_data=True and the map
+            self._process_imported_data(rows_from_api, selected_api_title, is_api_data=True, api_map=API_FIELD_TO_DB_FIELD_MAP)
         else:
             self.log_message(f"No data returned or error for {selected_api_title}.", "info")
 
-    def _process_imported_data(self, row_list, source_description):
+    def _process_imported_data(self, row_list, source_description, is_api_data=False, api_map=None):
         if not row_list:
             self.log_message(f"No data rows found in {source_description}.", "info")
+            return
+
+        if is_api_data and not api_map:
+            self.log_message(f"API data processing aborted: api_map not provided for {source_description}.", "error")
+            QMessageBox.critical(self, "Processing Error", "API map is missing for API data processing.")
             return
 
         if not self.credential_manager:
@@ -836,40 +862,60 @@ class MainWindow(QMainWindow):
             current_errors = [] # To accumulate errors for this record
 
             rc_from_row = ""
-            # Ensure CSV_HEADERS["response_code"] is robust for potential BOM characters
-            response_code_header_key = CSV_HEADERS["response_code"]
-            for k, v in original_row_dict.items():
-                if k.lstrip('\ufeff') == response_code_header_key:
-                    rc_from_row = v.strip() if v else ""
-                    break
+            # Determine response_code for duplicate check and logging
+            rc_from_row = ""
+            if is_api_data and api_map:
+                # Find the API key that maps to "response_code"
+                api_rc_key = None
+                for k, v in api_map.items():
+                    if v == "response_code":
+                        api_rc_key = k
+                        break
+                if api_rc_key:
+                    rc_from_row = original_row_dict.get(api_rc_key, "").strip()
+            else: # CSV data
+                response_code_header_key = CSV_HEADERS["response_code"]
+                for k, v_csv in original_row_dict.items(): # Renamed v to v_csv to avoid conflict
+                    if k.lstrip('\ufeff') == response_code_header_key:
+                        rc_from_row = v_csv.strip() if v_csv else ""
+                        break
             
             if not rc_from_row:
                 self.log_message(f"Row {i+1} from {source_description} skipped: Missing Response Code.", "error")
+                current_errors.append("Missing Response Code.") # Add to current_errors for this row
                 skipped_in_loop += 1
                 progress_dialog.update_progress(processed_in_loop, skipped_in_loop, new_added_in_loop)
                 if progress_dialog.was_cancelled(): break
-                continue
+                continue # Skip this iteration
 
             if self.db_manager.check_duplicate_response_code(rc_from_row):
                 self.log_message(f"Skipped duplicate Response Code '{rc_from_row}'.", "info")
                 skipped_in_loop += 1
                 progress_dialog.update_progress(processed_in_loop, skipped_in_loop, new_added_in_loop)
                 if progress_dialog.was_cancelled(): break
-                continue
+                continue # Skip this iteration
 
-            processed_flat = process_csv_row_data(original_row_dict)
+            # Data Processing Call
+            if is_api_data and api_map:
+                processed_flat = process_api_row_data(original_row_dict, api_map)
+            else:
+                processed_flat = process_csv_row_data(original_row_dict)
 
-            # Ensure uuid is present, as it's crucial for kml_file_name
+            # UUID Handling: Ensure uuid is present, generate if missing
             if not processed_flat.get("uuid"):
-                self.log_message(f"Data processing error for RC '{rc_from_row}': UUID missing after processing.", "error")
-                # This is a critical error, so we skip this record for DB and KML.
-                skipped_in_loop += 1
-                progress_dialog.update_progress(processed_in_loop, skipped_in_loop, new_added_in_loop)
-                if progress_dialog.was_cancelled(): break
-                continue
+                generated_uuid = str(uuid.uuid4())
+                log_msg_uuid = f"UUID missing for RC '{rc_from_row}' (source: {'API' if is_api_data else 'CSV'}). Generated new UUID: {generated_uuid}"
+                self.log_message(log_msg_uuid, "warning")
+                current_errors.append(f"UUID missing, generated: {generated_uuid}")
+                processed_flat["uuid"] = generated_uuid
 
+            # Accumulate errors from data processing
             if processed_flat.get('error_messages'):
-                current_errors.append(f"Data processing issues: {processed_flat.get('error_messages')}")
+                # Ensure it's treated as a list for consistent appending
+                if isinstance(processed_flat['error_messages'], str):
+                    current_errors.append(f"Data processing issues: {processed_flat['error_messages']}")
+                elif isinstance(processed_flat['error_messages'], list): # Should not happen based on processor
+                    current_errors.extend(processed_flat['error_messages'])
 
             kml_file_name = f"{processed_flat['uuid']}.kml"
             kml_content_ok = False
@@ -906,26 +952,45 @@ class MainWindow(QMainWindow):
 
 
             # Prepare data for database
-            db_data = processed_flat.copy()
+            db_data = processed_flat.copy() # Start with all processed data
             db_data['kml_file_name'] = kml_file_name
             db_data['kml_file_status'] = "Created" if kml_saved_successfully else "Errored"
-            db_data['device_code'] = device_id
-            db_data['editor_device_id'] = device_id # Current device is creator
+
+            # Device code: Prefer API's if available, else use current app's device_id
+            # processed_flat.get('device_code') would come from process_api_row_data if mapped
+            api_device_code = processed_flat.get('device_code')
+            db_data['device_code'] = api_device_code if api_device_code else device_id
+
+            db_data['editor_device_id'] = device_id # Current app is the creator/editor initially
             db_data['editor_device_nickname'] = device_nickname
 
-            # Remove old 'status' field if it exists, replaced by kml_file_status
+            # Remove the 'status' field from processed_flat as it's superseded by kml_file_status and error messages
             db_data.pop('status', None)
 
-            # Consolidate error messages
-            existing_errors = db_data.get('error_messages', "")
-            if isinstance(existing_errors, list): # if process_csv_row_data put a list
-                existing_errors.extend(current_errors)
-                db_data['error_messages'] = "\n".join(filter(None,existing_errors))
-            else: # if it's a string or None
-                all_errors = "\n".join(filter(None, [existing_errors] + current_errors))
-                db_data['error_messages'] = all_errors if all_errors else None
+            # Consolidate error messages: errors from processing + KML generation/saving
+            # current_errors already contains processing errors (if any, prepended with "Data processing issues:")
+            # and KML generation errors.
+            final_error_messages = "\n".join(filter(None, current_errors))
+            db_data['error_messages'] = final_error_messages if final_error_messages else None
 
+            # Date handling:
+            # last_modified is always now.
             db_data["last_modified"] = datetime.datetime.now().isoformat()
+            # date_added: Use from processed_flat if available (e.g., mapped from API), else now.
+            # Ensure it's in correct ISO format if coming from processed_flat.
+            # For now, assume process_api_row_data/process_csv_row_data doesn't yet format date_added.
+            # This might need refinement if date_added from source is in a different format.
+            # For simplicity, if 'date_added' is in processed_flat and is a non-empty string, use it, else now.
+            existing_date_added = processed_flat.get("date_added")
+            if existing_date_added and isinstance(existing_date_added, str) and existing_date_added.strip():
+                 # TODO: Potentially parse and reformat existing_date_added to ensure ISO format
+                 # For now, assume it's either correctly formatted or needs to be.
+                 # If it's from our API processor, it's just a stripped string.
+                 # This part might need a utility if dates from API are not ISO.
+                db_data["date_added"] = existing_date_added
+            else:
+                db_data["date_added"] = datetime.datetime.now().isoformat()
+
 
             db_result_id = self.db_manager.add_or_update_polygon_data(db_data, overwrite=False)
 

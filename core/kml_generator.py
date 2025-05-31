@@ -104,34 +104,46 @@ if __name__ == '__main__':
 
     # Sample data similar to what would be fetched from DB for a 'valid_for_kml' record
     sample_record = {
-        "uuid": "TEST_UUID_001", "response_code": "RC_TEST_001",
+        "uuid": "TEST_UUID_001", "response_code": "RC_TEST_001", "id": "ID_001", "db_id": "DB_ID_XYZ",
         "farmer_name": "KML Test Farmer", "village_name": "KML Test Village",
         "block": "Test Block", "district": "Test District", "proposed_area_acre": "2.5",
-        "p1_easting": 471895.31, "p1_northing": 2135690.93, "p1_altitude": 100, "p1_zone_num": 43, "p1_zone_letter": "Q",
-        "p2_easting": 471995.31, "p2_northing": 2135690.93, "p2_altitude": 101, "p2_zone_num": 43, "p2_zone_letter": "Q",
+        "p1_easting": 471895.31, "p1_northing": 2135690.93, "p1_altitude": 100, "p1_zone_num": 43, "p1_zone_letter": "Q", "p1_utm_str": "43Q 471895.31 2135690.93",
+        "p2_easting": 471995.31, "p2_northing": 2135690.93, "p2_altitude": 101, "p2_zone_num": 43, "p2_zone_letter": "Q", "p2_substituted": "false",
         "p3_easting": 471995.31, "p3_northing": 2135590.93, "p3_altitude": 102, "p3_zone_num": 43, "p3_zone_letter": "Q",
         "p4_easting": 471895.31, "p4_northing": 2135590.93, "p4_altitude": 103, "p4_zone_num": 43, "p4_zone_letter": "Q",
-        "status": "valid_for_kml"
-        # Add new v5 fields to test if they are correctly excluded or included if not in excluded_keys
-        # For example, if 'evaluation_status' is NOT in excluded_keys, it should appear.
-        # If 'some_other_field' is added and not in excluded_keys, it should appear.
-        ,"evaluation_status": "Eligible",
-        "custom_field_test": "Custom Value"
+        "status": "valid_for_kml", "kml_file_status": "Pending", "kml_file_name": "test.kml",
+        "kml_export_count": 5, "last_kml_export_date": "2023-01-01",
+        "date_added": "2022-12-01", "last_modified": "2023-01-15",
+        "edit_count": 3, "last_edit_date": "2023-01-10", "editor_device_id": "ED_007", "editor_device_nickname": "Bond",
+        "device_code": "DEV_XYZ", "error_messages": "None",
+        # Fields that should appear in the description
+        "evaluation_status": "Eligible",
+        "crop_name": "Wheat",
+        "water_source": "Canal",
+        "survey_number": "SN_123",
+        "notes": "This is a test note.",
+        "empty_field_test": "", # Should appear as "Empty Field Test: N/A"
+        "none_field_test": None # Should appear as "None Field Test: N/A"
     }
 
     if add_polygon_to_kml_object(kml_test, sample_record):
         print("Sample polygon added successfully.")
         # You can inspect the generated KML description in the output file.
         # The description for "TEST_UUID_001" should now be dynamically generated.
-        # Expected fields in description (based on sample_record and default exclusions):
+        # Expected fields in description (based on sample_record and current exclusions):
         # Farmer Name: KML Test Farmer
         # Village Name: KML Test Village
         # Block: Test Block
         # District: Test District
         # Proposed Area Acre: 2.5
         # Evaluation Status: Eligible
-        # Custom Field Test: Custom Value
-        kml_test.save("test_polygon_v5desc.kml") # Save with a new name to see the change
-        print("Saved test_polygon_v5desc.kml")
+        # Crop Name: Wheat
+        # Water Source: Canal
+        # Survey Number: SN_123
+        # Notes: This is a test note.
+        # Empty Field Test: N/A
+        # None Field Test: N/A
+        kml_test.save("test_polygon_v5desc_updated.kml") # Save with a new name to see the change
+        print("Saved test_polygon_v5desc_updated.kml")
     else:
         print("Failed to add sample polygon.")

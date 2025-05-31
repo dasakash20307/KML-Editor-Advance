@@ -198,3 +198,318 @@ def process_csv_row_data(row_dict_from_reader):
     
     processed_for_db["error_messages"] = "\n".join(error_accumulator) if error_accumulator else None
     return processed_for_db
+
+# --- API Data Processing ---
+
+def process_api_row_data(api_row_dict, api_to_db_map):
+    """
+    Processes a single data record (dictionary) from an API.
+    Uses api_to_db_map to map API field names to internal DB field names.
+    Extracts data, validates points, attempts substitution for one missing point.
+    Returns a dictionary flattened and ready for database insertion,
+    including 'status' and 'error_messages' (as a string).
+    """
+    processed_for_db = {}
+    error_accumulator = []
+
+    # 1. Initial Mapping based on api_to_db_map
+    for api_key, db_key in api_to_db_map.items():
+        processed_for_db[db_key] = api_row_dict.get(api_key, "").strip()
+
+    # 2. Ensure essential fields (uuid, response_code) are populated
+    # We need to find the DB keys for uuid and response_code from the map values
+    # This is a bit simplistic; a more robust way might be to have fixed internal keys
+    # for these critical fields if the api_to_db_map could vary wildly.
+    # For now, assume api_to_db_map *will* contain mappings for "uuid" and "response_code".
+
+    # Find the db_key corresponding to 'uuid' and 'response_code' in the map's values
+    db_uuid_key = None
+    db_response_code_key = None
+    for api_k, db_k in api_to_db_map.items():
+        if db_k == "uuid":
+            db_uuid_key = db_k
+        elif db_k == "response_code":
+            db_response_code_key = db_k
+
+    # Use the found db_keys to check values in processed_for_db
+    if not db_uuid_key or not processed_for_db.get(db_uuid_key):
+        error_accumulator.append(f"Critical: UUID is empty or missing from API data based on map. API key expected to map to 'uuid'.")
+    if not db_response_code_key or not processed_for_db.get(db_response_code_key):
+        error_accumulator.append(f"Critical: Response Code is empty or missing from API data based on map. API key expected to map to 'response_code'.")
+
+    if error_accumulator and ("UUID is empty or missing" in error_accumulator[-1] or \
+                              "Response Code is empty or missing" in error_accumulator[-1]):
+        processed_for_db["status"] = "error_missing_identifiers"
+        # Populate point fields with defaults for DB consistency
+        for i in range(1, 5):
+            processed_for_db[f"p{i}_utm_str"] = ""
+            processed_for_db[f"p{i}_altitude"] = 0.0
+            processed_for_db[f"p{i}_easting"] = None
+            processed_for_db[f"p{i}_northing"] = None
+            processed_for_db[f"p{i}_zone_num"] = None
+            processed_for_db[f"p{i}_zone_letter"] = None
+            processed_for_db[f"p{i}_substituted"] = False
+        processed_for_db["error_messages"] = "\n".join(error_accumulator)
+        return processed_for_db
+
+    processed_for_db.setdefault("status", "valid_for_kml") # Default status if not error_missing_identifiers
+
+    # 3. UTM Point Processing
+    # This list stores detailed info for each point during processing
+    intermediate_points_data = []
+
+    # api_to_db_map needs to define mappings for point data. Example:
+    # "api_p1_utm": "p1_utm_str", "api_p1_alt": "p1_altitude", etc.
+    for i in range(1, 5):
+        # Find the api_keys for current point's UTM string and altitude from the map
+        api_utm_key_for_point = None
+        api_alt_key_for_point = None
+
+        # Expected db_keys for points are "pX_utm_str" and "pX_altitude"
+        target_db_utm_key = f"p{i}_utm_str"
+        target_db_alt_key = f"p{i}_altitude"
+
+        for api_k, db_k in api_to_db_map.items():
+            if db_k == target_db_utm_key:
+                api_utm_key_for_point = api_k
+            elif db_k == target_db_alt_key:
+                api_alt_key_for_point = api_k
+
+        utm_str_val = api_row_dict.get(api_utm_key_for_point, "").strip() if api_utm_key_for_point else ""
+        alt_str_val = api_row_dict.get(api_alt_key_for_point, "0").strip() if api_alt_key_for_point else "0" # Default "0"
+
+        # Ensure these keys exist in processed_for_db from initial mapping if they were in api_to_db_map
+        # If they weren't in api_to_db_map, they wouldn't be in processed_for_db yet.
+        # The parse_utm_string and altitude processing will use utm_str_val and alt_str_val directly.
+        # The final results will be stored using standard pX_ keys.
+        processed_for_db[target_db_utm_key] = utm_str_val # Store the original UTM string
+
+        altitude_val = 0.0
+        try:
+            altitude_val = float(alt_str_val) if alt_str_val else 0.0
+        except ValueError:
+            error_accumulator.append(f"Point {i} altitude ('{alt_str_val}') from API key '{api_alt_key_for_point}' is non-numeric, defaulted to 0.")
+        processed_for_db[target_db_alt_key] = altitude_val # Store the parsed or default altitude
+
+        parsed_utm_components = parse_utm_string(utm_str_val)
+        point_data_item = {
+            "utm_str": utm_str_val, "altitude": altitude_val,
+            "easting": None, "northing": None, "zone_num": None, "zone_letter": None,
+            "substituted": False, "is_valid_parse": False
+        }
+        if parsed_utm_components:
+            zn, zl, e, n = parsed_utm_components
+            point_data_item.update({
+                "easting": e, "northing": n, "zone_num": zn, "zone_letter": zl,
+                "is_valid_parse": True
+            })
+        else:
+            if utm_str_val: # Only log malformed if it wasn't empty
+                error_accumulator.append(f"Point {i} UTM string ('{utm_str_val}') from API key '{api_utm_key_for_point}' is malformed.")
+        intermediate_points_data.append(point_data_item)
+
+    # --- Point Substitution Logic (adapted from process_csv_row_data) ---
+    invalid_point_indices = [idx for idx, p_data in enumerate(intermediate_points_data) if not p_data["is_valid_parse"]]
+    if len(invalid_point_indices) > 1:
+        processed_for_db["status"] = "error_too_many_missing_points"
+        error_accumulator.append(f"Too many missing/invalid UTM points ({len(invalid_point_indices)}) from API data.")
+    elif len(invalid_point_indices) == 1:
+        idx_to_fix = invalid_point_indices[0]
+        substitute_source_idx_map = {0: 1, 1: 2, 2: 3, 3: 0}
+        substitute_from_idx = substitute_source_idx_map[idx_to_fix]
+
+        if intermediate_points_data[substitute_from_idx]["is_valid_parse"]:
+            source_point = intermediate_points_data[substitute_from_idx]
+            target_point = intermediate_points_data[idx_to_fix]
+
+            target_point.update({
+                "easting": source_point["easting"], "northing": source_point["northing"],
+                "zone_num": source_point["zone_num"], "zone_letter": source_point["zone_letter"],
+                "is_valid_parse": True, "substituted": True,
+                "utm_str": target_point["utm_str"] + f" (Coords from P{substitute_from_idx+1})"
+            })
+            # Altitudes are kept as their original/defaulted values unless substitution implies altitude change too.
+            # For now, only coordinates are substituted.
+            error_accumulator.append(f"Point {idx_to_fix+1} coordinates substituted with Point {substitute_from_idx+1} data using API fields.")
+        else:
+            processed_for_db["status"] = "error_substitution_failed"
+            error_accumulator.append(f"Cannot substitute Point {idx_to_fix+1} (from API) as substitute Point {substitute_from_idx+1} is also invalid.")
+
+    # --- Flatten point data into processed_for_db and final status checks (adapted) ---
+    all_points_structurally_valid = True
+    for i_loop_idx in range(4): # Loop 0 to 3 for list indices
+        p_data_item = intermediate_points_data[i_loop_idx]
+        db_point_idx = i_loop_idx + 1 # DB point index P1, P2, ...
+
+        # These were already set or defaulted earlier, but substitution might change them
+        processed_for_db[f"p{db_point_idx}_utm_str"] = p_data_item["utm_str"]
+        processed_for_db[f"p{db_point_idx}_altitude"] = p_data_item["altitude"]
+        # These are the core parsed values
+        processed_for_db[f"p{db_point_idx}_easting"] = p_data_item["easting"]
+        processed_for_db[f"p{db_point_idx}_northing"] = p_data_item["northing"]
+        processed_for_db[f"p{db_point_idx}_zone_num"] = p_data_item["zone_num"]
+        processed_for_db[f"p{db_point_idx}_zone_letter"] = p_data_item["zone_letter"]
+        processed_for_db[f"p{db_point_idx}_substituted"] = p_data_item["substituted"]
+
+        if not p_data_item["is_valid_parse"]:
+            all_points_structurally_valid = False
+
+    if processed_for_db["status"] == "valid_for_kml": # Only if no major errors so far
+        if not all_points_structurally_valid:
+            processed_for_db["status"] = "error_point_data_invalid"
+            error_accumulator.append("One or more points from API data have invalid/missing coordinate data after processing attempts.")
+        else:
+            # Zone consistency check
+            p1_zn = processed_for_db.get("p1_zone_num")
+            p1_zl = processed_for_db.get("p1_zone_letter")
+            if p1_zn is not None and p1_zl is not None: # Ensure P1 has valid zone info
+                first_point_zone = (p1_zn, p1_zl)
+                for i_check_idx in range(2, 5): # Check P2, P3, P4 against P1
+                    current_point_zn = processed_for_db.get(f"p{i_check_idx}_zone_num")
+                    current_point_zl = processed_for_db.get(f"p{i_check_idx}_zone_letter")
+                    if current_point_zn is not None and current_point_zl is not None:
+                        if (current_point_zn, current_point_zl) != first_point_zone:
+                            processed_for_db["status"] = "error_inconsistent_zones"
+                            error_accumulator.append(f"Inconsistent UTM zones in API data (e.g., P1: {first_point_zone}, P{i_check_idx}: {(current_point_zn, current_point_zl)}).")
+                            break
+                    else: # This point was supposed to be valid but is missing zone info
+                        processed_for_db["status"] = "error_point_processing_incomplete"
+                        error_accumulator.append(f"Missing zone information for Point {i_check_idx} from API data needed for consistency check.")
+                        break
+            else: # P1 itself is missing zone information
+                processed_for_db["status"] = "error_point_processing_incomplete"
+                error_accumulator.append("Missing zone information for Point 1 from API data, cannot perform consistency check.")
+
+    processed_for_db["error_messages"] = "\n".join(error_accumulator) if error_accumulator else None
+    return processed_for_db
+
+
+if __name__ == '__main__':
+    print("Testing CSV Processor (existing functionality - basic check)")
+    # Basic test for existing CSV processor (not exhaustive)
+    sample_csv_row = {
+        CSV_HEADERS["uuid"]: "CSV_UUID_001", CSV_HEADERS["response_code"]: "CSV_RC_001",
+        CSV_HEADERS["farmer_name"]: "CSV Farmer", CSV_HEADERS["village"]: "CSV Village",
+        CSV_HEADERS["p1_utm"]: "43Q 123456 789012", CSV_HEADERS["p1_alt"]: "100",
+        CSV_HEADERS["p2_utm"]: "43Q 123457 789013", CSV_HEADERS["p2_alt"]: "101",
+        CSV_HEADERS["p3_utm"]: "43Q 123458 789014", CSV_HEADERS["p3_alt"]: "102",
+        CSV_HEADERS["p4_utm"]: "43Q 123459 789015", CSV_HEADERS["p4_alt"]: "103",
+    }
+    processed_csv_data = process_csv_row_data(sample_csv_row)
+    print(f"CSV Processed: {processed_csv_data['uuid']}, Status: {processed_csv_data['status']}")
+    # print(f"CSV Errors: {processed_csv_data['error_messages']}") # Uncomment for detail
+
+    print("\n--- Testing API Data Processor ---")
+
+    sample_api_map_v1 = {
+        "record_identifier": "uuid",
+        "survey_code": "response_code",
+        "farmer_details.name": "farmer_name", # Example of nested API field
+        "location.village": "village_name",
+        "location.block": "block",
+        "location.district": "district",
+        "land_info.area_acres": "proposed_area_acre",
+        "geo_points.point1.utm": "p1_utm_str", "geo_points.point1.altitude": "p1_altitude",
+        "geo_points.point2.utm": "p2_utm_str", "geo_points.point2.altitude": "p2_altitude",
+        "geo_points.point3.utm": "p3_utm_str", "geo_points.point3.altitude": "p3_altitude",
+        "geo_points.point4.utm": "p4_utm_str", "geo_points.point4.altitude": "p4_altitude",
+        "internal_notes": "notes" # Example of a field not in CSV processing
+    }
+
+    sample_api_data_valid = {
+        "record_identifier": "API_UUID_001", "survey_code": "API_RC_001",
+        "farmer_details.name": "API Farmer 1", "location.village": "API Village 1",
+        "location.block": "API Block A", "location.district": "API District X",
+        "land_info.area_acres": "5.2",
+        "geo_points.point1.utm": "44N 123456 7890123", "geo_points.point1.altitude": "150",
+        "geo_points.point2.utm": "44N 123556 7890123", "geo_points.point2.altitude": "151",
+        "geo_points.point3.utm": "44N 123556 7890023", "geo_points.point3.altitude": "152",
+        "geo_points.point4.utm": "44N 123456 7890023", "geo_points.point4.altitude": "153",
+        "internal_notes": "All good."
+    }
+
+    print("\nTest Case 1: Valid API Data")
+    processed_api_data_1 = process_api_row_data(sample_api_data_valid, sample_api_map_v1)
+    print(f"API Processed: {processed_api_data_1.get('uuid')}, Status: {processed_api_data_1.get('status')}")
+    if processed_api_data_1.get('error_messages'):
+        print(f"Errors: {processed_api_data_1['error_messages']}")
+    # print(processed_api_data_1) # For full output
+
+    sample_api_data_missing_point = {
+        "record_identifier": "API_UUID_002", "survey_code": "API_RC_002",
+        "farmer_details.name": "API Farmer 2", "location.village": "API Village 2",
+        "geo_points.point1.utm": "43Q 533030 2196060", "geo_points.point1.altitude": "200",
+        "geo_points.point2.utm": "", "geo_points.point2.altitude": "201", # Missing P2 UTM
+        "geo_points.point3.utm": "43Q 533050 2196040", "geo_points.point3.altitude": "202",
+        "geo_points.point4.utm": "43Q 533040 2196030", "geo_points.point4.altitude": "203",
+    }
+    print("\nTest Case 2: API Data with one missing point (P2 UTM empty, P3 will be substituted for P2)")
+    # Note: The substitution logic is p0->p1, p1->p2, p2->p3, p3->p0.
+    # So if p1 (index 1) is missing, p2 (index 2) is used.
+    # In this test, point 2 (index 1) is missing. It will try to use point 3 (index 2) data.
+    processed_api_data_2 = process_api_row_data(sample_api_data_missing_point, sample_api_map_v1)
+    print(f"API Processed: {processed_api_data_2.get('uuid')}, Status: {processed_api_data_2.get('status')}")
+    print(f"P2 UTM: {processed_api_data_2.get('p2_utm_str')}, P2 Substituted: {processed_api_data_2.get('p2_substituted')}")
+    if processed_api_data_2.get('error_messages'):
+        print(f"Messages: {processed_api_data_2['error_messages']}")
+
+    sample_api_data_critical_error = {
+        # Missing record_identifier (uuid)
+        "survey_code": "API_RC_003",
+        "farmer_details.name": "API Farmer 3",
+    }
+    print("\nTest Case 3: API Data with critical error (missing UUID)")
+    processed_api_data_3 = process_api_row_data(sample_api_data_critical_error, sample_api_map_v1)
+    print(f"API Processed: {processed_api_data_3.get('uuid')}, Status: {processed_api_data_3.get('status')}")
+    if processed_api_data_3.get('error_messages'):
+        print(f"Errors: {processed_api_data_3['error_messages']}")
+
+    sample_api_data_two_missing_points = {
+        "record_identifier": "API_UUID_004", "survey_code": "API_RC_004",
+        "geo_points.point1.utm": "", "geo_points.point1.altitude": "200", # Missing P1
+        "geo_points.point2.utm": "", "geo_points.point2.altitude": "201", # Missing P2
+        "geo_points.point3.utm": "43Q 533050 2196040", "geo_points.point3.altitude": "202",
+        "geo_points.point4.utm": "43Q 533040 2196030", "geo_points.point4.altitude": "203",
+    }
+    print("\nTest Case 4: API Data with two missing points")
+    processed_api_data_4 = process_api_row_data(sample_api_data_two_missing_points, sample_api_map_v1)
+    print(f"API Processed: {processed_api_data_4.get('uuid')}, Status: {processed_api_data_4.get('status')}")
+    if processed_api_data_4.get('error_messages'):
+        print(f"Errors: {processed_api_data_4['error_messages']}")
+
+    sample_api_data_inconsistent_zones = {
+        "record_identifier": "API_UUID_005", "survey_code": "API_RC_005",
+        "geo_points.point1.utm": "43Q 123456 789012", "geo_points.point1.altitude": "100",
+        "geo_points.point2.utm": "44N 123457 789013", "geo_points.point2.altitude": "101", # Different Zone
+        "geo_points.point3.utm": "43Q 123458 789014", "geo_points.point3.altitude": "102",
+        "geo_points.point4.utm": "43Q 123459 789015", "geo_points.point4.altitude": "103",
+    }
+    print("\nTest Case 5: API Data with inconsistent UTM zones")
+    processed_api_data_5 = process_api_row_data(sample_api_data_inconsistent_zones, sample_api_map_v1)
+    print(f"API Processed: {processed_api_data_5.get('uuid')}, Status: {processed_api_data_5.get('status')}")
+    if processed_api_data_5.get('error_messages'):
+        print(f"Errors: {processed_api_data_5['error_messages']}")
+
+    # Test case: What if api_to_db_map doesn't contain mapping for some points?
+    sample_api_map_v2_missing_p4 = {
+        "record_identifier": "uuid", "survey_code": "response_code",
+        "geo_points.point1.utm": "p1_utm_str", "geo_points.point1.altitude": "p1_altitude",
+        "geo_points.point2.utm": "p2_utm_str", "geo_points.point2.altitude": "p2_altitude",
+        "geo_points.point3.utm": "p3_utm_str", "geo_points.point3.altitude": "p3_altitude",
+        # P4 mapping is missing
+    }
+    sample_api_data_for_map_v2 = {
+        "record_identifier": "API_UUID_006", "survey_code": "API_RC_006",
+        "geo_points.point1.utm": "43Q 123456 789012", "geo_points.point1.altitude": "100",
+        "geo_points.point2.utm": "43Q 123457 789013", "geo_points.point2.altitude": "101",
+        "geo_points.point3.utm": "43Q 123458 789014", "geo_points.point3.altitude": "102",
+        # P4 data might be present in API payload but won't be mapped
+        "geo_points.point4.utm": "43Q 123459 789015", "geo_points.point4.altitude": "103",
+    }
+    print("\nTest Case 6: API Data with map missing P4 definition")
+    # This will result in P4 being "empty" during processing, triggering substitution or "too_many_missing"
+    processed_api_data_6 = process_api_row_data(sample_api_data_for_map_v2, sample_api_map_v2_missing_p4)
+    print(f"API Processed: {processed_api_data_6.get('uuid')}, Status: {processed_api_data_6.get('status')}")
+    print(f"P4 UTM: '{processed_api_data_6.get('p4_utm_str')}', P4 Substituted: {processed_api_data_6.get('p4_substituted')}")
+    if processed_api_data_6.get('error_messages'):
+        print(f"Messages: {processed_api_data_6['error_messages']}")

@@ -426,18 +426,30 @@ if __name__ == '__main__':
     print("\n--- Testing Polygon Data ---")
     sample_poly_data1 = {
         "uuid": "uuid-test-001", "response_code": "rc-test-001", "farmer_name": "Test Farmer 1",
-        "village_name": "Test Village",
-        "kml_file_name": "test_farmer_1.kml", "kml_file_status": "Created",
-        "evaluation_status": "Eligible", "device_code": "dev001",
-        "p1_utm_str": "43Q 123 456", "p1_altitude": 100.0, "p1_easting": 123.0, "p1_northing": 456.0, "p1_zone_num": 43, "p1_zone_letter": "Q",
-        # ... (add other point data if needed for full test)
+        "village_name": "Test Village", "block": "Test Block A", "district": "Test District X",
+        "proposed_area_acre": "5.0",
+        "kml_file_name": "uuid-test-001.kml", "kml_file_status": "Created",
+        "evaluation_status": "Eligible", "device_code": "dev001_apidata", # Simulating it came from API
+        "editor_device_id": "local_editor_001", "editor_device_nickname": "Local Editor",
+        "p1_utm_str": "43Q 123456 7890123", "p1_altitude": 100.0, "p1_easting": 123456.0, "p1_northing": 7890123.0, "p1_zone_num": 43, "p1_zone_letter": "Q", "p1_substituted": False,
+        "p2_utm_str": "43Q 123556 7890123", "p2_altitude": 101.0, "p2_easting": 123556.0, "p2_northing": 7890123.0, "p2_zone_num": 43, "p2_zone_letter": "Q", "p2_substituted": False,
+        "p3_utm_str": "43Q 123556 7890023", "p3_altitude": 102.0, "p3_easting": 123556.0, "p3_northing": 7890023.0, "p3_zone_num": 43, "p3_zone_letter": "Q", "p3_substituted": False,
+        "p4_utm_str": "43Q 123456 7890023", "p4_altitude": 103.0, "p4_easting": 123456.0, "p4_northing": 7890023.0, "p4_zone_num": 43, "p4_zone_letter": "Q", "p4_substituted": False,
+        "error_messages": None,
+        "date_added": "2023-10-01T10:00:00Z", # Simulating date_added from API
+        "last_modified": "2023-10-01T10:00:00Z" # Will be overwritten by db_manager
     }
     sample_poly_data2 = {
         "uuid": "uuid-test-002", "response_code": "rc-test-002", "farmer_name": "Test Farmer 2",
-        "village_name": "Another Village",
-        "kml_file_name": "test_farmer_2.kml", "kml_file_status": "Errored",
-        "error_messages": "Point 3 missing", "evaluation_status": "Not Evaluated Yet", "device_code": "dev002",
-        # ...
+        "village_name": "Another Village", "block": "Test Block B", "district": "Test District Y",
+        "proposed_area_acre": "2.3",
+        "kml_file_name": "uuid-test-002.kml", "kml_file_status": "Errored",
+        "error_messages": "Point 3 UTM string malformed.\nKML generation failed due to point error.",
+        "evaluation_status": "Not Evaluated Yet", "device_code": "local_app_dev002", # Simulating it used app's device_id
+        "editor_device_id": "local_editor_001", "editor_device_nickname": "Local Editor",
+        "p1_utm_str": "44N 223456 8890123", "p1_altitude": 200.0, "p1_easting": 223456.0, "p1_northing": 8890123.0, "p1_zone_num": 44, "p1_zone_letter": "N",
+        "p2_utm_str": "44N 223556 8890123", "p2_altitude": 201.0, "p2_easting": 223556.0, "p2_northing": 8890123.0, "p2_zone_num": 44, "p2_zone_letter": "N",
+        # Missing P3, P4 to simulate error
     }
 
     poly_id1 = db_manager.add_or_update_polygon_data(sample_poly_data1)
@@ -457,11 +469,15 @@ if __name__ == '__main__':
     print(f"Attempted to add polygon 1 again (no overwrite), result ID: {poly_id1_again}") # Should be same as poly_id1
 
     # Test duplicate handling (overwrite)
-    sample_poly_data1_updated = sample_poly_data1.copy()
-    sample_poly_data1_updated["farmer_name"] = "Test Farmer 1 Updated Name"
-    sample_poly_data1_updated["evaluation_status"] = "Eligible" # Update for overwrite
+    sample_poly_data1_updated = sample_poly_data1.copy() # Start with a copy of the original
+    sample_poly_data1_updated["farmer_name"] = "Test Farmer 1 Updated Name by overwrite"
+    sample_poly_data1_updated["kml_file_status"] = "Created - Overwritten"
+    sample_poly_data1_updated["editor_device_id"] = "overwrite_editor_002"
+    sample_poly_data1_updated["editor_device_nickname"] = "Overwrite Editor"
+    sample_poly_data1_updated["evaluation_status"] = "Not Eligible" # Changed from Eligible
+
     poly_id1_overwrite = db_manager.add_or_update_polygon_data(sample_poly_data1_updated, overwrite=True)
-    print(f"Attempted to add polygon 1 again (overwrite), result ID: {poly_id1_overwrite}")
+    print(f"Attempted to add polygon 1 again (overwrite), result ID: {poly_id1_overwrite}") # Should be same as poly_id1
 
     all_polys = db_manager.get_all_polygon_data_for_display()
     print(f"All polygon data for display ({len(all_polys)} records):")
