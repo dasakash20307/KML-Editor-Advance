@@ -835,6 +835,16 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Processing Error", "API map is missing for API data processing.")
             return
 
+        # BOM Character Cleaning for API data keys
+        if is_api_data:
+            cleaned_row_list = []
+            # Use a different variable name for the items in the original row_list
+            # to avoid confusion with original_row_dict used later in the main processing loop.
+            for api_row_original_keys in row_list:
+                cleaned_row_list.append({k.lstrip('\ufeff'): v for k, v in api_row_original_keys.items()})
+            row_list = cleaned_row_list # Replace original row_list with the cleaned one
+            self.log_message("Cleaned BOM characters from API data keys.", "info")
+
         if not self.credential_manager:
             self.log_message("Credential Manager not available. Cannot process API data for KML generation.", "error")
             QMessageBox.critical(self, "Error", "Credential Manager not available.")
