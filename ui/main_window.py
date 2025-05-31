@@ -45,22 +45,28 @@ FG_COLOR_MW = "#333333"
 ORGANIZATION_TAGLINE_MW = "Developed by Dilasa Janvikash Pratishthan to support community upliftment"
 
 API_FIELD_TO_DB_FIELD_MAP = {
-    "uuid": "uuid",  # Assuming API provides 'uuid' directly
-    "response_code": "response_code",  # Assuming API provides 'response_code' directly
-    "farmer_name": "farmer_name", # Example: API uses "farmer_name"
-    "village_name": "village_name", # Example: API uses "village_name"
-    "block_name": "block", # Example: API uses "block_name"
-    "district_name": "district", # Example: API uses "district_name"
-    "area_gps": "proposed_area_acre", # Example: API uses "area_gps"
-    "point_1_utm": "p1_utm_str", "point_1_altitude": "p1_altitude",
-    "point_2_utm": "p2_utm_str", "point_2_altitude": "p2_altitude",
-    "point_3_utm": "p3_utm_str", "point_3_altitude": "p3_altitude",
-    "point_4_utm": "p4_utm_str", "point_4_altitude": "p4_altitude",
-    "survey_device_code": "device_code", # API might provide its own device identifier
-    "survey_date": "date_added", # API might provide a survey date as date_added
-    # Add any other relevant direct mappings for data to be stored or processed
-    # "notes_from_api": "notes",
-    # "photo_url_api": "photo_url",
+    "UUID (use as the file name)": "uuid",
+    "Response Code": "response_code",
+    "Name of the Farmer": "farmer_name",
+    "Village Name": "village_name",
+    "Block": "block",
+    "District": "district",
+    "Proposed Area (Acre)": "proposed_area_acre",
+    "Point 1 (UTM)": "p1_utm_str",
+    "Point 1 (altitude)": "p1_altitude",
+    "Point 2 (UTM)": "p2_utm_str",
+    "Point 2 (altitude)": "p2_altitude",
+    "Point 3 (UTM)": "p3_utm_str",
+    "Point 3 (altitude)": "p3_altitude",
+    "Point 4 (UTM)": "p4_utm_str",
+    "Point 4 (altitude)": "p4_altitude",
+    # Based on the provided header, there's no direct field for 'device_code' or 'survey_date'
+    # So, we remove the previous example mappings:
+    # "survey_device_code": "device_code", (Removed)
+    # "survey_date": "date_added", (Removed)
+    # 'device_code' and 'date_added' will be handled by downstream logic in _process_imported_data
+    # (e.g., device_code from CredentialManager, date_added as processing time)
+    # if not found in processed_flat from the map.
 }
 
 # --- Table Model with Checkbox Support ---
