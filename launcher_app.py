@@ -209,7 +209,7 @@ def launch():
             # Update progress to indicate setup is done.
             current_loading_screen.update_progress(100, "Setup Complete. Please Restart.")
             QMessageBox.information(current_loading_screen, "Setup Complete", "Initial configuration is complete. Please restart the application.")
-            QApplication.instance().quit() # Add this line to exit
+            app.quit() # Add this line to exit
             return True # Though the quit() might make this return not strictly necessary for flow.
         except Exception as e_save:
             error_msg_save = f"Failed to save settings: {e_save}"
