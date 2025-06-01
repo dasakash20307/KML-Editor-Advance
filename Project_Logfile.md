@@ -556,3 +556,94 @@ Task 7's core requirements – loading a KML file based on table selection, pars
 3.  **Clear Separation of Concerns:** Maintaining separation (e.g., `CredentialManager` for settings, `DatabaseManager` for DB ops, `MapViewWidget` for map display, `MainWindow` for orchestration) makes features easier to implement and debug.
 4.  **Proactive Error Handling in File Operations:** When dealing with file paths from external sources (like database records), always include checks for file existence (`os.path.exists`) and wrap file I/O in `try-except` blocks to gracefully handle issues like missing files or permission errors.
 ---
+---
+[Task 8 Log File (Add Task 9 at Next or relevant next task)]
+---
+**Update Date:** 2025-06-07
+**Version:** Beta.v5.0.5.Dev-ADas (Reflects Task 8 completion & fixes)
+**Author:** AI Assistant (Jules)
+**Task Reference:** Task 8: Database Locking Mechanism (from CA4 Part 2)
+
+**Objective:**
+To implement a robust file-based locking mechanism for the main SQLite database to enable safe concurrent use in the Central/Connected App model. This system aims to prevent simultaneous write operations, manage lock ownership, and handle stale locks.
+
+**Core Components Implemented/Modified:**
+
+1.  **`core/sync_manager.py` (New File):**
+    *   Introduced `DatabaseLockManager` class.
+    *   **`__init__(self, db_path_str, credential_manager)`**: Initializes with DB path and `CredentialManager`.
+    *   **`_get_lock_file_path()`**: Derives lock file name (e.g., `dbname.db.lock`) in the same directory as the DB.
+    *   **`acquire_lock(expected_duration, operation_description)`**:
+        *   Checks for existing lock file.
+        *   If held by current device, updates heartbeat and returns `True`.
+        *   If held by another, checks for staleness (heartbeat + expected duration + grace period).
+        *   Returns `True` (acquired), `False` (busy), `"STALE_LOCK_DETECTED"`, or `"ERROR"`. UI interaction for stale locks is deferred to the caller.
+    *   **`force_acquire_lock(expected_duration, operation_description)`**: Allows overriding a stale lock by deleting the old lock file and creating a new one.
+    *   **`release_lock()`**: Deletes the lock file if held by the current device.
+    *   **`update_heartbeat()`**: Updates the heartbeat timestamp in the lock file if held by the current device.
+    *   **`get_current_lock_info()`**: Reads and returns data from an existing lock file.
+    *   Lock file stores: `holder_device_id`, `holder_nickname`, `start_time_iso`, `expected_duration_seconds`, `operation_description`, `heartbeat_time_iso`.
+
+2.  **`ui/main_window.py` (Significant Modifications):**
+    *   **Initialization**: `DatabaseLockManager` is instantiated in `MainWindow.__init__`.
+    *   **Retry Logic Framework**:
+        *   Added attributes: `MAX_LOCK_RETRIES`, `LOCK_RETRY_TIMEOUT_MS`, `db_lock_retry_attempts`, `current_retry_operation`, `current_retry_args`, `current_retry_kwargs`.
+        *   `db_lock_retry_timer` (`QTimer`) connected to `_handle_lock_retry_timeout`.
+    *   **Helper Methods for Locking**:
+        *   `_reset_retry_state()`: Clears retry attributes and stops the timer.
+        *   `_handle_lock_retry_timeout()`: Re-invokes the original public method on timer timeout.
+        *   `_execute_db_operation_with_lock(...)`: Central method to manage the full locking workflow:
+            *   Calls `acquire_lock()`.
+            *   If lock acquired: Executes the main operation (passed as a callable), then releases lock.
+            *   If stale lock: Prompts user via `QMessageBox.question` to override. If yes, calls `force_acquire_lock()`.
+            *   If busy: Initiates retry timer, which calls the original public method via `_handle_lock_retry_timeout`.
+            *   Handles errors and ensures lock release in `finally` blocks.
+            *   Returns `True` if the callable operation succeeded, `False` otherwise.
+    *   **Integration with Data Operations**:
+        *   `_process_imported_data`: Refactored to use `_execute_db_operation_with_lock` for the entire import process. Heartbeats are updated within the import loop.
+        *   `handle_delete_checked_rows`: Refactored to use `_execute_db_operation_with_lock`.
+        *   `handle_clear_all_data`: Refactored to use `_execute_db_operation_with_lock`.
+        *   `handle_generate_kml`: Refactored to use `_execute_db_operation_with_lock`. Heartbeats added for KML generation and DB status updates.
+        *   `on_table_selection_changed` (for KML status update if file missing): Refactored to use `_execute_db_operation_with_lock`.
+    *   **`PolygonTableModel.setData()` (for `evaluation_status` update)**:
+        *   Modified to call `main_window.db_lock_manager.acquire_lock()`.
+        *   Handles `True` (proceeds), `False` (busy - shows warning, no retry from model), `"STALE_LOCK_DETECTED"` (shows warning, no override from model), and `"ERROR"` (shows critical message) return statuses from `acquire_lock`.
+
+**Debugging Journey & Key Fixes:**
+
+The implementation of Task 8 and its subsequent fixes involved a significant debugging effort primarily centered around two issues:
+
+1.  **`ModuleNotFoundError: No module named 'core.sync_manager'`:**
+    *   **Initial Problem:** The application failed to launch because `ui/main_window.py` could not import `DatabaseLockManager` from `core.sync_manager`.
+    *   **Investigation:** `ls("core")` commands and user tracebacks consistently showed that `core/sync_manager.py` was not being created or persisted in the repository, despite subtask reports claiming otherwise.
+    *   **Attempted Workarounds & Resolution:**
+        *   Multiple direct attempts to create `core/sync_manager.py` via subtasks failed to make the file persist.
+        *   A temporary workaround involved placing the `DatabaseLockManager` class code directly into `core/__init__.py` and changing the import in `ui/main_window.py` to `from core import DatabaseLockManager`. This fixed the immediate import error but was not ideal structurally.
+        *   **Final Fix:** After further attempts, a subtask successfully created `core/sync_manager.py` with the correct class definition. `core/__init__.py` was then cleaned to be a simple package initializer (empty with a comment), and the import in `ui/main_window.py` was reverted to the standard `from core.sync_manager import DatabaseLockManager`. This resolved the `ModuleNotFoundError` correctly. The root cause appeared to be inconsistencies in how subtasks were persisting file creations.
+
+2.  **`AttributeError: 'MainWindow' object has no attribute '_execute_db_operation_with_lock'`:**
+    *   **Problem:** After resolving the `ModuleNotFoundError` (initially with the `__init__.py` workaround), the application launched but failed during operations like "Delete Checked Rows" because the `_execute_db_operation_with_lock` method and its helper methods/attributes were missing from the `MainWindow` class.
+    *   **Investigation:** It was determined that these methods, though defined in previous subtask plans and reported as implemented, were lost or not correctly applied during the complex refactoring process, possibly due to issues with diff applications or state management in the AI tooling.
+    *   **Resolution:** A dedicated subtask successfully restored/added `_execute_db_operation_with_lock`, `_reset_retry_state`, `_handle_lock_retry_timeout`, and the necessary instance attributes (e.g., `MAX_LOCK_RETRIES`) to `MainWindow`. Subsequent refactoring ensured that `handle_delete_checked_rows` (and other methods like `handle_clear_all_data`, `handle_generate_kml`, `_process_imported_data`, `on_table_selection_changed`) correctly utilized this restored helper method.
+
+**Alignment with Requirements:**
+*   A file-based locking mechanism (`.db.lock` file) is implemented to prevent simultaneous database write operations.
+*   The lock file contains metadata (holder ID/nickname, start time, expected duration, operation, heartbeat).
+*   Stale lock detection (based on heartbeat, expected duration, and a grace period) is implemented, with a user prompt for override.
+*   A retry mechanism is in place for operations attempted while the database is legitimately locked by another process, with UI feedback.
+*   Heartbeats are updated during long operations (e.g., data import, bulk KML generation).
+*   Locks are released using `finally` blocks to ensure cleanup even on errors.
+*   All specified `MainWindow` methods and `PolygonTableModel.setData` are integrated with this locking system.
+
+**Notes for Future Tasks & Development Process:**
+
+1.  **Verify File System Operations:** When subtasks involve file creation, modification, or deletion, it's crucial to have a reliable way to verify these operations immediately (e.g., `ls` command, reading file content). Subtask success reports should be treated with caution if contradicted by direct verification.
+2.  **Atomic Subtasks for Refactoring:** For complex refactoring across multiple methods or files, break down changes into the smallest possible atomic subtasks. This reduces the chance of tool errors (like diff mismatches) and makes debugging easier if a specific small step fails.
+3.  **State Management in AI Tooling:** Be mindful of potential state desynchronization between the AI's understanding of file content and the actual state in the remote environment, especially after multiple chained modifications or failed subtasks. Explicitly re-reading files before generating diffs is good but may not always be sufficient if the underlying tooling has state issues.
+4.  **Structured Debugging Plans:** When runtime errors occur after a feature implementation, create a structured sub-plan to diagnose and fix these errors, similar to how new features are planned. This includes identifying the root cause, outlining corrective code changes, and verification steps.
+5.  **Prioritize Critical Errors:** Address blocking errors like `ModuleNotFoundError` or `AttributeError` before attempting further refactoring of other, less critical, code sections.
+6.  **KML File Deletion:** The current Task 8 implementation does *not* delete associated KML files from the file system when a database record is deleted. This functionality, including handling for `.kml.lock` files (Task 9), is a separate future task.
+
+**Impact:**
+The successful implementation of Task 8 provides a critical mechanism for data integrity in a shared environment. The resolution of the subsequent runtime errors ensures the application is stable and usable with this new locking feature.
+---

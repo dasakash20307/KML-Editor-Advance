@@ -77,6 +77,11 @@ The ongoing update to Version 5 introduces significant architectural improvement
         *   **Data Paths:** User-defined paths for storing the main SQLite database file (e.g., `dilasa_main_data_v5.db`) and the root folder for KML files (e.g., `kml_files/`).
     *   This configuration is stored locally in a `device_config.db` file, typically located in a user-specific application data directory (path determined using the `platformdirs` library). This replaces previous hardcoded or fixed data storage locations.
 
+*   **Database Locking Mechanism (`DatabaseLockManager`):**
+    *   To enable safe concurrent use of the main database in the Central/Connected App model, a robust file-based locking mechanism (`.db.lock` file) has been implemented.
+    *   This system prevents simultaneous write operations, manages lock ownership with device ID/nickname, and includes features for heartbeat updates during long operations and stale lock detection/override.
+    *   All database write operations are now routed through this locking system to ensure data integrity in shared environments.
+
 ## Key Technologies
 
 *   **Language:** Python
@@ -90,7 +95,7 @@ The ongoing update to Version 5 introduces significant architectural improvement
 
 ## Current Status
 
-The application is undergoing a significant update to **Version 5 (v5)**. Key architectural changes, including a KML-first data model and user-defined configurations via `CredentialManager`, have been implemented. The main data table now displays a comprehensive set of v5 metadata, and the filter panel UI has been updated for improved usability (date filters temporarily removed). See 'Key v5 Architectural Changes' for more details. The UI has also been modernized with High DPI support and a new application launcher. Development continues on further v5 enhancements and Google Earth Engine integration.
+The application is undergoing a significant update to **Version 5 (v5)**. Key architectural changes, including a KML-first data model, user-defined configurations via `CredentialManager`, and the **Database Locking Mechanism**, have been implemented. The main data table now displays a comprehensive set of v5 metadata, and the filter panel UI has been updated for improved usability (date filters temporarily removed). See 'Key v5 Architectural Changes' for more details. The UI has also been modernized with High DPI support and a new application launcher. Development continues on further v5 enhancements and Google Earth Engine integration.
 
 ## Setup
 
