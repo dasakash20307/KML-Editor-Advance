@@ -344,7 +344,29 @@ class MainWindow(QMainWindow):
 
         self.db_lock_retry_timer = QTimer(self)
         self.db_lock_retry_timer.setSingleShot(True)
-        # Actual connection of timeout signal and advanced retry attributes will be in a later step.
+
+        # Attributes for advanced lock retry logic
+        self.MAX_LOCK_RETRIES = 5
+        self.LOCK_RETRY_TIMEOUT_MS = 7000 # 7 seconds
+        self.db_lock_retry_attempts = 0
+        self.current_retry_operation = None # Stores the method to call on retry (e.g., self.handle_delete_checked_rows)
+        self.current_retry_args = None    # Stores args for the retry_operation
+        self.current_retry_kwargs = None  # Stores kwargs for the retry_operation
+
+        # Ensure the timer's timeout is connected
+        if hasattr(self, 'db_lock_retry_timer'): # Should exist
+            try: # Disconnect first to avoid multiple connections if this block runs multiple times
+                self.db_lock_retry_timer.timeout.disconnect(self._handle_lock_retry_timeout)
+            except (TypeError, RuntimeError):
+                pass # It's fine if it wasn't connected before
+            self.db_lock_retry_timer.timeout.connect(self._handle_lock_retry_timeout)
+        else:
+            # Fallback: Initialize if it was somehow missed. This should not ideally happen.
+            self.db_lock_retry_timer = QTimer(self)
+            self.db_lock_retry_timer.setSingleShot(True)
+            self.db_lock_retry_timer.timeout.connect(self._handle_lock_retry_timeout)
+            # self.log_message is not available yet in __init__, so use print for this unlikely case
+            print("MainWindow WARN: db_lock_retry_timer was re-initialized during attribute patching in __init__.")
 
         self.resize(1200, 800); self._center_window()
         self._create_main_layout(); self._create_header(); self._create_menus_and_toolbar(); self._create_status_bar()
@@ -575,6 +597,131 @@ class MainWindow(QMainWindow):
 
             elif hasattr(self,'map_view_widget'):self.map_view_widget.clear_map() # Default clear if no valid record
 
+    def _reset_retry_state(self):
+        # print("DEBUG: Resetting retry state") # For debugging
+        self.db_lock_retry_attempts = 0
+        self.current_retry_operation = None
+        self.current_retry_args = None
+        self.current_retry_kwargs = None
+        if hasattr(self, 'db_lock_retry_timer') and self.db_lock_retry_timer.isActive():
+            self.db_lock_retry_timer.stop()
+
+    def _handle_lock_retry_timeout(self):
+        # This method is called when the db_lock_retry_timer times out.
+        # It re-invokes the originally requested public method.
+        if self.current_retry_operation:
+            operation_name = self.current_retry_operation.__name__ if hasattr(self.current_retry_operation, '__name__') else str(self.current_retry_operation)
+            self.log_message(f"Lock retry timer timeout. Re-attempting original operation: {operation_name}", "info")
+
+            operation_to_call = self.current_retry_operation
+            args = self.current_retry_args if self.current_retry_args is not None else []
+            kwargs = self.current_retry_kwargs if self.current_retry_kwargs is not None else {}
+
+            if callable(operation_to_call):
+                operation_to_call(*args, **kwargs)
+            else:
+                self.log_message(f"Error: Stored retry operation {operation_name} is not callable.", "error")
+                self._reset_retry_state()
+        else:
+            self.log_message("MainWindow WARN: _handle_lock_retry_timeout called with no current_retry_operation.", "warning")
+            self._reset_retry_state()
+
+    def _execute_db_operation_with_lock(self, operation_callable, operation_desc, lock_duration=60,
+                                        retry_callable_for_timer=None,
+                                        args_for_retry_callable=None,
+                                        kwargs_for_retry_callable=None):
+        if not self.db_lock_manager:
+            self.log_message(f"Cannot perform '{operation_desc}': DatabaseLockManager not initialized.", "critical")
+            QMessageBox.critical(self, "Critical Error", "Database Lock Manager not available. Please restart.")
+            return False # Indicates operation did not proceed
+
+        if self.current_retry_operation != retry_callable_for_timer:
+            self.db_lock_retry_attempts = 0
+
+        lock_status = self.db_lock_manager.acquire_lock(lock_duration, operation_desc)
+        operation_performed_and_succeeded = False
+
+        if lock_status is True:
+            self.log_message(f"Lock acquired for '{operation_desc}'. Executing operation.", "info")
+            self._reset_retry_state()
+            try:
+                if callable(operation_callable):
+                    operation_performed_and_succeeded = operation_callable()
+                else:
+                    self.log_message(f"Error: operation_callable for '{operation_desc}' is not callable.", "error")
+                    operation_performed_and_succeeded = False
+            except Exception as e:
+                self.log_message(f"Exception during locked operation '{operation_desc}': {e}", "error")
+                QMessageBox.critical(self, "Operation Error", f"An error occurred during '{operation_desc}':\n{e}")
+                operation_performed_and_succeeded = False
+            finally:
+                self.db_lock_manager.release_lock()
+            return operation_performed_and_succeeded
+
+        elif lock_status == "STALE_LOCK_DETECTED":
+            self._reset_retry_state()
+            lock_info = self.db_lock_manager.get_current_lock_info()
+            holder_nickname = lock_info.get('holder_nickname', 'Unknown') if lock_info else 'Unknown'
+            stale_op_desc = lock_info.get('operation_description', 'unknown operation') if lock_info else 'unknown'
+
+            reply = QMessageBox.question(self, "Stale Database Lock",
+                                         f"The database lock held by '{holder_nickname}' for operation '{stale_op_desc}' appears to be stale.\n\nDo you want to override this lock?\n\nOverriding might be risky if the other process is still active but unresponsive.",
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                         QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.Yes:
+                self.log_message(f"User chose to override stale lock for '{operation_desc}'.", "info")
+                if self.db_lock_manager.force_acquire_lock(lock_duration, operation_desc):
+                    self.log_message(f"Lock forcibly acquired for '{operation_desc}'. Executing operation.", "info")
+                    try:
+                        if callable(operation_callable):
+                            operation_performed_and_succeeded = operation_callable()
+                        else:
+                             operation_performed_and_succeeded = False
+                    except Exception as e:
+                        self.log_message(f"Exception during locked operation (after force acquire) '{operation_desc}': {e}", "error")
+                        QMessageBox.critical(self, "Operation Error", f"An error occurred during '{operation_desc}' after overriding lock:\n{e}")
+                        operation_performed_and_succeeded = False
+                    finally:
+                        self.db_lock_manager.release_lock()
+                    return operation_performed_and_succeeded
+                else:
+                    self.log_message(f"Failed to force acquire lock for '{operation_desc}'.", "error")
+                    QMessageBox.critical(self, "Lock Override Failed", "Could not override the stale lock. The original lock might still be active or there was a file system error.")
+                    return False
+            else:
+                self.log_message(f"User chose not to override stale lock for '{operation_desc}'. Operation aborted.", "info")
+                return False
+
+        elif lock_status is False: # Lock is busy, not stale
+            if self.db_lock_retry_attempts < self.MAX_LOCK_RETRIES:
+                self.db_lock_retry_attempts += 1
+                self.current_retry_operation = retry_callable_for_timer
+                self.current_retry_args = args_for_retry_callable if args_for_retry_callable is not None else []
+                self.current_retry_kwargs = kwargs_for_retry_callable if kwargs_for_retry_callable is not None else {}
+
+                lock_info = self.db_lock_manager.get_current_lock_info()
+                holder_nickname = lock_info.get('holder_nickname', 'Unknown') if lock_info else 'Unknown'
+                locked_op_desc = lock_info.get('operation_description', 'unknown operation') if lock_info else 'unknown'
+
+                self.log_message(f"Database locked by {holder_nickname} (for '{locked_op_desc}'). Will retry '{operation_desc}' in {self.LOCK_RETRY_TIMEOUT_MS / 1000}s (Attempt {self.db_lock_retry_attempts}/{self.MAX_LOCK_RETRIES}).", "warning")
+                if hasattr(self, 'db_lock_retry_timer'):
+                    self.db_lock_retry_timer.start(self.LOCK_RETRY_TIMEOUT_MS)
+            else:
+                self.log_message(f"Max lock retry attempts ({self.MAX_LOCK_RETRIES}) reached for '{operation_desc}'. Operation aborted.", "error")
+                QMessageBox.warning(self, "Database Busy", f"The database is still locked by another process after {self.MAX_LOCK_RETRIES} retries. Please try '{operation_desc}' again later.")
+                self._reset_retry_state()
+            return False
+
+        elif lock_status == "ERROR":
+            self._reset_retry_state()
+            self.log_message(f"Failed to acquire lock for '{operation_desc}' due to an internal error in DatabaseLockManager.", "critical")
+            QMessageBox.critical(self, "Lock Acquisition Error", "Could not acquire database lock due to an internal error. Please check the logs.")
+            return False
+
+        self.log_message(f"Unhandled lock status '{lock_status}' for '{operation_desc}'. Operation aborted.", "error")
+        self._reset_retry_state()
+        return False
+
     def refresh_api_source_dropdown(self):
         if hasattr(self,'api_source_combo_toolbar'):
             current_text=self.api_source_combo_toolbar.currentText();self.api_source_combo_toolbar.clear();sources=self.db_manager.get_mwater_sources()
@@ -675,30 +822,37 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Delete Checked", "No records checked.")
             return
 
-        def _do_delete():
-            # Confirmation is part of the operation, so it's inside the callable
-            if QMessageBox.question(self, "Confirm Delete", f"Delete {len(checked_ids)} checked record(s) permanently?",
+        # Define the actual database operation
+        def db_operation():
+            # Confirmation dialog is part of the operation flow
+            if QMessageBox.question(self, "Confirm Delete",
+                                    f"Delete {len(checked_ids)} checked record(s) permanently?",
                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                     QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
                 if self.db_manager.delete_polygon_data(checked_ids):
                     self.log_message(f"{len(checked_ids)} checked record(s) deleted.", "info")
-                    self.load_data_into_table() # This should be called only if db_operation returned True
-                    return True # Indicate success for _execute_db_operation_with_lock
+                    return True # Indicate success of DB action
                 else:
-                    self.log_message("Failed to delete records.", "error")
-                    QMessageBox.warning(self, "DB Error", "Could not delete records.")
-                    return False # Indicate failure
+                    self.log_message("Failed to delete records from database.", "error")
+                    QMessageBox.warning(self, "DB Error", "Could not delete records from the database.")
+                    return False # Indicate failure of DB action
             else:
                 self.log_message("Delete operation cancelled by user.", "info")
-                return False # Indicate operation was not performed / "failed" from lock perspective
+                return False # User cancelled, so operation "failed" or was not completed
 
-        # The success of load_data_into_table is now handled by the return of _do_delete
-        self._execute_db_operation_with_lock(
-            operation_callable=_do_delete,
-            operation_desc="Deleting checked rows",
+        # Execute the operation with lock handling
+        operation_succeeded = self._execute_db_operation_with_lock(
+            operation_callable=db_operation,
+            operation_desc=f"Deleting {len(checked_ids)} checked row(s)", # More specific desc
             lock_duration=30,
             retry_callable_for_timer=self.handle_delete_checked_rows
+            # No args/kwargs needed for handle_delete_checked_rows itself for retry
         )
+
+        if operation_succeeded:
+            self.load_data_into_table() # Refresh table only if the core DB operation succeeded
+        # If not successful (lock issue or db_operation returned False),
+        # _execute_db_operation_with_lock or db_operation would have handled user feedback.
 
     def handle_clear_all_data(self):
         if not self.db_lock_manager:
