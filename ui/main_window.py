@@ -477,7 +477,38 @@ class MainWindow(QMainWindow):
                     except Exception as e_conv:self.log_message(f"Map: UTM conv fail {polygon_record.get('uuid')},P{i}:{e_conv}","error");utm_valid=False;break
                 if utm_valid and len(coords_lat_lon)==4:self.map_view_widget.display_polygon(coords_lat_lon,coords_lat_lon[0])
                 elif hasattr(self,'map_view_widget'):self.map_view_widget.clear_map()
-            elif hasattr(self,'map_view_widget'):self.map_view_widget.clear_map()
+            # End of existing UTM to Lat/Lon conversion block for map_view_widget
+            # Add new KML loading logic here:
+            elif polygon_record: # Record exists, but might not be 'valid_for_kml' or UTM conversion failed
+                kml_file_name = polygon_record.get('kml_file_name')
+                main_kml_folder_path = self.credential_manager.get_kml_folder_path()
+
+                if kml_file_name and isinstance(kml_file_name, str) and kml_file_name.strip() and main_kml_folder_path:
+                    full_kml_path = os.path.join(main_kml_folder_path, kml_file_name.strip())
+                    if os.path.exists(full_kml_path):
+                        self.map_view_widget.load_kml_for_display(full_kml_path)
+                    else:
+                        # KML file does not exist
+                        self.log_message(f"KML file '{kml_file_name}' not found at '{full_kml_path}'. Updating status.", "warning")
+                        if hasattr(self, 'map_view_widget'): self.map_view_widget.clear_map()
+                        # db_id is already available from the earlier part of the method
+                        if db_id is not None:
+                             # This DB method (update_kml_file_status) will be implemented in a later task.
+                             # For now, the call is placed here.
+                            self.db_manager.update_kml_file_status(db_id, "File Deleted")
+                            self.load_data_into_table() # Refresh table to show updated status
+                        else:
+                            self.log_message("DB ID not found for selected row, cannot update KML file status.", "error")
+                else:
+                    # kml_file_name is empty, invalid, or folder path is missing
+                    if hasattr(self, 'map_view_widget'): self.map_view_widget.clear_map()
+                    if not main_kml_folder_path:
+                        self.log_message("KML folder path not configured. Cannot load KML.", "warning")
+                    elif not kml_file_name or not isinstance(kml_file_name, str) or not kml_file_name.strip():
+                         self.log_message(f"No KML file name for selected record (DB ID: {db_id if db_id is not None else 'Unknown'}). Clearing map.", "info")
+
+            elif hasattr(self,'map_view_widget'):self.map_view_widget.clear_map() # Default clear if no valid record
+
     def refresh_api_source_dropdown(self):
         if hasattr(self,'api_source_combo_toolbar'):
             current_text=self.api_source_combo_toolbar.currentText();self.api_source_combo_toolbar.clear();sources=self.db_manager.get_mwater_sources()
