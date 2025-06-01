@@ -1,5 +1,8 @@
 # Project Log
 
+---
+[Task 1 Log (Add Task 2 to Next)]
+---
 ## Task 1: Initial Styling & Project Setup (from CA6)
 
 **Objective:** Lay the visual and structural groundwork for the v5 application, including modern styling defaults, high-DPI compatibility, and a consistent look and feel.
@@ -76,6 +79,8 @@ The application now starts with a modern dark theme, supports high-DPI displays,
 *   More robust startup sequence by handling initialization in a separate thread.
 *   Modernized application entry point aligning with v5 architecture goals.
 ---
+
+[Task 2 Log File (Add Task 3 at Next)]
 ---
 **Update Date:** 2025-05-30
 **Version:** Beta.v5.0.1.Dev-ADas (as per last launcher update)
@@ -127,6 +132,7 @@ This entry provides a detailed look at the implementation of the App Launcher, i
 *   The debugging process, especially addressing the Qt threading model for GUI objects, was critical to achieving a stable and correct implementation.
 *   The system is now more robust and adheres to Qt's best practices for multi-threaded GUI applications.
 ---
+[Task 3 Log File (Add Task 4 at Next)]
 ---
 **Update Date:** 2024-05-31
 **Version:** Beta.v5.0.x.Dev-ADas (Reflects ongoing V5 development)
@@ -209,6 +215,8 @@ The integration of `CredentialManager` and the deferred database path logic surf
 **Further Considerations (Not part of Task 3 but related):**
 *   The actual invocation of the first-run setup dialogs for a *true first run* (i.e., `device_config.db` does not exist at all) is primarily the responsibility of `launcher_app.py` logic that should ideally check `CredentialManager.is_first_run()` very early in the startup sequence. The current "corrupt config" flow reuses the dialogs; ensuring the "true first run" path is equally robust or integrated into this new setup trigger in `handle_initialization_finished` might be beneficial.
 ---
+
+[Task 4 Log File (Add Task 5 at Next)]
 ---
 **Update Date:** 2025-06-01
 **Version:** Beta.v5.0.x.Dev-ADas (Reflects Task 4 & 5 integration)
@@ -305,7 +313,7 @@ Reflecting on the implementation and debugging journey through Tasks 1-5, partic
     *   **Recommendation:** When data is passed between major components or functions (e.g., the `processed_flat` dictionary, or the data passed to `db_manager.add_or_update_polygon_data`), ensure there's a clear, documented (even if just in comments initially) understanding of the expected keys, their data types, and which ones are mandatory.
     *   **Benefit:** Prevents errors related to missing keys or incorrect data types, especially when new fields are added or existing ones modified.
 
-By keeping these points in mind, future development cycles for KML-Editor-Advance v5 can become smoother and more predictable.
+[Task 5 Log File (Add Task 6 at Next)]
 ---
 **Update Date:** 2025-06-02
 **Version:** Beta.v5.0.2.Dev-ADas
@@ -399,7 +407,7 @@ Implement the functionality to fetch data from a configured mWater API, process 
 *   **Modularity of `API_FIELD_TO_DB_FIELD_MAP`:** Centralizing API-specific field name knowledge in `API_FIELD_TO_DB_FIELD_MAP` is beneficial. If the application needs to support multiple, differently structured APIs in the future, this map could be made dynamically selectable or configurable per API source.
 ---
 
-[end of Project_Logfile.md]
+[Task 6 Log File (Add Task 7 at Next)]
 ---
 **Update Date:** 2025-06-03
 **Version:** Beta.v5.0.3.Dev-ADas
