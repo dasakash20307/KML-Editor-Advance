@@ -387,6 +387,28 @@ class DatabaseManager:
             print(f"DB: Error updating evaluation_status for ID '{record_id}': {e}")
             return False
 
+    def update_kml_file_status(self, db_id: int, new_status: str) -> bool:
+        """
+        Updates the KML file status and last_modified timestamp for a given record ID.
+        # TODO: Integrate with sync_manager for thread safety in future versions.
+        """
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.update_kml_file_status: Connection or cursor not available.")
+            return False
+        try:
+            current_time_iso = datetime.datetime.now().isoformat()
+            self.cursor.execute("""
+                UPDATE polygon_data
+                SET kml_file_status = ?,
+                    last_modified = ?
+                WHERE id = ?
+            """, (new_status, current_time_iso, db_id))
+            self.conn.commit()
+            return self.cursor.rowcount > 0 # True if a row was updated
+        except sqlite3.Error as e:
+            print(f"DB: Error updating kml_file_status for ID '{db_id}' to '{new_status}': {e}")
+            return False
+
     def close(self):
         """Closes the database connection."""
         if self.conn:
@@ -425,7 +447,7 @@ if __name__ == '__main__':
     # Test polygon data
     print("\n--- Testing Polygon Data ---")
     sample_poly_data1 = {
-        "uuid": "uuid-test-001", "response_code": "rc-test-001", "farmer_name": "Test Farmer 1",
+        "uuid": "uuid-test-001", "response_code": "rc-test-001", "farmer_name": "Test Farmer 1", # This will be poly_id1
         "village_name": "Test Village", "block": "Test Block A", "district": "Test District X",
         "proposed_area_acre": "5.0",
         "kml_file_name": "uuid-test-001.kml", "kml_file_status": "Created",
@@ -461,7 +483,25 @@ if __name__ == '__main__':
         print(f"Updating evaluation status for ID {poly_id1} to 'Not Eligible'")
         db_manager.update_evaluation_status(poly_id1, "Not Eligible")
         updated_record = db_manager.get_polygon_data_by_id(poly_id1)
-        print(f"Record {poly_id1} after status update: {updated_record.get('evaluation_status')}")
+        print(f"Record {poly_id1} after eval status update: Status='{updated_record.get('evaluation_status')}', LastMod='{updated_record.get('last_modified')}'")
+
+        # Test for update_kml_file_status
+        print(f"Updating KML file status for ID {poly_id1} to 'File Deleted'")
+        original_last_modified = updated_record.get('last_modified')
+        update_kml_success = db_manager.update_kml_file_status(poly_id1, "File Deleted")
+        if update_kml_success:
+            record_after_kml_update = db_manager.get_polygon_data_by_id(poly_id1)
+            print(f"Record {poly_id1} after KML status update: KML Status='{record_after_kml_update.get('kml_file_status')}', LastMod='{record_after_kml_update.get('last_modified')}'")
+            if record_after_kml_update.get('kml_file_status') == "File Deleted":
+                print(f"SUCCESS: KML status correctly updated for ID {poly_id1}.")
+            else:
+                print(f"FAILURE: KML status NOT updated for ID {poly_id1}.")
+            if record_after_kml_update.get('last_modified') != original_last_modified:
+                 print(f"SUCCESS: last_modified timestamp updated for ID {poly_id1}.")
+            else:
+                print(f"FAILURE: last_modified timestamp NOT updated for ID {poly_id1}.")
+        else:
+            print(f"FAILURE: update_kml_file_status returned False for ID {poly_id1}.")
 
 
     # Test duplicate handling (skip)
