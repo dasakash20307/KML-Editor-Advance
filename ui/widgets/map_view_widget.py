@@ -9,9 +9,13 @@ import os
 import tempfile
 import xml.etree.ElementTree as ET
 
+# Assuming CredentialManager is in core, which is a sibling to ui
+from core.credential_manager import CredentialManager
+
 class MapViewWidget(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, credential_manager: CredentialManager, parent=None):
         super().__init__(parent)
+        self.credential_manager = credential_manager
         self.web_view = QWebEngineView()
 
         settings = self.web_view.settings()
@@ -227,27 +231,71 @@ class MapViewWidget(QWidget):
         if error_message:
             print(f"Error parsing KML content from {kml_file_path}: {error_message}")
             self._initialize_map() # Reset map to default state on parsing error
-            self.description_edit.setText(f"Error parsing KML: {os.path.basename(kml_file_path)}\nDetails: {error_message}")
+            if hasattr(self, 'description_edit'): # Ensure description_edit exists
+                self.description_edit.setText(f"Error parsing KML: {os.path.basename(kml_file_path)}\nDetails: {error_message}")
             return
 
-        self.description_edit.setText(description_text or "No description available.")
+        if hasattr(self, 'description_edit'):
+             self.description_edit.setText(description_text or "No description available.")
+        else: # Fallback if description_edit somehow doesn't exist
+            print(f"KML Description: {description_text or 'No description available.'}")
+
+
+        # Fetch KML view settings
+        # Fallback to CredentialManager defaults if any key is missing (get_kml_default_view_settings handles this)
+        settings = self.credential_manager.get_kml_default_view_settings()
+
+        fill_color = settings.get("kml_fill_color_hex")
+        # Convert opacity from percent (0-100) to float (0.0-1.0)
+        fill_opacity_val = settings.get("kml_fill_opacity_percent") / 100.0
+        stroke_color = settings.get("kml_line_color_hex")
+        stroke_width_val = settings.get("kml_line_width_px")
+        view_mode = settings.get("kml_view_mode")
+        zoom_offset = settings.get("kml_zoom_offset")
+
+        # Apply view mode adjustments
+        if view_mode == "Outline Only":
+            fill_opacity_val = 0.0
+        elif view_mode == "Fill Only":
+            stroke_width_val = 0 # Effectively makes the line invisible
 
         if coords_list_lat_lon:
-            if is_point: # Should be a single coordinate pair for a point
+            if is_point:
                  if len(coords_list_lat_lon) == 1:
+                    # For Markers, color customization is more complex (e.g. custom icon).
+                    # For now, use default marker style or a simple color if easily doable.
+                    # Folium markers use icons, so direct color application like Polygons isn't straightforward.
+                    # We can use a generic colored icon or a specific one if available.
+                    # For simplicity, we'll use the stroke_color for a basic marker color hint if possible,
+                    # but this usually means creating a custom icon.
+                    # Default marker:
                     folium.Marker(
                         location=coords_list_lat_lon[0],
-                        tooltip=description_text if description_text and description_text != "No description available." else "KML Point"
+                        tooltip=description_text if description_text and description_text != "No description available" else "KML Point",
+                        # Example: trying to use a colored icon (requires more setup for specific colors)
+                        # icon=folium.Icon(color=stroke_color if folium.Icon.is_valid_color(stroke_color) else 'blue')
+                        # For now, let's stick to default marker appearance.
                     ).add_to(self.current_map)
-                    # For a single point, fit_bounds might be too zoomed out if only one point is passed.
-                    # So, we set location and zoom explicitly.
                     self.current_map.location = coords_list_lat_lon[0]
-                    self.current_map.zoom_start = 15 # Or some other suitable zoom level
-            elif len(coords_list_lat_lon) > 2: # A polygon needs at least 3 unique points
+                    self.current_map.zoom_start = 15 # Default zoom for a point
+                    # Apply zoom_offset for points as well
+                    current_point_zoom = self.current_map.zoom_start # Start with the default for point
+                    new_point_zoom = max(1, current_point_zoom + zoom_offset)
+                    self.current_map.options['zoom'] = new_point_zoom
+                    self.current_map.zoom_start = new_point_zoom
+                    if hasattr(self.current_map, '_zoom'):
+                        self.current_map._zoom = new_point_zoom
+
+
+            elif len(coords_list_lat_lon) > 2: # A polygon
                 folium.Polygon(
                     locations=coords_list_lat_lon,
-                    color="crimson", weight=3, fill=True, fill_color="crimson", fill_opacity=0.25,
-                    tooltip="KML Polygon"
+                    color=stroke_color,
+                    weight=stroke_width_val,
+                    fill=True, # Fill is true, opacity controls visibility
+                    fill_color=fill_color,
+                    fill_opacity=fill_opacity_val,
+                    tooltip="KML Polygon" # Could use description_text here too
                 ).add_to(self.current_map)
 
                 min_lat = min(c[0] for c in coords_list_lat_lon)
@@ -257,32 +305,31 @@ class MapViewWidget(QWidget):
                 bounds_for_map = [[min_lat, min_lon], [max_lat, max_lon]]
                 self.current_map.fit_bounds(bounds_for_map)
 
-                # Adjust zoom level after fit_bounds
-                MIN_ZOOM_ADJUST = 2 # Minimum zoom level for the map
-                ZOOM_DECREMENT = 2
+                MIN_ZOOM_LEVEL = 2 # Absolute minimum zoom level for the map
 
-                current_zoom_val = None
+                base_zoom_after_fit = None
                 if hasattr(self.current_map, 'options') and 'zoom' in self.current_map.options:
-                    current_zoom_val = self.current_map.options['zoom']
-                elif hasattr(self.current_map, '_zoom'): # Check internal attribute as a fallback
-                    current_zoom_val = self.current_map._zoom
-                elif hasattr(self.current_map, 'zoom_start'): # Less reliable after fit_bounds but a last resort
-                    current_zoom_val = self.current_map.zoom_start
+                    base_zoom_after_fit = self.current_map.options['zoom']
+                elif hasattr(self.current_map, '_zoom'):
+                    base_zoom_after_fit = self.current_map._zoom
+                elif hasattr(self.current_map, 'zoom_start'):
+                    base_zoom_after_fit = self.current_map.zoom_start # Less ideal but a fallback
 
-                if current_zoom_val is not None:
-                    new_zoom_val = max(MIN_ZOOM_ADJUST, current_zoom_val - ZOOM_DECREMENT)
-                    self.current_map.options['zoom'] = new_zoom_val # Primary way to set zoom for next render
-                    self.current_map.zoom_start = new_zoom_val # Also update zoom_start for consistency
-                    if hasattr(self.current_map, '_zoom'): # If _zoom was read, also try to set it
-                        self.current_map._zoom = new_zoom_val
-                    print(f"MapViewWidget: Adjusted zoom from {current_zoom_val} to {new_zoom_val}")
+                if base_zoom_after_fit is not None:
+                    # Apply the zoom_offset from settings
+                    effective_zoom = max(MIN_ZOOM_LEVEL, base_zoom_after_fit + zoom_offset)
+                    self.current_map.options['zoom'] = effective_zoom
+                    self.current_map.zoom_start = effective_zoom
+                    if hasattr(self.current_map, '_zoom'):
+                        self.current_map._zoom = effective_zoom
+                    print(f"MapViewWidget: Original zoom after fit_bounds: {base_zoom_after_fit}. Offset: {zoom_offset}. Final zoom: {effective_zoom}")
                 else:
-                    print("MapViewWidget: Could not determine current zoom level after fit_bounds to adjust it.")
+                    print("MapViewWidget: Could not determine base zoom after fit_bounds to apply offset.")
 
             else: # Not a point and not enough coords for a polygon
-                self.description_edit.append("\nNote: Insufficient coordinates for displayable geometry.")
+                if hasattr(self, 'description_edit'): self.description_edit.append("\nNote: Insufficient coordinates for displayable geometry.")
         else:
-            self.description_edit.append("\nNote: No valid coordinate data found in KML.")
+            if hasattr(self, 'description_edit'): self.description_edit.append("\nNote: No valid coordinate data found in KML.")
 
         folium.LayerControl().add_to(self.current_map)
         self.update_map(self.current_map)

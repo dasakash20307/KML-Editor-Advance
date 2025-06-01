@@ -29,6 +29,7 @@ import uuid # Added for UUID generation
 from .dialogs.api_sources_dialog import APISourcesDialog
 # from .dialogs.duplicate_dialog import DuplicateDialog # Removed as per previous subtask
 from .dialogs.output_mode_dialog import OutputModeDialog
+from .dialogs.default_view_settings_dialog import DefaultViewSettingsDialog
 from .widgets.map_view_widget import MapViewWidget
 from .widgets.google_earth_webview_widget import GoogleEarthWebViewWidget
 
@@ -316,7 +317,14 @@ class MainWindow(QMainWindow):
         self.delete_checked_action=QAction(QIcon.fromTheme("edit-delete"),"Delete Checked Rows...",self);self.delete_checked_action.triggered.connect(self.handle_delete_checked_rows);data_menu.addAction(self.delete_checked_action)
         self.clear_all_data_action=QAction(QIcon.fromTheme("edit-clear-all"),"Clear All Polygon Data...",self);self.clear_all_data_action.triggered.connect(self.handle_clear_all_data);data_menu.addAction(self.clear_all_data_action)
         kml_menu=menubar.addMenu("&KML");self.generate_kml_action=QAction(QIcon.fromTheme("document-export"),"&Generate KML for Checked Rows...",self);self.generate_kml_action.triggered.connect(self.handle_generate_kml);kml_menu.addAction(self.generate_kml_action)
-        self.view_menu=menubar.addMenu("&View");self.toggle_ge_view_action=QAction("Google Earth View",self);self.toggle_ge_view_action.setCheckable(True);self.toggle_ge_view_action.toggled.connect(self._handle_ge_view_toggle);self.view_menu.addAction(self.toggle_ge_view_action)
+
+        self.view_menu=menubar.addMenu("&View")
+        self.toggle_ge_view_action=QAction("Google Earth View",self);self.toggle_ge_view_action.setCheckable(True);self.toggle_ge_view_action.toggled.connect(self._handle_ge_view_toggle);self.view_menu.addAction(self.toggle_ge_view_action)
+        self.view_menu.addSeparator()
+        self.default_kml_view_settings_action = QAction("Default KML View Settings...", self)
+        self.default_kml_view_settings_action.triggered.connect(self.open_default_kml_view_settings_dialog)
+        self.view_menu.addAction(self.default_kml_view_settings_action)
+
         help_menu=menubar.addMenu("&Help");self.about_action=QAction(QIcon.fromTheme("help-about"),"&About",self);self.about_action.triggered.connect(self.handle_about);help_menu.addAction(self.about_action)
         self.ge_instructions_action=QAction("GE &Instructions",self);self.ge_instructions_action.triggered.connect(self.handle_show_ge_instructions);help_menu.addAction(self.ge_instructions_action)
         self.toolbar=QToolBar("Main Toolbar");self.toolbar.setIconSize(QSize(20,20));self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon);self.toolbar.setMovable(True);self.addToolBar(Qt.ToolBarArea.TopToolBarArea,self.toolbar)
@@ -423,7 +431,8 @@ class MainWindow(QMainWindow):
 
     def _setup_main_content_area(self):
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.map_view_widget = MapViewWidget(self); self.map_view_widget.setMinimumWidth(300)
+        # Pass credential_manager to MapViewWidget constructor
+        self.map_view_widget = MapViewWidget(self.credential_manager, self); self.map_view_widget.setMinimumWidth(300)
         self.google_earth_view_widget = GoogleEarthWebViewWidget(self); self.google_earth_view_widget.setMinimumWidth(300)
         self.map_stack = QStackedWidget(self); self.map_stack.addWidget(self.map_view_widget); self.map_stack.addWidget(self.google_earth_view_widget)
         self.main_splitter.addWidget(self.map_stack)
@@ -677,6 +686,17 @@ class MainWindow(QMainWindow):
             self.log_text_edit_qt_actual.setTextColor(text_color);self.log_text_edit_qt_actual.append(log_entry);self.log_text_edit_qt_actual.ensureCursorVisible()
         else:print(log_entry)
         if hasattr(self,'_main_status_bar'):self._main_status_bar.showMessage(message,7000 if level=="info"else 10000)
+
+    def open_default_kml_view_settings_dialog(self):
+        dialog = DefaultViewSettingsDialog(self.credential_manager, self)
+        if dialog.exec() == QDialog.Accepted:
+            self.log_message("Default KML view settings saved.", "info")
+            # Future enhancement: Consider refreshing currently displayed KML if applicable.
+            # For now, new settings will apply to KMLs loaded or re-loaded henceforth.
+            print("Default KML View Settings dialog accepted. Refresh logic would go here if implemented.")
+        else:
+            self.log_message("Default KML view settings dialog cancelled.", "info")
+
     def load_data_into_table(self):
         try:
             polygon_records=self.db_manager.get_all_polygon_data_for_display();self.source_model.update_data(polygon_records)

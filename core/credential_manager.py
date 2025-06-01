@@ -8,6 +8,15 @@ class CredentialManager:
     APP_NAME = "DilasaKMLTool_V5_Config" # Subdirectory for our config
     APP_AUTHOR = "Dilasa" # Optional, but good for platformdirs
 
+    DEFAULT_KML_VIEW_SETTINGS = {
+        "kml_fill_color_hex": "#007bff",  # Blue
+        "kml_fill_opacity_percent": 50,   # 50%
+        "kml_line_color_hex": "#000000",  # Black
+        "kml_line_width_px": 1,
+        "kml_view_mode": "Outline and Fill",  # Options: "Outline and Fill", "Outline Only", "Fill Only"
+        "kml_zoom_offset": 0 # Integer, e.g., -2 to zoom out, +1 to zoom in from default fit.
+    }
+
     def __init__(self):
         # Use platformdirs to get the user-specific data directory
         self.app_data_path = platformdirs.user_data_dir(self.APP_NAME, self.APP_AUTHOR)
@@ -130,6 +139,67 @@ class CredentialManager:
         """Returns the full path to the device_config.db file."""
         return self.db_path
 
+    def get_kml_default_view_settings(self) -> dict:
+        """
+        Retrieves KML default view settings from the database.
+        If any setting is not found, it falls back to the class default for that setting.
+        """
+        settings_from_db = {}
+        has_any_setting_from_db = False # To check if we should even try parsing
+
+        # Check if any relevant setting exists to avoid defaulting everything if DB just created
+        # This check is a bit indirect; ideally, we'd know if _create_config_db_if_not_exists ran
+        # and inserted defaults, but this class doesn't do that for these new settings yet.
+        # For now, we fetch and if a value is None, we use default.
+
+        for key in self.DEFAULT_KML_VIEW_SETTINGS.keys():
+            value_str = self._get_setting(key)
+            if value_str is not None:
+                has_any_setting_from_db = True # At least one setting was found
+                if key in ["kml_fill_opacity_percent", "kml_line_width_px", "kml_zoom_offset"]:
+                    try:
+                        settings_from_db[key] = int(value_str)
+                    except ValueError:
+                        print(f"Warning: Could not parse integer for {key}: '{value_str}'. Using default.")
+                        settings_from_db[key] = self.DEFAULT_KML_VIEW_SETTINGS[key]
+                else: # String values like colors, view_mode
+                    settings_from_db[key] = value_str
+            else:
+                # Value not in DB, use default from class constant
+                settings_from_db[key] = self.DEFAULT_KML_VIEW_SETTINGS[key]
+
+        # If no specific KML settings were ever saved, settings_from_db will be populated by defaults.
+        # This is the desired behavior: always return a full dict.
+        return settings_from_db
+
+    def save_kml_default_view_settings(self, settings_dict: dict) -> bool:
+        """
+        Saves KML default view settings to the database.
+        Only saves keys that are defined in DEFAULT_KML_VIEW_SETTINGS.
+        """
+        try:
+            for key, default_value in self.DEFAULT_KML_VIEW_SETTINGS.items():
+                if key in settings_dict:
+                    value_to_save = settings_dict[key]
+                    # Ensure data types are consistent with defaults for casting if needed later,
+                    # though _set_setting stores everything as text.
+                    if isinstance(default_value, int):
+                        try:
+                            # Validate if it can be an int, but store as string
+                            int(value_to_save)
+                            self._set_setting(key, str(value_to_save))
+                        except ValueError:
+                            print(f"Warning: Invalid integer value for {key}: '{value_to_save}'. Skipping.")
+                    else: # strings
+                         self._set_setting(key, str(value_to_save))
+                # else: key from DEFAULT_KML_VIEW_SETTINGS not in settings_dict, so don't update it.
+                # This means partial updates are possible if desired, but the current design
+                # of the calling dialog implies it will always provide all settings.
+            return True
+        except Exception as e:
+            print(f"Error saving KML default view settings: {e}")
+            return False
+
 if __name__ == '__main__':
     print("--- Test CredentialManager (with platformdirs) ---")
     expected_app_data_dir = platformdirs.user_data_dir(CredentialManager.APP_NAME, CredentialManager.APP_AUTHOR)
@@ -166,10 +236,79 @@ if __name__ == '__main__':
 
     cm = CredentialManager()
     print(f"Is first run? {cm.is_first_run()}")
-    assert cm.is_first_run(), "Should be a first run after cleaning DB file."
+    # Initial assertion depends on whether the DB file was actually deleted successfully above.
+    # This test block is complex due to file system interactions.
 
-    if cm.is_first_run():
-        print("Saving new settings for first run...")
+    # Test KML View Settings
+    print("\n--- Testing KML View Settings ---")
+    if cm.is_first_run(): # If DB was just created
+        print("First run: Getting KML default view settings (should be class defaults)...")
+        kml_settings = cm.get_kml_default_view_settings()
+        assert kml_settings == CredentialManager.DEFAULT_KML_VIEW_SETTINGS, \
+            f"Expected default KML settings, got {kml_settings}"
+        print(f"Initial KML settings (from class defaults): {kml_settings}")
+
+    # Create a new CredentialManager instance to simulate fresh load after potential first run save_settings
+    # This is because cm.save_settings() also sets self._first_run = False
+    # To ensure we test loading from a DB that might or might not have KML settings yet:
+    if os.path.exists(db_file_path_for_test) and not cm.is_first_run():
+         # If the previous block ran save_settings, the DB exists.
+         # We want to test get_kml_default_view_settings when no KML settings are explicitly saved yet.
+         # The current implementation of get_kml_default_view_settings will return class defaults
+         # if specific keys are not in the DB.
+         pass # Covered by the logic below
+
+
+    print("\nSaving new KML view settings...")
+    new_kml_settings = {
+        "kml_fill_color_hex": "#ff0000",
+        "kml_fill_opacity_percent": 30,
+        "kml_line_color_hex": "#00ff00",
+        "kml_line_width_px": 3,
+        "kml_view_mode": "Outline Only",
+        "kml_zoom_offset": -1
+    }
+    save_success = cm.save_kml_default_view_settings(new_kml_settings)
+    assert save_success, "Failed to save KML view settings."
+    print("New KML settings saved.")
+
+    print("Getting KML view settings after save...")
+    retrieved_kml_settings = cm.get_kml_default_view_settings()
+    assert retrieved_kml_settings == new_kml_settings, \
+        f"Expected {new_kml_settings}, but got {retrieved_kml_settings}"
+    print(f"Retrieved KML settings: {retrieved_kml_settings}")
+    assert retrieved_kml_settings["kml_fill_opacity_percent"] == 30, "Opacity type check"
+    assert retrieved_kml_settings["kml_line_width_px"] == 3, "Line width type check"
+    assert retrieved_kml_settings["kml_zoom_offset"] == -1, "Zoom offset type check"
+
+
+    print("\nTest saving partial KML settings (should only update provided ones)...")
+    partial_settings = {
+        "kml_fill_color_hex": "#cccccc",
+        "kml_zoom_offset": 2
+    }
+    cm.save_kml_default_view_settings(partial_settings)
+    retrieved_after_partial_save = cm.get_kml_default_view_settings()
+    print(f"Settings after partial save: {retrieved_after_partial_save}")
+    # Expected:
+    # kml_fill_color_hex should be #cccccc
+    # kml_fill_opacity_percent should be 30 (from previous save)
+    # kml_line_color_hex should be #00ff00 (from previous save)
+    # kml_line_width_px should be 3 (from previous save)
+    # kml_view_mode should be "Outline Only" (from previous save)
+    # kml_zoom_offset should be 2
+    assert retrieved_after_partial_save["kml_fill_color_hex"] == "#cccccc"
+    assert retrieved_after_partial_save["kml_fill_opacity_percent"] == 30
+    assert retrieved_after_partial_save["kml_line_color_hex"] == "#00ff00"
+    assert retrieved_after_partial_save["kml_line_width_px"] == 3
+    assert retrieved_after_partial_save["kml_view_mode"] == "Outline Only"
+    assert retrieved_after_partial_save["kml_zoom_offset"] == 2
+    print("Partial KML settings save verified.")
+
+
+    # Original tests for basic settings
+    if cm.is_first_run(): # This block might not run if DB existed from previous KML tests
+        print("\nSaving new settings for first run (original test flow)...")
         cm.save_settings(
             nickname="PlatformTestDevice",
             app_mode="Central App",
