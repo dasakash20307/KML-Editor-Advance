@@ -17,6 +17,7 @@ from PySide6.QtGui import QPixmap, QIcon, QAction, QStandardItemModel, QStandard
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QTimer, QSize, QSortFilterProxyModel, QDate
 
 from database.db_manager import DatabaseManager
+from core.sync_manager import DatabaseLockManager # Added for DB Lock
 from core.utils import resource_path
 from core.data_processor import process_csv_row_data, CSV_HEADERS, process_api_row_data
 from core.api_handler import fetch_data_from_mwater_api
@@ -163,31 +164,68 @@ class PolygonTableModel(QAbstractTableModel):
 
         if role == Qt.ItemDataRole.EditRole and col == self.EVALUATION_STATUS_COL:
             new_status = str(value)
-            if self.db_manager and hasattr(self.db_manager, 'update_evaluation_status'):
-                update_success = self.db_manager.update_evaluation_status(db_id, new_status)
-                if update_success:
-                    updated_record_list = list(self._data[row])
-                    updated_record_list[8] = new_status
-                    self._data[row] = tuple(updated_record_list)
-                    row_start_index = self.index(row, 0)
-                    row_end_index = self.index(row, self.columnCount() - 1)
-                    self.dataChanged.emit(row_start_index, row_end_index)
-                    parent_main_window = self.parent()
-                    if isinstance(parent_main_window, MainWindow) and hasattr(parent_main_window, 'log_message'):
-                         parent_main_window.log_message(f"Evaluation status for ID {db_id} updated to '{new_status}'.", "info")
-                    return True
+            main_window = self.parent()
+
+            if not isinstance(main_window, MainWindow) or                not hasattr(main_window, 'db_lock_manager') or                not main_window.db_lock_manager:
+                if isinstance(main_window, MainWindow):
+                    main_window.log_message("PolygonTableModel: DatabaseLockManager not available in MainWindow.", "error")
+                    QMessageBox.critical(main_window, "Error", "Database Lock Manager not available. Cannot save changes.")
                 else:
-                    error_msg = f"DB update failed for record ID {db_id} with status {new_status}"
-                    parent_main_window = self.parent()
-                    if isinstance(parent_main_window, MainWindow) and hasattr(parent_main_window, 'log_message'):
-                        parent_main_window.log_message(error_msg, "error")
-                    return False
-            else: # Should not happen if db_manager is always provided
-                error_msg = f"Error: self.db_manager not available or missing update_evaluation_status method for record ID {db_id}"
-                parent_main_window = self.parent()
-                if isinstance(parent_main_window, MainWindow) and hasattr(parent_main_window, 'log_message'):
-                    parent_main_window.log_message(error_msg, "error")
+                    # This case should ideally not happen if the model is parented correctly
+                    print("PolygonTableModel: ERROR - Parent is not MainWindow or db_lock_manager not accessible.")
                 return False
+
+            operation_desc = f"Updating evaluation status for DB ID {db_id}"
+            # Acquire lock with a short timeout
+            lock_status = main_window.db_lock_manager.acquire_lock(10, operation_desc)
+
+            if lock_status is True:
+                update_success = False
+                try:
+                    if self.db_manager and hasattr(self.db_manager, 'update_evaluation_status'):
+                        update_success = self.db_manager.update_evaluation_status(db_id, new_status)
+                        if update_success:
+                            # Correctly update the internal model data
+                            # self._data[row] is a tuple, so it needs to be reconstructed
+                            updated_record_list = list(self._data[row])
+                            updated_record_list[8] = new_status # EVALUATION_STATUS is at index 8 of the tuple from get_all_polygon_data_for_display
+                            self._data[row] = tuple(updated_record_list)
+
+                            # Emit dataChanged for the entire row to refresh all delegates if needed,
+                            # though specifically for background role and display role of this cell.
+                            row_start_index = self.index(row, 0)
+                            row_end_index = self.index(row, self.columnCount() - 1)
+                            self.dataChanged.emit(row_start_index, row_end_index)
+                            main_window.log_message(f"Evaluation status for ID {db_id} updated to '{new_status}'.", "info")
+                        else:
+                            main_window.log_message(f"DB update failed for eval status ID {db_id} to {new_status}", "error")
+                            QMessageBox.warning(main_window, "DB Error", "Failed to update evaluation status in database.")
+                    else:
+                        main_window.log_message("DB Manager not available for eval status update.", "error")
+                        QMessageBox.critical(main_window, "Error", "DB Manager not available.")
+                finally:
+                    main_window.db_lock_manager.release_lock()
+                return update_success
+            else: # Lock not acquired
+                lock_info = main_window.db_lock_manager.get_current_lock_info()
+                holder_nickname = lock_info.get('holder_nickname', 'Unknown') if lock_info else 'Unknown'
+                locked_op_desc = lock_info.get('operation_description', 'Unknown operation') if lock_info else 'Unknown'
+
+                if lock_status == "STALE_LOCK_DETECTED":
+                    main_window.log_message(f"Stale lock detected for eval status update (ID {db_id}). Held by {holder_nickname} for '{locked_op_desc}'.", "warning")
+                    QMessageBox.warning(main_window, "Database Stale Lock",
+                                        f"Database lock by {holder_nickname} for '{locked_op_desc}' appears stale. "
+                                        "Editing in table is blocked. Try main window actions for override options if available.")
+                elif lock_status is False: # Locked by another, not stale
+                    main_window.log_message(f"DB locked by {holder_nickname} for '{locked_op_desc}'. Eval status for ID {db_id} not updated.", "error")
+                    QMessageBox.warning(main_window, "Database Locked",
+                                        f"Database is locked by {holder_nickname} for '{locked_op_desc}'. Please try again later.")
+                elif lock_status == "ERROR":
+                    main_window.log_message(f"Error acquiring lock for eval status update (ID {db_id}).", "error")
+                    QMessageBox.critical(main_window, "Lock Error", "Could not acquire database lock due to an internal error.")
+                # For any non-True lock_status, the operation did not proceed.
+                return False
+
         return False
 
     def flags(self, index):
@@ -287,8 +325,27 @@ class MainWindow(QMainWindow):
         self.app_icon_path = resource_path(APP_ICON_FILE_NAME_MW)
         if os.path.exists(self.app_icon_path): self.setWindowIcon(QIcon(self.app_icon_path))
         self.db_manager = db_manager; self.credential_manager = credential_manager
-        if self.db_manager is None: QMessageBox.critical(self, "Initialization Error", "Database Manager not provided."); sys.exit(1) # Ensure exit
-        if self.credential_manager is None: QMessageBox.critical(self, "Initialization Error", "Credential Manager not provided."); sys.exit(1) # Ensure exit
+        if self.db_manager is None: QMessageBox.critical(self, "Initialization Error", "Database Manager not provided."); sys.exit(1)
+        if self.credential_manager is None: QMessageBox.critical(self, "Initialization Error", "Credential Manager not provided."); sys.exit(1)
+
+        # Initialize DatabaseLockManager (Basic from previous subtask)
+        self.db_lock_manager = None
+        if self.db_manager and self.credential_manager:
+            db_path = self.credential_manager.get_db_path()
+            if db_path:
+                self.db_lock_manager = DatabaseLockManager(db_path, self.credential_manager)
+                # self.log_message("DatabaseLockManager initialized.", "info") # Logging will be added later
+            else:
+                # self.log_message("Failed to initialize DatabaseLockManager: DB path not found.", "error")
+                QMessageBox.critical(self, "Locking Error", "Could not initialize database lock manager: DB path missing.")
+        else:
+            # self.log_message("Failed to initialize DatabaseLockManager: DB Manager or Credential Manager missing.", "error")
+            QMessageBox.critical(self, "Locking Error", "Could not initialize database lock manager: core components missing.")
+
+        self.db_lock_retry_timer = QTimer(self)
+        self.db_lock_retry_timer.setSingleShot(True)
+        # Actual connection of timeout signal and advanced retry attributes will be in a later step.
+
         self.resize(1200, 800); self._center_window()
         self._create_main_layout(); self._create_header(); self._create_menus_and_toolbar(); self._create_status_bar()
         self.current_temp_kml_path = None; self.show_ge_instructions_popup_again = True
@@ -613,11 +670,36 @@ class MainWindow(QMainWindow):
             self.log_message(f"Data exported to {filepath}","success");QMessageBox.information(self,"Export Successful",f"{model_to_export.rowCount()} displayed records exported to:\n{filepath}")
         except Exception as e:self.log_message(f"Error exporting CSV:{e}","error");QMessageBox.critical(self,"Export Error",f"Could not export data:{e}")
     def handle_delete_checked_rows(self):
-        checked_ids=self.source_model.get_checked_item_db_ids()
-        if not checked_ids:QMessageBox.information(self,"Delete Checked","No records checked.");return
-        if QMessageBox.question(self,"Confirm Delete",f"Delete {len(checked_ids)}checked record(s) permanently?",QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,QMessageBox.StandardButton.No)==QMessageBox.StandardButton.Yes:
-            if self.db_manager.delete_polygon_data(checked_ids):self.log_message(f"{len(checked_ids)}checked record(s)deleted.","info");self.load_data_into_table()
-            else:self.log_message("Failed to delete records.","error");QMessageBox.warning(self,"DB Error","Could not delete records.")
+        checked_ids = self.source_model.get_checked_item_db_ids()
+        if not checked_ids:
+            QMessageBox.information(self, "Delete Checked", "No records checked.")
+            return
+
+        def _do_delete():
+            # Confirmation is part of the operation, so it's inside the callable
+            if QMessageBox.question(self, "Confirm Delete", f"Delete {len(checked_ids)} checked record(s) permanently?",
+                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                    QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+                if self.db_manager.delete_polygon_data(checked_ids):
+                    self.log_message(f"{len(checked_ids)} checked record(s) deleted.", "info")
+                    self.load_data_into_table() # This should be called only if db_operation returned True
+                    return True # Indicate success for _execute_db_operation_with_lock
+                else:
+                    self.log_message("Failed to delete records.", "error")
+                    QMessageBox.warning(self, "DB Error", "Could not delete records.")
+                    return False # Indicate failure
+            else:
+                self.log_message("Delete operation cancelled by user.", "info")
+                return False # Indicate operation was not performed / "failed" from lock perspective
+
+        # The success of load_data_into_table is now handled by the return of _do_delete
+        self._execute_db_operation_with_lock(
+            operation_callable=_do_delete,
+            operation_desc="Deleting checked rows",
+            lock_duration=30,
+            retry_callable_for_timer=self.handle_delete_checked_rows
+        )
+
     def handle_clear_all_data(self):
         if QMessageBox.question(self,"Confirm Clear All","Delete ALL polygon data permanently?\nThis cannot be undone.",QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,QMessageBox.StandardButton.No)==QMessageBox.StandardButton.Yes:
             if self.db_manager.delete_all_polygon_data():self.log_message("All polygon data deleted.","info");self.source_model._check_states.clear();self.load_data_into_table()
