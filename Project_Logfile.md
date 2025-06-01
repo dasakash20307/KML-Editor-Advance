@@ -132,6 +132,7 @@ This entry provides a detailed look at the implementation of the App Launcher, i
 *   The debugging process, especially addressing the Qt threading model for GUI objects, was critical to achieving a stable and correct implementation.
 *   The system is now more robust and adheres to Qt's best practices for multi-threaded GUI applications.
 ---
+
 [Task 3 Log File (Add Task 4 at Next)]
 ---
 **Update Date:** 2024-05-31
@@ -487,4 +488,71 @@ The implementation of Task 6 and the subsequent UI enhancements involved an iter
     *   Use robust parsing that explicitly handles potential `None` values or malformed strings *before* attempting conversion to `QDate`.
     *   Log parsing errors during debugging rather than silently passing.
     *   Clearly define behavior for records with missing/invalid dates when a date filter is active (e.g., always exclude them).
+---
+---
+[Task 7 Log File (Add Task 8 at Next or relevant next task)]
+---
+**Update Date:** 2025-06-05
+**Version:** Beta.v5.0.4.Dev-ADas
+**Author:** AI Assistant (Jules)
+**Task Reference:** Task 7: Basic KML Loading & Description Display in MapView (from CA1 Part 3 & CA3 Part 1)
+
+**Objective:**
+To enable the map view (`MapViewWidget`) to load KML files associated with selected records, display their geographic polygons or points on the map, and show any embedded KML description in a dedicated panel. This aligns with the KML-first approach where KML files are primary data sources for geometry and rich descriptions.
+
+**Core Components Implemented/Modified:**
+
+1.  **`ui/widgets/map_view_widget.py` (Significantly Enhanced):**
+    *   Added a `QTextEdit` (`self.description_edit`) to the layout for displaying KML descriptions.
+    *   Implemented `load_kml_for_display(self, kml_file_path: str)`:
+        *   Reads KML file content.
+        *   Calls the new static method `_parse_kml_data` to extract geometry and description.
+        *   Clears previous map features (by re-initializing `self.current_map`).
+        *   Renders `folium.Polygon` (with styling from default view settings - integrated from a subsequent feature) or `folium.Marker` on the map.
+        *   Centers and zooms the map to the new geometry using `fit_bounds()`, with zoom level further adjusted by user's default zoom offset (from default view settings).
+        *   Displays the extracted KML description or error messages in `self.description_edit`.
+    *   Added `_parse_kml_data(kml_content_string: str)` (static method): This refactored logic robustly parses KML content (handling XML namespaces) to find coordinates (for Polygons and Points, converting lon/lat to lat/lon) and descriptions (from Placemark or Document level). Returns standardized tuple: `(coordinates, description, is_point, error_message)`.
+    *   `__init__` updated to accept `credential_manager` (for fetching default view settings).
+    *   `_initialize_map()` and `clear_map()` now also clear the description panel.
+
+2.  **`ui/main_window.py` (Modified):**
+    *   Enhanced `on_table_selection_changed()`:
+        *   When a table row is selected, it retrieves the `kml_file_name` and constructs the full path using `kml_root_path` from `CredentialManager`.
+        *   If the KML file exists, it calls `self.map_view_widget.load_kml_for_display(full_kml_path)`.
+        *   If the KML file does not exist, it calls `self.map_view_widget.clear_map()` and then `self.db_manager.update_kml_file_status(db_id, "File Deleted")` to update the record's status in the database. The table is then refreshed via `self.load_data_into_table()`.
+        *   If `kml_file_name` is invalid/empty, the map is cleared.
+    *   Updated `MapViewWidget` instantiation to pass the `credential_manager` instance.
+
+3.  **`database/db_manager.py` (Modified):**
+    *   Added `update_kml_file_status(self, db_id: int, new_status: str) -> bool`: This method updates the `kml_file_status` and `last_modified` timestamp for a specified record ID in the `polygon_data` table. Includes error handling and DB commit.
+
+4.  **`tests/test_map_view_kml_parsing.py` (New File):**
+    *   Created a new unit test suite using `unittest`.
+    *   Provides comprehensive tests for `MapViewWidget._parse_kml_data`, covering valid polygons, points, various description sources, malformed KML, missing KML elements, and namespace handling.
+
+**Key Functionality Added / User Experience:**
+*   Users can now visually inspect KML geometries (polygons/points) on an interactive map by selecting records.
+*   Detailed descriptions embedded within KML files are displayed alongside the map.
+*   The system gracefully handles missing KML files by updating their status and clearing the map.
+*   Map display for polygons respects user-configurable default view settings (fill/line color, opacity, width, view mode) and zoom offsets, providing a customized experience (Note: Default View Settings was a subsequent feature, but its integration affects Task 7's final display).
+
+**Debugging Journey & Key Fixes/Enhancements:**
+
+*   **KML Parsing Testability:** The core KML parsing logic was refactored from `load_kml_for_display` into a new static method `_parse_kml_data` within `MapViewWidget`. This separation was crucial for enabling effective unit testing of the parsing logic (using `tests/test_map_view_kml_parsing.py`) without requiring a live UI environment.
+*   **Zoom Level Adjustment:**
+    *   Initial user feedback indicated that the default zoom level after `fit_bounds()` was too close.
+    *   An iterative approach was taken to fix this:
+        1.  An early attempt to simply decrement the zoom level after `fit_bounds()` proved unreliable as `fit_bounds()` often had overriding effects.
+        2.  The final, more robust solution involved: letting `fit_bounds()` determine an initial center and zoom; then, retrieving this effective zoom level; applying the user-defined zoom offset (from the Default View Settings feature); and finally, explicitly re-setting the map's `location` (to the bounds' center) and `zoom_start` (to the newly calculated final zoom) on the `folium.Map` object and its `options` dictionary before rendering. This ensured the desired zoom level was respected.
+*   **KML Namespace Handling:** Ensured that XML parsing correctly handled default KML namespaces by using appropriate prefixes when searching for tags with `ElementTree`.
+
+**Alignment with Requirements:**
+Task 7's core requirements – loading a KML file based on table selection, parsing it to display the polygon on the map, and showing its description – have been met. The implementation also handles file-not-found scenarios and integrates with default styling options for a better user experience.
+
+**Notes for Future Tasks & Development Process:**
+
+1.  **Isolate Core Logic for Testability:** As demonstrated with KML parsing, extracting complex logic (especially data processing or parsing) into static methods or separate utility functions greatly improves unit testability and can be done independently of UI components.
+2.  **Iterative Refinement for UX Features:** UI/UX features like map zoom often benefit from iterative refinement based on feedback. Expect that initial implementations might need adjustments. For map interactions, logging intermediate values (like calculated centers, detected zoom levels) during development is very helpful for debugging.
+3.  **Clear Separation of Concerns:** Maintaining separation (e.g., `CredentialManager` for settings, `DatabaseManager` for DB ops, `MapViewWidget` for map display, `MainWindow` for orchestration) makes features easier to implement and debug.
+4.  **Proactive Error Handling in File Operations:** When dealing with file paths from external sources (like database records), always include checks for file existence (`os.path.exists`) and wrap file I/O in `try-except` blocks to gracefully handle issues like missing files or permission errors.
 ---

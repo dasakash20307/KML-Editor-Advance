@@ -24,6 +24,8 @@ The **Dilasa Advance KML Tool** is a Windows desktop application developed for D
     *   Create KML polygon files from selected records for use in GIS software.
 *   **Map Visualization & Google Earth Integration:**
     *   View selected polygons on an integrated map (Folium-based with OpenStreetMap/Esri Satellite).
+    *   **Interactive KML Display:** View KML polygons and points directly on an interactive map by selecting records from the data table. Associated KML descriptions are displayed alongside the map.
+    *   **Customizable KML View:** Personalize the default appearance of displayed KMLs (colors, opacity, line styles, view mode, and zoom preferences) via 'View -> Default KML View Settings'.
     *   Switch to an embedded Google Earth Web View.
     *   When a polygon is selected in the Google Earth View:
         *   A temporary KML file is automatically created.
