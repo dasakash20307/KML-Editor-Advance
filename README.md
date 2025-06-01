@@ -42,10 +42,16 @@ The **Dilasa Advance KML Tool** is a Windows desktop application developed for D
     *   **Toolbar:** Quick access buttons for common actions like Import CSV, API Fetch, Toggle GE View, Generate KML, and Delete Checked Rows.
     *   **Map/Google Earth View Pane:** Displays either the Folium map or the Google Earth Web View.
     *   **Data Table Pane:**
-        *   Displays all polygon records from the database with details like ID, Status, UUID, Farmer Name, Village, etc.
+        *   Displays all polygon records from the database with comprehensive details. This now includes key v5 metadata such as **DB ID, UUID, Response Code, Farmer Name, Village, KML File Name, KML File Status, Evaluation Status, Times Edited, Last Edit Date, Editor Device ID, Editor Nickname, Device Code (Creator), Date Added, Export Count, Last Exported, and Last Modified.**
         *   Supports selection of multiple rows using checkboxes.
         *   "Select/Deselect All" checkbox for bulk actions.
-    *   **Filter Panel:** Allows filtering of the data table by UUID, date added, KML export status, and record error status.
+    *   **Filter Panel & Controls:**
+        *   A " Filters" button located on a strip above the main table allows users to toggle the visibility of the filter options panel.
+        *   The filter options panel allows filtering of the data table by UUID, KML export status, and record status (e.g., "Valid Records", "Error Records" based on KML file status).
+        *   Filters are applied only when an "Apply Filters" button is clicked.
+        *   A "Clear Filters" button resets all active filter criteria.
+        *   The filter panel automatically hides after filters are applied.
+        *   *(Note: Date-based filtering has been temporarily removed for rework).*
     *   **Log Panel:** Shows status messages, errors, and logs of application activity.
 *   **Startup Sequence:**
     *   **`launcher_app.py`**: Main application entry point. Manages application setup, styling, and initiates the loading sequence.
@@ -82,7 +88,7 @@ The ongoing update to Version 5 introduces significant architectural improvement
 
 ## Current Status
 
-The application is undergoing a significant update to **Version 5 (v5)**. Key architectural changes, including a KML-first data model and user-defined configurations via `CredentialManager`, have been implemented. See 'Key v5 Architectural Changes' for more details. The UI has also been modernized with High DPI support and a new application launcher. Development continues on further v5 enhancements and Google Earth Engine integration.
+The application is undergoing a significant update to **Version 5 (v5)**. Key architectural changes, including a KML-first data model and user-defined configurations via `CredentialManager`, have been implemented. The main data table now displays a comprehensive set of v5 metadata, and the filter panel UI has been updated for improved usability (date filters temporarily removed). See 'Key v5 Architectural Changes' for more details. The UI has also been modernized with High DPI support and a new application launcher. Development continues on further v5 enhancements and Google Earth Engine integration.
 
 ## Setup
 

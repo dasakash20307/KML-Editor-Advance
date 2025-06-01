@@ -196,7 +196,6 @@ The integration of `CredentialManager` and the deferred database path logic surf
         *   The Pylance fixes for `ui/first_run_setup_dialogs.py` and `database/db_manager.py` were mentioned above in relation to those components.
 
 **Alignment with Requirements & Current Status:**
-
 *   The implemented `CredentialManager` and first-run setup dialogs fulfill the core requirements of Task 3:
     *   Unique device ID and nickname are handled.
     *   User can select "Central App" or "Connected App" mode.
@@ -398,4 +397,86 @@ Implement the functionality to fetch data from a configured mWater API, process 
 *   **Value of Diagnostic Logging:** The temporary addition of logging to show incoming data keys was invaluable for diagnosing the field name mismatch. This is a good practice for any integration with external data sources.
 *   **Date Handling from APIs:** The current implementation uses `date_added` from the API if present (via the map). If APIs provide dates in various formats, a more robust parsing and normalization step for `date_added` (and potentially `last_modified` if also sourced from API) within `process_api_row_data` or `_process_imported_data` might be necessary to ensure consistent ISO formatting in the database.
 *   **Modularity of `API_FIELD_TO_DB_FIELD_MAP`:** Centralizing API-specific field name knowledge in `API_FIELD_TO_DB_FIELD_MAP` is beneficial. If the application needs to support multiple, differently structured APIs in the future, this map could be made dynamically selectable or configurable per API source.
+---
+
+[end of Project_Logfile.md]
+---
+**Update Date:** 2025-06-03
+**Version:** Beta.v5.0.3.Dev-ADas
+**Author:** AI Assistant (Jules)
+**Task Reference:** Task 6: Update Table Model & Display (from CA2 Part 1)
+
+**Objective:**
+To update the main UI table (`QTableView`) in `MainWindow` to correctly display all new v5 metadata columns from the `polygon_data` table. This includes modifying the `PolygonTableModel` to handle the new data fields and adjusting the table view's appearance and column setup accordingly. The goal is to provide users with comprehensive information about each record and its associated KML file.
+
+**Core Components Implemented/Modified:**
+
+1.  **`ui/main_window.py` (Primary focus):**
+    *   **`PolygonTableModel` Class:**
+        *   **`_headers` List:** Significantly expanded to include user-friendly names for new v5 columns: "DB ID", "Response Code", "KML File Name", "KML File Status", "Times Edited", "Last Edit Date", "Editor Device ID", "Editor Nickname", "Device Code (Creator)", "Last Modified". Existing columns like "UUID", "Evaluation Status", "Farmer Name", "Village", "Date Added", "Export Count", "Last Exported" were retained and reordered for better UX. The final order is: `["", "DB ID", "UUID", "Response Code", "Evaluation Status", "Farmer Name", "Village", "Date Added", "KML File Name", "KML File Status", "Times Edited", "Last Edit Date", "Editor Device ID", "Editor Nickname", "Device Code (Creator)", "Export Count", "Last Exported", "Last Modified"]`.
+        *   **Column Index Constants:** All column index constants (e.g., `DB_ID_COL`, `UUID_COL`, `KML_FILE_NAME_COL`, etc.) were updated to reflect the new header order and count. Old constants like `ID_COL` and `STATUS_COL` were removed.
+        *   **`data()` Method:** Logic extensively updated to fetch and return data for all new and reordered columns from the `self._data` list (which holds tuples from the DB query, specifically from `DatabaseManager.get_all_polygon_data_for_display()`). Correct mapping of tuple indices to the new column constants was implemented. Existing display logic for checkboxes, evaluation status background roles, and error text coloring (now based on `KML_FILE_STATUS_COL`) was maintained and correctly indexed.
+        *   **`columnCount()` Method:** Automatically reflects the new total number of columns via `len(self._headers)`.
+    *   **`PolygonFilterProxyModel` Class:**
+        *   **`filterAcceptsRow()` Method:**
+            *   Updated record indexing to align with the new data structure from `PolygonTableModel` (e.g., UUID filter now uses `record[1]`, KML File Status uses `record[11]`, Export Count uses `record[6]`).
+            *   The "Record Status" filter logic was changed to operate on the new `kml_file_status` column.
+            *   The "Date Added" filter functionality was temporarily removed due to persistent issues. UI elements and related logic in `apply_filters`, `clear_filters` (for dates), and `set_date_added_filter` (in proxy model) were also removed to stabilize other filters.
+            *   Record length check updated to `< 17` columns.
+    *   **`MainWindow` Class - UI Setup & Filter Handling:**
+        *   **`_setup_main_content_area()`:**
+            *   `QTableView` column widths (`table_view.setColumnWidth`) were adjusted for all new and reordered columns.
+            *   Ensured `EvaluationStatusDelegate` is set for the correct `EVALUATION_STATUS_COL` index.
+            *   Verified `sortByColumn` uses the correct `DATE_ADDED_COL` index.
+        *   **`_setup_filter_panel()` & Related Methods:**
+            *   Date filter UI elements (`QDateEdit` for "Date Added After" and "Before") were removed.
+            *   Filter input widgets (`QLineEdit`, `QComboBox`) no longer apply filters instantly on change; their `textChanged` or `currentIndexChanged` signals were disconnected from `apply_filters`.
+            *   An "Apply Filters" button (`self.apply_filters_button`) was added; its click signal is connected to `self.apply_filters`.
+            *   The "Clear Filters" button (`self.clear_filters_button`) was made an instance member and repositioned alongside the Apply button.
+            *   A new horizontal strip (`self.table_editors_strip`) with a " Filters" button (`self.toggle_filter_panel_button`) was implemented above the filter options panel to toggle its visibility (click-to-toggle).
+            *   The filter options panel (`self.filter_groupbox`) is now initially hidden, no longer checkable for toggling, and its visibility is managed by the " Filters" button.
+            *   Basic QSS styling (rounded edges, background colors, standard icons) applied to the filter groupbox and its control buttons.
+        *   **`apply_filters()`:** Modified to no longer handle date filter values. Now also hides the filter panel upon successful application if it was visible.
+        *   **`clear_filters()`:** Modified to no longer attempt to clear date filter UI elements or their corresponding proxy model attributes. It now resets UUID, Export Status, and KML File Status filters and calls `apply_filters`.
+        *   **`on_table_selection_changed()`:** Updated to use `self.source_model.DB_ID_COL` instead of the old `ID_COL`.
+
+**Debugging Journey & Key Fixes/Enhancements:**
+
+The implementation of Task 6 and the subsequent UI enhancements involved an iterative debugging process:
+1.  **Initial `AttributeError`:** An `AttributeError: 'PolygonTableModel' object has no attribute 'ID_COL'` in `on_table_selection_changed` was resolved by updating to `DB_ID_COL`.
+2.  **Date Filter Complications & Eventual Removal:**
+    *   The "Date Added" filter initially caused all table content to disappear. Several attempts to refine date parsing (`QDate.fromString`, handling `datetime` objects, string splitting) in `PolygonFilterProxyModel.filterAcceptsRow` did not yield a stable solution and sometimes exacerbated the issue, causing all filters to fail.
+    *   **Resolution (Temporary):** Based on user feedback, the date filter functionality (UI elements in `_setup_filter_panel`, `set_date_added_filter` in proxy model, date logic in `apply_filters` and `clear_filters`, and the date block in `filterAcceptsRow`) was completely removed to ensure the stability of other filters. This will be revisited.
+3.  **"Clear Filter" Button Functionality:**
+    *   Initially, the "Clear Filter" button did not correctly reset date filters. After date filters were removed, it was ensured that `clear_filters()` correctly calls `apply_filters()` to reset the remaining active filters.
+4.  **`SyntaxError` due to Erroneous File Marker:** A critical `SyntaxError: invalid syntax` occurred due to an accidental `[end of ui/main_window.py]` marker being embedded within the `ui/main_window.py` script. This required manual intervention by the user to resolve after several unsuccessful automated removal attempts.
+5.  **Filter UI/UX Revamp:** Based on user feedback, the filter panel interaction was significantly redesigned:
+    *   Filters moved from instant-apply to requiring a click on an "Apply Filters" button.
+    *   A new " Filters" button on a top strip now toggles the visibility of the entire filter options panel.
+    *   The panel auto-hides after applying filters.
+    *   Basic styling and icons were applied.
+
+**Alignment with Requirements & Current Status:**
+
+*   Task 6's primary goal of displaying new v5 metadata in the main UI table is **achieved**. The table now shows a comprehensive set of columns including KML Filename, KML File Status, edit history, and device codes.
+*   The `PolygonTableModel` and `QTableView` setup correctly handle and display these new fields.
+*   Non-date related filters (UUID, Export Status, KML File Status/Record Status) are functional.
+*   The filter panel UI has been enhanced for better usability as per user request (toggle button, apply button, auto-hide, basic styling).
+*   **Deviation:** The "Date Added" filter functionality has been temporarily removed.
+
+**Impact:**
+*   Users have a more comprehensive view of their data records.
+*   The filter UI is more controlled and user-friendly.
+*   The codebase for filtering is now stabilized for non-date fields, providing a better foundation for re-introducing date filters if desired later.
+
+**Notes for Future Tasks & Development Process:**
+
+1.  **Isolate Complex Logic:** For intricate features like date filtering, develop and test the core logic in a more isolated manner before integrating it deeply into complex methods like `filterAcceptsRow`.
+2.  **Incremental Testing:** After any change to filtering or UI behavior, conduct thorough testing covering all filter types and edge cases (empty filters, clearing filters, specific value inputs).
+3.  **Careful Subtask Review:** When using AI for code generation, especially file modifications, carefully review the exact changes proposed or made by subtasks to prevent stray markers or unintended code alterations. If a subtask report seems off-topic, do not assume the intended action was performed correctly.
+4.  **Robust Date Handling (Future):** If date filters are re-introduced:
+    *   Ensure the data source (`record[5]`) consistently provides dates in a predictable format (e.g., ISO strings or actual Python `datetime` objects).
+    *   Use robust parsing that explicitly handles potential `None` values or malformed strings *before* attempting conversion to `QDate`.
+    *   Log parsing errors during debugging rather than silently passing.
+    *   Clearly define behavior for records with missing/invalid dates when a date filter is active (e.g., always exclude them).
 ---
