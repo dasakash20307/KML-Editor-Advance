@@ -701,32 +701,117 @@ class MainWindow(QMainWindow):
         )
 
     def handle_clear_all_data(self):
-        if QMessageBox.question(self,"Confirm Clear All","Delete ALL polygon data permanently?\nThis cannot be undone.",QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,QMessageBox.StandardButton.No)==QMessageBox.StandardButton.Yes:
-            if self.db_manager.delete_all_polygon_data():self.log_message("All polygon data deleted.","info");self.source_model._check_states.clear();self.load_data_into_table()
-            else:self.log_message("Failed to clear data.","error");QMessageBox.warning(self,"DB Error","Could not clear data.")
+        if not self.db_lock_manager:
+            self.log_message("Database Lock Manager not available. Cannot clear data.", "error")
+            QMessageBox.critical(self, "Critical Error", "Database Lock Manager is not initialized. Please restart the application.")
+            return
+
+        def _do_clear():
+            if QMessageBox.question(self, "Confirm Clear All", "Delete ALL polygon data permanently?\nThis cannot be undone.",
+                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                    QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+                if self.db_manager.delete_all_polygon_data():
+                    self.log_message("All polygon data deleted.", "info")
+                    self.source_model._check_states.clear() # Clear local check states
+                    # self.load_data_into_table() # Will be called if _execute returns True
+                    return True # Indicate success
+                else:
+                    self.log_message("Failed to clear all data from database.", "error")
+                    QMessageBox.warning(self, "DB Error", "Could not clear all data from the database.")
+                    return False # Indicate failure
+            else:
+                self.log_message("Clear all data operation cancelled by user.", "info")
+                return False # Indicate operation was not performed
+
+        if self._execute_db_operation_with_lock(
+            operation_callable=_do_clear,
+            operation_desc="Clearing all polygon data",
+            lock_duration=60, # Slightly longer for a full clear
+            retry_callable_for_timer=self.handle_clear_all_data
+        ):
+            self.load_data_into_table()
+
     def handle_generate_kml(self):
-        checked_ids=self.source_model.get_checked_item_db_ids()
-        if not checked_ids:QMessageBox.information(self,"Generate KML","No records checked.");return
-        records_data=[self.db_manager.get_polygon_data_by_id(db_id)for db_id in checked_ids];valid_for_kml=[r for r in records_data if r and r.get('status')=='valid_for_kml']
-        if not valid_for_kml:QMessageBox.information(self,"Generate KML","Checked records not valid for KML.");return
-        output_folder=QFileDialog.getExistingDirectory(self,"Select Output Folder",os.path.expanduser("~/Documents"))
-        if not output_folder:self.log_message("KML generation cancelled.","info");return
-        output_mode_dialog=OutputModeDialog(self);kml_output_mode=output_mode_dialog.get_selected_mode()
-        if not kml_output_mode:self.log_message("KML gen cancelled(mode selection).","info");return
-        self.log_message(f"Generating KMLs to:{output_folder}(Mode:{kml_output_mode})","info");files_gen,ids_gen=0,[]
-        try:
-            if kml_output_mode=="single":
-                ts=datetime.datetime.now().strftime('%d.%m.%y');fn=f"Consolidate_ALL_KML_{ts}_{len(valid_for_kml)}.kml";doc=simplekml.Kml(name=f"Consolidated - {ts}")
-                for pd in valid_for_kml:
-                    if add_polygon_to_kml_object(doc,pd):ids_gen.append(pd['id'])
-                if doc.features:doc.save(os.path.join(output_folder,fn));files_gen=1
-            elif kml_output_mode=="multiple":
-                for pd in valid_for_kml:doc=simplekml.Kml(name=pd['uuid']);
-                if add_polygon_to_kml_object(doc,pd):doc.save(os.path.join(output_folder,f"{pd['uuid']}.kml"));ids_gen.append(pd['id']);files_gen+=1
-            for rid in ids_gen:self.db_manager.update_kml_export_status(rid)
-            if ids_gen:self.load_data_into_table()
-            msg=f"{files_gen}KMLs generated for {len(ids_gen)}records."if files_gen>0 else"No KMLs generated.";self.log_message(msg,"success"if files_gen>0 else"info");QMessageBox.information(self,"KML Generation",msg)
-        except Exception as e:self.log_message(f"KML Gen Error:{e}","error");QMessageBox.critical(self,"KML Error",f"Error:\n{e}")
+        checked_ids = self.source_model.get_checked_item_db_ids()
+        if not checked_ids:
+            QMessageBox.information(self, "Generate KML", "No records checked.")
+            return
+
+        records_data = [self.db_manager.get_polygon_data_by_id(db_id) for db_id in checked_ids]
+        valid_for_kml = [r for r in records_data if r and r.get('status') == 'valid_for_kml']
+        if not valid_for_kml:
+            QMessageBox.information(self, "Generate KML", "Checked records not valid for KML.")
+            return
+
+        output_folder = QFileDialog.getExistingDirectory(self, "Select Output Folder", os.path.expanduser("~/Documents"))
+        if not output_folder:
+            self.log_message("KML generation cancelled (folder selection).", "info")
+            return
+
+        output_mode_dialog = OutputModeDialog(self)
+        kml_output_mode = output_mode_dialog.get_selected_mode()
+        if not kml_output_mode: # User cancelled dialog
+            self.log_message("KML generation cancelled (mode selection).", "info")
+            return
+
+        if not self.db_lock_manager:
+            self.log_message("Database Lock Manager not available. Cannot generate KML.", "error")
+            QMessageBox.critical(self, "Critical Error", "Database Lock Manager is not initialized. Please restart the application.")
+            return
+
+        def _do_kml_generation():
+            # This inner function will only be called if the lock is acquired.
+            self.log_message(f"Generating KMLs to: {output_folder} (Mode: {kml_output_mode})", "info")
+            files_gen, ids_gen = 0, []
+            heartbeat_interval_kml = 10  # records
+            operation_successful = True
+
+            try:
+                if kml_output_mode == "single":
+                    ts = datetime.datetime.now().strftime('%d.%m.%y')
+                    fn = f"Consolidate_ALL_KML_{ts}_{len(valid_for_kml)}.kml"
+                    doc = simplekml.Kml(name=f"Consolidated - {ts}")
+                    for idx, pd in enumerate(valid_for_kml):
+                        if idx > 0 and idx % heartbeat_interval_kml == 0: self.db_lock_manager.update_heartbeat()
+                        if add_polygon_to_kml_object(doc, pd): ids_gen.append(pd['id'])
+                    if doc.features: doc.save(os.path.join(output_folder, fn)); files_gen = 1
+                elif kml_output_mode == "multiple":
+                    for idx, pd in enumerate(valid_for_kml):
+                        if idx > 0 and idx % heartbeat_interval_kml == 0: self.db_lock_manager.update_heartbeat()
+                        doc = simplekml.Kml(name=pd['uuid'])
+                        if add_polygon_to_kml_object(doc, pd):
+                            doc.save(os.path.join(output_folder, f"{pd['uuid']}.kml"))
+                            ids_gen.append(pd['id']); files_gen += 1
+
+                for idx, rid in enumerate(ids_gen):
+                    if idx > 0 and idx % heartbeat_interval_kml == 0: self.db_lock_manager.update_heartbeat()
+                    self.db_manager.update_kml_export_status(rid)
+
+                if ids_gen: self.load_data_into_table() # Refresh only if changes were made
+                msg = f"{files_gen} KMLs generated for {len(ids_gen)} records." if files_gen > 0 else "No KMLs generated."
+                self.log_message(msg, "success" if files_gen > 0 else "info")
+                QMessageBox.information(self, "KML Generation", msg)
+            except Exception as e_kml: # Catch specific KML/DB errors within the operation
+                self.log_message(f"Error during KML generation/DB update: {e_kml}", "error")
+                QMessageBox.critical(self, "KML/DB Error", f"An error occurred during KML generation or status update:\n{e_kml}")
+                operation_successful = False # Mark operation as failed
+            return operation_successful
+
+        # Estimate duration: 2 seconds per record, min 30s, max 5 minutes (300s)
+        estimated_duration = min(max(len(valid_for_kml) * 2, 30), 300)
+
+        # _execute_db_operation_with_lock will handle the lock acquisition and release
+        # It will also call load_data_into_table if _do_kml_generation returns True
+        # However, _do_kml_generation already calls load_data_into_table if ids_gen is not empty.
+        # To avoid double loading, we ensure _do_kml_generation handles its own UI updates.
+        # The return value of _do_kml_generation now signals if the core task was done.
+        self._execute_db_operation_with_lock(
+            operation_callable=_do_kml_generation,
+            operation_desc=f"Generating KMLs and updating {len(valid_for_kml)} export statuses",
+            lock_duration=estimated_duration,
+            retry_callable_for_timer=self.handle_generate_kml
+        )
+
     def _trigger_ge_polygon_upload(self,polygon_record):
         self.log_message(f"GE View:Processing polygon UUID {polygon_record.get('uuid')}for GE upload.","info");kml_doc=simplekml.Kml(name=str(polygon_record.get('uuid','Polygon')))
         if add_polygon_to_kml_object(kml_doc,polygon_record):
