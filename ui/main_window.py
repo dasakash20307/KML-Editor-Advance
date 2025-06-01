@@ -353,16 +353,20 @@ class MainWindow(QMainWindow):
         
         filter_layout.addWidget(QLabel("Filter UUID:"), 0, 0)
         self.uuid_filter_edit = QLineEdit(); self.uuid_filter_edit.setPlaceholderText("Contains...")
+        # self.uuid_filter_edit.textChanged.connect(self.apply_filters) # Will be connected to Apply button
         filter_layout.addWidget(self.uuid_filter_edit, 0, 1, 1, 3) 
 
         filter_layout.addWidget(QLabel("Export Status:"), 1, 0)
         self.export_status_combo = QComboBox(); self.export_status_combo.addItems(["All", "Exported", "Not Exported"])
+        # self.export_status_combo.currentIndexChanged.connect(self.apply_filters) # Will be connected to Apply button
         filter_layout.addWidget(self.export_status_combo, 1, 1)
 
         filter_layout.addWidget(QLabel("Record Status:"), 1, 2)
         self.error_status_combo = QComboBox(); self.error_status_combo.addItems(["All", "Valid Records", "Error Records"])
+        # self.error_status_combo.currentIndexChanged.connect(self.apply_filters) # Will be connected to Apply button
         filter_layout.addWidget(self.error_status_combo, 1, 3)
 
+        # Buttons on row 2
         self.apply_filters_button = QPushButton("Apply Filters")
         self.apply_filters_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton))
         self.apply_filters_button.setStyleSheet("""
@@ -651,4 +655,5 @@ class MainWindow(QMainWindow):
             except Exception as e:self.log_message(f"Error deleting temp KML {self.current_temp_kml_path}:{e}","error")
         super().closeEvent(event)
 
+[end of ui/main_window.py]
 [end of ui/main_window.py]
