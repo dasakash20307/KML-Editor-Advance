@@ -13,7 +13,7 @@
 * **Part X (e.g., "CA4 Part 1"):** Refers to a specific sub-task or component within the broader plan for the referenced Change Area, as detailed in our discussions and the reorganized plan.
 * **KML-first:** An architectural approach where the KML file is treated as the primary source of truth for geographic data (geometry, description) once created, with the database storing metadata and a reference (filename) to this KML file.
 * **CredentialManager:** A new core component responsible for managing device identity (UUID, nickname), application mode (Central/Connected), and paths to the main database and KML storage folder. It uses a local secondary database (`device_config.db`).
-* **Locking Mechanism:** Refers to the application-level file-based locking system (for both the main database and individual KML files) to manage concurrent access in the Central/Connected App setup.
+* **Locking Mechanism:** Refers to the application-level file-based locking system (for both the main database and individual KML files) to manage concurrent access in the Central/Connected App setup. This is primarily managed by `DatabaseLockManager` and `KMLFileLockManager` in `core/sync_manager.py` and utilized by UI components through `ui/lock_handlers.py`.
 * **OpenLayers:** A JavaScript library chosen for implementing the advanced KML visual editor within a `QWebEngineView`.
 * **QWebChannel:** A PySide6 module for bidirectional communication between Python and JavaScript running in `QWebEngineView`.
 
@@ -156,7 +156,7 @@ This report provides an in-depth, task-by-task breakdown for updating the "KML-E
     * **Connections of Modules and UI Elements:**
         * `CredentialManager` provides `db_path` and `kml_root_path`.
         * `DatabaseManager` is instantiated with `db_path`.
-        * This `DatabaseManager` instance is used by modules needing DB access (e.g., `MainWindow`).
+        * This `DatabaseManager` instance is used by modules needing DB access (e.g., `DataHandler`, `KMLHandler`).
         * KML handling logic uses `kml_root_path` + `kml_file_name`.
 
 ---
@@ -170,28 +170,28 @@ This report provides an in-depth, task-by-task breakdown for updating the "KML-E
 * **Detailed Description:**
     * **Functionality:** Fetches data from mWater APIs. For each valid record, it generates a KML file with a dynamic description, saves this KML to the designated KML storage folder, and then writes a comprehensive metadata record (including KML filename and initial status) to the main SQLite database. Handles duplicate checking based on `response_code`.
     * **Alignment with v4 Modules & Modifications:**
-        * **`core/api_handler.py`**: The `fetch_data_from_mwater_api` function will be retained for fetching raw data. Its return (list of dicts) will be consumed by new logic in `MainWindow`.
-        * **`core/data_processor.py`**: The `process_csv_row_data` function will be adapted. While its primary role is for CSVs, its logic for parsing UTM, handling point data, and structuring data into a dictionary will be influential. For API data, a similar processing step will be needed to map API fields to the v5 DB schema and prepare data for KML generation.
+        * **`core/api_handler.py`**: The `fetch_data_from_mwater_api` function will be retained for fetching raw data. Its return (list of dicts) will be consumed by `DataHandler`.
+        * **`core/data_processor.py`**: The `process_api_row_data` (and `process_csv_row_data`) function will be used by `DataHandler` to map API/CSV fields to the v5 DB schema and prepare data for KML generation.
         * **`core/kml_generator.py`**:
             * **Modification:** `create_kml_description_for_placemark` will be significantly changed. It will receive the full data record (from API/CSV). It will iterate through its items, excluding a predefined list of keys (e.g., UUID, response_code, internal DB fields, p1_utm_str, etc.), and format the rest as "Key: Value" or "Key: N/A" for the KML description.
             * **Modification:** `add_polygon_to_kml_object` will be used to generate the KML structure. It should correctly use the (potentially 4) initial points.
-        * **`ui/main_window.py`** (`handle_fetch_from_api` and new helper methods):
-            * **Major Refactor:** The `handle_fetch_from_api` method will orchestrate the new KML-first workflow:
+        * **`ui/main_window.py`** (`handle_fetch_from_api`):
+            * **Major Refactor:** This method in `MainWindow` now delegates the core logic to `DataHandler.handle_fetch_from_api()`.
+        * **`ui/data_handlers.py` (`DataHandler` class):**
+            * **`handle_fetch_from_api` and `_process_imported_data` methods:** Orchestrate the KML-first workflow:
                 1.  Call `api_handler.fetch_data_from_mwater_api`.
                 2.  For each returned row (record):
-                    a.  Process the raw record to map fields to v5 DB structure and prepare data for KML description (similar to `core/data_processor.py` logic).
-                    b.  Generate a UUID if not present (though API data should have it).
-                    c.  Check for duplicate `response_code` in DB (using `db_manager.check_duplicate_response_code`). If duplicate, skip or handle as per definitive duplicate strategy (current plan: skip and log).
+                    a.  Process the raw record (via `core.data_processor`).
+                    b.  Generate UUID if not present.
+                    c.  Check for duplicate `response_code` in DB (via `db_manager`).
                     d.  Call `kml_generator` to create a `simplekml.Kml` object.
-                    e.  Construct KML filename (e.g., `f"{uuid_value}.kml"`).
+                    e.  Construct KML filename.
                     f.  Determine full path using `kml_root_path` from `CredentialManager`.
-                    g.  Attempt to save the KML file (this write needs KML file lock - Task 9).
-                    h.  If KML save successful:
-                        i.  Prepare metadata dictionary for DB insertion (UUID, response\_code, `kml_file_name`, `kml_file_status`="Created", `date_added`, `device_code` if available from API, `editor_device_id` and `editor_device_nickname` from `CredentialManager` as the creator).
-                        j.  Call `db_manager.add_or_update_polygon_data` (this write needs DB lock - Task 8).
-                    k.  If KML save fails: Log error, prepare metadata with `kml_file_name`=NULL, `kml_file_status`="Errored", and save to DB.
+                    g.  Attempt to save the KML file (using `LockHandler` for KML file lock).
+                    h.  If KML save successful: Prepare metadata and call `db_manager.add_or_update_polygon_data` (using `LockHandler` for DB lock).
+                    k.  If KML save fails: Log error, prepare metadata with error status, and save to DB.
             * Uses `APIImportProgressDialog` for user feedback.
-    * **Folder and File Structure:** Uses existing core modules, but KML files are now saved to the folder configured in Task 4 (e.g., `[main_kml_folder_path]/[UUID].kml`).
+    * **Folder and File Structure:** Uses existing core modules, but KML files are now saved to the folder configured in Task 4. `ui/data_handlers.py` is central.
     * **UI Structure:**
         * User interaction is via the existing "Fetch from API" button and `APISourcesDialog`.
         * `APIImportProgressDialog` provides feedback.
@@ -200,10 +200,8 @@ This report provides an in-depth, task-by-task breakdown for updating the "KML-E
         * **`requests`**: For HTTP calls.
         * **`simplekml`**: For KML object creation and saving.
         * **`sqlite3`**: Via `DatabaseManager`.
-        * **`csv`, `io.StringIO`**: If API returns CSV formatted text data.
     * **Connections of Modules and UI Elements:**
-        * `MainWindow` (UI) -> `api_handler` (core) -> `kml_generator` (core) -> `CredentialManager` (for paths/IDs) -> `DatabaseManager` (database) -> `MainWindow` (update table UI).
-        * Locking mechanisms from `core/sync_manager.py` will be called before KML file saves and DB writes.
+        * `MainWindow` (UI) -> `DataHandler` -> `api_handler` (core) -> `core.data_processor` -> `kml_generator` (core) -> `CredentialManager` (for paths/IDs) -> `LockHandler` -> `DatabaseManager` (database) -> `DataHandler` -> `MainWindow` (update table UI).
 
 ---
 **Task 6: Update Table Model & Display (from CA2 Part 1)**
@@ -214,21 +212,22 @@ This report provides an in-depth, task-by-task breakdown for updating the "KML-E
     * **Functionality:** The main data table in the `MainWindow` will display all relevant metadata columns from the v5 `polygon_data` table, providing users with comprehensive information about each record and its associated KML file.
     * **Alignment with v4 Modules & Modifications:**
         * **`ui/main_window.py`**:
-            * **`PolygonTableModel` class**:
-                * **Modification (`_headers` list):** This list will be significantly expanded to include user-friendly names for all new v5 columns: `Device Code`, `KML File Name`, `KML File Status`, `Times Edited`, `Last Edit Date`, `Editor Device ID`, `Editor Nickname`, in addition to adapted v4 columns like `UUID`, `Response Code`, `Evaluation Status`, `Farmer Name`, `Village`, `Date Added`, `Export Count`, `Last Exported`. Column order to be determined for best UX.
-                * **Modification (`data()` method):** Logic will be updated to fetch and return data for these new columns from the `self._data` list (which holds tuples from the DB query). Correct mapping of tuple indices to columns is critical.
-                * **Modification (`columnCount()` method):** Will return the new total number of columns.
-                * The existing logic for checkbox column (`CHECKBOX_COL`), ID column, evaluation status display and background role will be maintained and correctly indexed.
-            * **`QTableView` Setup (`_setup_main_content_area`):**
-                * Column widths (`table_view.setColumnWidth`) will need to be adjusted for the new columns.
-                * The `EvaluationStatusDelegate` will continue to be set for the `evaluation_status` column.
-    * **Folder and File Structure:** Primarily modifications within `ui/main_window.py`.
+            * **Refactor:** The `PolygonTableModel` class definition is **moved** to `ui/table_models.py`. `MainWindow` now imports and instantiates it.
+        * **`ui/table_models.py` (`PolygonTableModel` class):**
+            * **Modification (`_headers` list):** This list will be significantly expanded to include user-friendly names for all new v5 columns: `Device Code`, `KML File Name`, `KML File Status`, `Times Edited`, `Last Edit Date`, `Editor Device ID`, `Editor Nickname`, in addition to adapted v4 columns like `UUID`, `Response Code`, `Evaluation Status`, `Farmer Name`, `Village`, `Date Added`, `Export Count`, `Last Exported`. Column order to be determined for best UX.
+            * **Modification (`data()` method):** Logic will be updated to fetch and return data for these new columns from the `self._data` list (which holds tuples from the DB query). Correct mapping of tuple indices to columns is critical.
+            * **Modification (`columnCount()` method):** Will return the new total number of columns.
+            * The existing logic for checkbox column (`CHECKBOX_COL`), ID column, evaluation status display and background role will be maintained and correctly indexed.
+        * **`ui/main_window.py` (`QTableView` Setup in `_setup_main_content_area`):**
+            * Column widths (`table_view.setColumnWidth`) will need to be adjusted for the new columns.
+            * The `EvaluationStatusDelegate` (now imported from `ui.table_delegates`) will continue to be set for the `evaluation_status` column.
+    * **Folder and File Structure:** `ui/table_models.py` now contains `PolygonTableModel`.
     * **UI Structure:**
         * The `QTableView` in the `MainWindow`'s right pane is the main UI element affected. Its appearance will change due to the new columns.
     * **Libraries Structure & Connections:**
         * **`PySide6` (`QtWidgets`, `QtCore`, `QtGui`):** For `QTableView`, `QAbstractTableModel`, delegates.
     * **Connections of Modules and UI Elements:**
-        * `DatabaseManager.get_all_polygon_data_for_display()` (modified in Task 4 to fetch new columns) provides data to `PolygonTableModel.update_data()`.
+        * `DatabaseManager.get_all_polygon_data_for_display()` (modified in Task 4 to fetch new columns) provides data to `PolygonTableModel.update_data()` (in `ui.table_models`).
         * `PolygonTableModel` then provides data (including for new columns) to the `QTableView` for display.
         * User interactions with the table (sorting, selection) are handled by `QTableView` and its model.
 
@@ -251,15 +250,17 @@ This report provides an in-depth, task-by-task breakdown for updating the "KML-E
                 7.  Updates a dedicated UI element (see UI Structure below) to display the extracted KML description.
             * The existing `_initialize_map` and `update_map` methods for handling Folium will be used.
         * **`ui/main_window.py` (`on_table_selection_changed` method)**:
-            * **Modification:** When a table row is selected:
+            * **Refactor:** This logic is now primarily handled by `KMLHandler.handle_table_selection_changed()`. `MainWindow` connects its table selection signal to this handler method.
+        * **`ui/kml_handlers.py` (`KMLHandler` class):**
+            * **`handle_table_selection_changed` method:**
                 1.  Get the `kml_file_name` for the selected record from `PolygonTableModel`.
                 2.  Get the `main_kml_folder_path` from `CredentialManager`.
                 3.  Construct the full path to the KML file.
                 4.  If the path is valid and file exists:
                     * Call `map_view_widget.load_kml_for_display(full_kml_path)`.
-                    * Update `kml_file_status` in DB to "File Deleted" (with DB lock) if file does not exist, then refresh table row.
+                    * Update `kml_file_status` in DB to "File Deleted" (via `DataHandler` for DB lock) if file does not exist, then refresh table row.
                 5.  If KML is invalid or file doesn't exist, clear map and description panel.
-    * **Folder and File Structure:** Primarily modifications to `ui/widgets/map_view_widget.py` and `ui/main_window.py`.
+    * **Folder and File Structure:** Modifications to `ui/widgets/map_view_widget.py`. `ui/kml_handlers.py` now orchestrates.
     * **UI Structure:**
         * **Within `MapViewWidget` or an adjacent panel in `MainWindow`:**
             * A `QTextEdit` (read-only, styled) will be added to display the KML description. This could be part of the map view widget's layout or a separate widget that `MainWindow` manages and updates.
@@ -268,10 +269,10 @@ This report provides an in-depth, task-by-task breakdown for updating the "KML-E
         * **`PySide6` (`QtWidgets`, `QtWebEngineWidgets`, `QtCore`):** For UI elements and map display.
         * **`folium`**: To generate the map with the polygon.
         * **`simplekml`** (or `lxml`/`xml.etree.ElementTree`): For parsing KML file content to extract coordinates and description.
-        * **`core/utils.py` (`resource_path`)**: Used by `MapViewWidget` if loading local HTML/JS assets, and by `MainWindow` to construct paths.
     * **Connections of Modules and UI Elements:**
-        * `MainWindow` (table selection event) -> gets `kml_file_name` from `PolygonTableModel` and `kml_root_path` from `CredentialManager`.
-        * `MainWindow` -> calls method in `MapViewWidget` instance, passing the KML file path.
+        * `MainWindow` (table selection signal) -> `KMLHandler.handle_table_selection_changed()`.
+        * `KMLHandler` -> gets `kml_file_name` from `PolygonTableModel` and `kml_root_path` from `CredentialManager`.
+        * `KMLHandler` -> calls method in `MapViewWidget` instance, passing the KML file path.
         * `MapViewWidget` -> parses KML -> uses `folium` to update `QWebEngineView` content -> updates its internal description display UI element.
 
 ---
@@ -286,21 +287,22 @@ This report provides an in-depth, task-by-task breakdown for updating the "KML-E
     * **Functionality:** Implements an application-level distributed mutex for the main SQLite database file. Before any write operation, an app must acquire a lock by creating a `.db.lock` file. If the lock is already held, the app waits and informs the user. The lock file contains information about the current holder and expected duration, with mechanisms for heartbeats during long operations and stale lock detection/override.
     * **Alignment with v4 Modules & Modifications:** This is entirely **new** functionality. V4 had no shared access or locking.
     * **Folder and File Structure:**
-        * **New Module (Recommended):** `core/sync_manager.py`. This module will contain classes/functions for `DatabaseLockManager` and later `KMLFileLockManager`.
+        * **`core/sync_manager.py`**: This module contains classes/functions for `DatabaseLockManager` (and `KMLFileLockManager`).
+        * **`ui/lock_handlers.py` (New Module):** Defines `LockHandler` class which acts as an interface for UI-triggered locking operations, utilizing `DatabaseLockManager` and `KMLFileLockManager` from `core/sync_manager.py`.
         * **Lock File:** A file named e.g., `[main_db_filename].lock` (e.g., `dilasa_main_data_v5.db.lock`) will be created/deleted in the *same directory* as the main database file (path from `CredentialManager`).
     * **UI Structure:**
-        * Non-modal popups or status bar messages in `MainWindow` (e.g., "Database is in use by [nickname], trying again in X_s...") when waiting for a lock.
-        * A modal `QMessageBox` prompt for the user if a stale lock is detected and an override is being offered.
+        * Non-modal popups or status bar messages in `MainWindow` (e.g., "Database is in use by [nickname], trying again in X_s...") when waiting for a lock, managed via `LockHandler`.
+        * A modal `QMessageBox` prompt for the user if a stale lock is detected and an override is being offered, managed via `LockHandler`.
     * **Libraries Structure & Connections:**
         * **`os`**: For file existence checks, creation, deletion of lock files.
-        * **`json`** (or simple text I/O): For reading/writing metadata to the lock file (locking device ID/nickname, start time, expected duration, heartbeat, operation description).
+        * **`json`** (or simple text I/O): For reading/writing metadata to the lock file.
         * **`datetime`, `time`**: For timestamps, calculating durations, and timeouts.
-        * **`PySide6.QtCore.QTimer`**: For periodically re-checking the lock status when an app is waiting, without freezing the UI.
+        * **`PySide6.QtCore.QTimer`**: Used by `LockHandler` for periodically re-checking the lock status.
     * **Connections of Modules and UI Elements:**
-        * The `DatabaseLockManager` in `core/sync_manager.py` will provide methods like `acquire_db_lock(expected_duration, operation_description, current_device_id, current_device_nickname)` and `release_db_lock()`.
-        * **All modules performing database write operations** (e.g., `MainWindow` methods for API fetch, CSV import, saving evaluation status, and the KML editor save function when it updates DB metadata) **MUST** call `acquire_db_lock()` before the DB transaction and `release_db_lock()` in a `finally` block after the transaction (or on error).
-        * If `acquire_db_lock()` indicates the lock is held, the calling function in `MainWindow` will update the UI (status bar/popup) and start a `QTimer` to retry.
-        * `CredentialManager` provides the current app's device ID and nickname to be written into the lock file.
+        * `DatabaseLockManager` in `core/sync_manager.py` provides core lock logic.
+        * `LockHandler` in `ui/lock_handlers.py` wraps `DatabaseLockManager` methods (e.g., `acquire_db_lock`, `release_db_lock`) and handles UI feedback (timers, messages).
+        * Modules performing database write operations (e.g., `DataHandler`, `KMLHandler`) call methods on the `LockHandler` instance.
+        * `CredentialManager` provides the current app's device ID and nickname to be written into the lock file via `LockHandler`.
 
 ---
 **Task 9: KML File Locking Mechanism (from CA4 Part 3)**
@@ -308,26 +310,19 @@ This report provides an in-depth, task-by-task breakdown for updating the "KML-E
 * **Task Prompt:**
     * "Similar to database locking, we need to protect individual KML files from concurrent modification or deletion when an application is actively working on them, especially during editing or initial creation in the shared KML folder."
 * **Detailed Description:**
-    * **Functionality:** Implements an application-level lock for individual KML files. Before creating a new KML file or opening an existing KML for editing (which implies a future save/overwrite), an app must acquire a lock specific to that KML file (e.g., `[UUID].kml.lock`). This prevents other apps (especially the Central App during delete operations) from interfering with an active KML file operation.
+    * **Functionality:** Implements an application-level lock for individual KML files. Before creating a new KML file or opening an existing KML for editing, an app must acquire a lock specific to that KML file (e.g., `[UUID].kml.lock`).
     * **Alignment with v4 Modules & Modifications:** This is entirely **new** functionality.
     * **Folder and File Structure:**
-        * The `KMLFileLockManager` logic will reside in `core/sync_manager.py` (alongside `DatabaseLockManager`).
-        * **Lock Files:** For a KML file `[UUID].kml`, a corresponding lock file `[UUID].kml.lock` will be created/deleted in the *same shared KML folder* (path from `CredentialManager`).
+        * `KMLFileLockManager` logic resides in `core/sync_manager.py`.
+        * `LockHandler` in `ui/lock_handlers.py` utilizes `KMLFileLockManager`.
+        * **Lock Files:** For a KML file `[UUID].kml`, a corresponding lock file `[UUID].kml.lock` will be created/deleted in the *same shared KML folder*.
     * **UI Structure:**
-        * If a user tries to edit a KML and the `.kml.lock` file already exists (and is held by another user), `MainWindow` will show a `QMessageBox` or status message: "KML file [filename] is currently locked by [nickname]. Cannot edit now."
-        * Central App: If a delete operation (single or bulk) encounters a locked KML file, a summary message at the end of the operation will inform the user which files were skipped due to locks.
-        * Prompts for stale KML lock overrides, similar to DB stale locks but potentially with shorter timeout considerations.
-    * **Libraries Structure & Connections:**
-        * **`os`, `json` (or simple text I/O), `datetime`, `time`**: For lock file operations.
-        * **`PySide6.QtCore.QTimer`**: If waiting for a KML file lock.
+        * UI feedback (messages, prompts for stale locks) handled by `LockHandler` and displayed by `MainWindow`.
+    * **Libraries Structure & Connections:** (Same as Task 8 for lock file operations)
     * **Connections of Modules and UI Elements:**
-        * The `KMLFileLockManager` in `core/sync_manager.py` will provide methods like `acquire_kml_lock(kml_filename, current_device_id, current_device_nickname)` and `release_kml_lock(kml_filename)`.
-        * **KML Creation (Task 5 - API Fetch, Task 10 - CSV Import):** Before `simplekml.save()`, `acquire_kml_lock()` is called. `release_kml_lock()` is called after successful save or on error.
-        * **KML Editing (Task 11 - KML Editor):**
-            * When "Edit" button is clicked, `acquire_kml_lock()` for the target KML. If it fails, disallow editing.
-            * Lock is held during the editing session.
-            * `release_kml_lock()` is called when "Save" (after file write) or "Cancel" is clicked.
-        * **KML Deletion (Central App only, in `MainWindow` methods like `handle_delete_checked_rows`):** Before attempting to delete a KML file, the Central App calls a method like `can_delete_kml(kml_filename)` which checks for the presence of `[kml_filename].lock`. If locked, deletion of that file is skipped.
+        * `KMLFileLockManager` in `core/sync_manager.py` provides core KML lock logic.
+        * `LockHandler` in `ui/lock_handlers.py` wraps `KMLFileLockManager` methods.
+        * `DataHandler` (for KML creation during import) and `KMLHandler` (for KML editing/saving) call methods on the `LockHandler` instance to acquire/release KML file locks.
 
 ---
 **Phase 4: Enhanced Features & UI Refinements**
@@ -344,8 +339,8 @@ This report provides an in-depth, task-by-task breakdown for updating the "KML-E
         * For each valid row:
             1.  Processes data (UTM parsing, etc.) using `core/data_processor.py`.
             2.  Generates a KML file with dynamic description based on other columns in the CSV.
-            3.  Saves the KML file to the designated KML folder (using KML file lock).
-            4.  Saves all relevant metadata (including KML filename, creator's device ID/nickname from `CredentialManager`, "Created" status) to the database (using DB lock).
+            3.  Saves the KML file to the designated KML folder (using KML file lock via `LockHandler`).
+            4.  Saves all relevant metadata (including KML filename, creator's device ID/nickname from `CredentialManager`, "Created" status) to the database (using DB lock via `LockHandler`).
         * Handles duplicates based on `response_code` (skip and log).
         * Provides user feedback via `APIImportProgressDialog`.
     * **Functionality (Template Export CSV):**
@@ -355,11 +350,16 @@ This report provides an in-depth, task-by-task breakdown for updating the "KML-E
         * **`core/data_processor.py`**:
             * **Modification (`CSV_HEADERS` constant):** Update to include all new v5 mandatory headers.
             * **Modification (`process_csv_row_data` function):** Revise to validate for new mandatory columns. Its output dictionary must align with the v5 DB schema and provide enough info for KML generation.
-        * **`ui/main_window.py` (`handle_import_csv` method)**:
-            * **Major Refactor:** This method will now mirror the complexity of `handle_fetch_from_api` (Task 5), orchestrating CSV row reading -> `data_processor` -> KML generation (`kml_generator`) -> KML save (with KML lock) -> DB save (with DB lock).
-            * **New Method (e.g., `handle_export_csv_template`):** This new method will define the header list and use `QFileDialog.getSaveFileName` to allow the user to save the template.
-        * **`core/kml_generator.py`**: Used as in Task 5 for KML generation.
-    * **Folder and File Structure:** Modifications to existing core and UI modules.
+        * **`ui/main_window.py` (`handle_import_csv` method and `handle_export_csv_template` method)**:
+            * **Major Refactor:** The `handle_import_csv` and `handle_export_csv_template` methods in `MainWindow` now primarily act as entry points, delegating the core logic for CSV import, processing, KML generation during import, DB saving, and CSV template export to the `DataHandler` class.
+        * **`ui/data_handlers.py` (New Module):**
+            * **`DataHandler` class:** This new class encapsulates the primary logic for CSV import/export.
+                * Handles reading CSV files, iterating through rows, and coordinating with `core.data_processor` for data validation and structuring.
+                * Orchestrates KML generation (via `core.kml_generator`) and saving of KML files (with KML lock via `LockHandler`) for each valid imported CSV record.
+                * Manages saving metadata to the database (via `DatabaseManager` and with DB lock via `LockHandler`).
+                * Implements the logic for exporting a CSV template.
+        * **`core/kml_generator.py`**: Used by `DataHandler` for KML generation during CSV import.
+    * **Folder and File Structure:** Modifications to existing core and UI modules. Introduction of `ui/data_handlers.py`.
     * **UI Structure:**
         * Existing "Import CSV" action (`QAction` and toolbar button) in `MainWindow` triggers the enhanced import.
         * **New UI Element:** A new `QAction` (e.g., "Export CSV Template...") added to the "File" or "Data" menu in `MainWindow`.
@@ -369,8 +369,10 @@ This report provides an in-depth, task-by-task breakdown for updating the "KML-E
         * **`simplekml`**: For KML generation.
         * **`PySide6`**: For `QFileDialog` and UI elements.
     * **Connections of Modules and UI Elements:**
-        * `MainWindow` (UI "Import CSV") -> reads CSV -> calls `data_processor` for each row -> `kml_generator` -> saves KML (using `CredentialManager` for path, `sync_manager` for KML lock) -> `DatabaseManager` (using `sync_manager` for DB lock).
-        * `MainWindow` (UI "Export CSV Template") -> defines headers -> writes CSV file via `QFileDialog`.
+        * `MainWindow` (UI "Import CSV" action) -> calls `DataHandler.handle_import_csv()`.
+        * `DataHandler` -> reads CSV -> calls `core.data_processor` for each row -> `core.kml_generator` -> saves KML (using `CredentialManager` for path, `LockHandler` for KML lock) -> `DatabaseManager` (using `LockHandler` for DB lock).
+        * `MainWindow` (UI "Export CSV Template" action) -> calls `DataHandler.handle_export_csv_template()`.
+        * `DataHandler` -> defines headers -> writes CSV file via `QFileDialog`.
 
 ---
 **Task 11: KML Visual Editor (OpenLayers) (from CA3 Part 2)**
@@ -389,13 +391,22 @@ This report provides an in-depth, task-by-task breakdown for updating the "KML-E
         * "Save" action:
             * Retrieves modified geometry from OpenLayers and description from Qt panel.
             * Re-generates the KML file content (now potentially with a different number of points).
-            * Overwrites the KML file in the KML storage folder (acquiring/releasing KML file lock).
-            * Updates DB metadata (`last_edit_date`, `edit_count`, `editor_device_id/nickname`, `kml_file_status` to "Edited") (acquiring/releasing DB lock).
+            * Overwrites the KML file in the KML storage folder (acquiring/releasing KML file lock via `LockHandler`).
+            * Updates DB metadata (`last_edit_date`, `edit_count`, `editor_device_id/nickname`, `kml_file_status` to "Edited") (acquiring/releasing DB lock via `LockHandler`).
         * "Cancel" action: Discards all changes.
     * **Alignment with v4 Modules & Modifications:**
-        * **`ui/widgets/map_view_widget.py`**: This widget will likely be heavily refactored or replaced by a new, dedicated `KMLEditorViewWidget` to encapsulate the `QWebEngineView` and the OpenLayers integration logic. The Folium-based display logic will be superseded by OpenLayers for this view when editing.
-        * **`core/kml_generator.py`**: Its functions (`add_polygon_to_kml_object`, `create_kml_description_for_placemark`) will be crucial for re-generating the KML content after edits. `add_polygon_to_kml_object` must be enhanced to handle a list of coordinates with a variable number of points, not just fixed P1-P4.
+        * **`ui/main_window.py` (`on_table_selection_changed` method):**
+            * **Refactor:** The logic for fetching a selected record's KML path and triggering its display in map/GE views has been **moved** from `MainWindow.on_table_selection_changed` to the `KMLHandler` class in `ui/kml_handlers.py`. `MainWindow` now calls the `KMLHandler` instance.
+        * **`ui/kml_handlers.py` (New Module):**
+            * **`KMLHandler` class:** This new class is responsible for:
+                * Handling KML display logic when table selection changes (receiving signals or being called by `MainWindow`).
+                * Interacting with `MapViewWidget` and `GoogleEarthViewWidget` to load and display KMLs.
+                * Managing KML saving operations initiated from the KML Editor, including KML file writes (with KML lock via `LockHandler`) and DB metadata updates (via `DatabaseManager` and DB lock via `LockHandler`).
+        * **`ui/widgets/map_view_widget.py` / `ui/widgets/kml_editor_view_widget.py` (KML Editor Widget):**
+            * This widget (whether it's a refactored `map_view_widget.py` or a new `kml_editor_view_widget.py`) will **delegate** its "Save" functionality. Instead of directly writing KML files or updating the database, it will call methods on the `KMLHandler` instance to perform these actions.
+        * **`core/kml_generator.py`**: Its functions (`add_polygon_to_kml_object`, `create_kml_description_for_placemark`) will be used by `KMLHandler` (or the KML Editor widget via `KMLHandler`) for re-generating KML content after edits. `add_polygon_to_kml_object` must be enhanced to handle a variable number of points.
     * **Folder and File Structure:**
+        * **New Module:** `ui/kml_handlers.py`.
         * **New/Modified Widget:** `ui/widgets/kml_editor_view_widget.py` (or heavily modified `map_view_widget.py`).
         * **New Web Assets Folder:** `assets/js_libs/openlayers/` (to store downloaded OpenLayers `ol.js`, `ol.css`, etc.). (Task discussed previously for bundling)
         * **New HTML/JS/CSS for Editor:**
@@ -417,23 +428,25 @@ This report provides an in-depth, task-by-task breakdown for updating the "KML-E
         * **`simplekml`**: Used by the Python side to parse the initial KML (if needed beyond what OpenLayers JS handles for loading) and, crucially, to re-generate and save the KML file from the (potentially modified) geometry and description data.
         * **`json`** (Python built-in): Likely used by `QWebChannel` or custom JS-Python communication to pass geometry data (e.g., as GeoJSON).
     * **Connections of Modules and UI Elements:**
-        1.  `MainWindow` (on table selection) tells `KMLEditorViewWidget` the path to the KML file to load.
-        2.  `KMLEditorViewWidget` (Python) calls JS function `loadKmlToMap(kml_content_or_path)` via `QWebChannel`. It also loads KML name/description into Qt input widgets.
-        3.  User clicks "Edit KML" button (Qt).
-        4.  `KMLEditorViewWidget` (Python) calls JS function `enableMapEditing()` via `QWebChannel`.
-        5.  User edits geometry on the OpenLayers map (JS). JS uses OpenLayers interactions. Changes to geometry are communicated back to Python via `QWebChannel` (e.g., JS calls `pythonInterface.updateEditedGeometry(new_coords_geojson)`). Python stores this in a temporary "edited state" object.
-        6.  User edits name/description in Qt input widgets. Python updates the "edited state" object.
-        7.  User clicks "Save Changes" button (Qt).
-        8.  `KMLEditorViewWidget` (Python):
-            a.  Acquires KML file lock (via `sync_manager`).
-            b.  Acquires DB lock (via `sync_manager`).
-            c.  Uses `simplekml` and the "edited state" (geometry from JS, description from Qt) to generate new KML content.
+        1.  `MainWindow` (on table selection) -> calls `KMLHandler.handle_table_selection_changed()`.
+        2.  `KMLHandler` -> gets KML path (from `DatabaseManager` & `CredentialManager`) -> tells `KMLEditorViewWidget` (or equivalent map widget) to load KML.
+        3.  `KMLEditorViewWidget` (Python) calls JS function `loadKmlToMap(kml_content_or_path)` via `QWebChannel`. It also loads KML name/description into Qt input widgets.
+        4.  User clicks "Edit KML" button (Qt) in `KMLEditorViewWidget`.
+        5.  `KMLEditorViewWidget` (Python) calls JS function `enableMapEditing()` via `QWebChannel`.
+        6.  User edits geometry on the OpenLayers map (JS). JS uses OpenLayers interactions. Changes to geometry are communicated back to Python via `QWebChannel`. Python (in `KMLEditorViewWidget`) stores this in a temporary "edited state" object.
+        7.  User edits name/description in Qt input widgets within `KMLEditorViewWidget`. Python updates the "edited state" object.
+        8.  User clicks "Save Changes" button (Qt) in `KMLEditorViewWidget`.
+        9.  `KMLEditorViewWidget` (Python) -> calls `KMLHandler.save_edited_kml(edited_state_data)`.
+        10. `KMLHandler`:
+            a.  Acquires KML file lock (via `LockHandler`).
+            b.  Acquires DB lock (via `LockHandler`).
+            c.  Uses `simplekml` and the "edited state" to generate new KML content.
             d.  Saves the KML file.
             e.  Updates database metadata (`edit_count`, `last_edit_date`, `editor_device_id/nickname` from `CredentialManager`, `kml_file_status`="Edited") via `DatabaseManager`.
-            f.  Releases DB lock, then KML file lock.
-            g.  Calls JS function `disableMapEditing()` and reloads the map with the saved KML.
-            h.  Refreshes relevant row in `MainWindow`'s table.
-        9.  User clicks "Cancel Edit": Python discards "edited state", calls JS `disableMapEditing()`, reloads original KML in map. Releases KML file lock if acquired for edit mode initiation.
+            f.  Releases DB lock, then KML file lock (via `LockHandler`).
+            g.  Signals `KMLEditorViewWidget` to disable editing and reload map.
+            h.  Signals `MainWindow` to refresh table.
+        11. User clicks "Cancel Edit" in `KMLEditorViewWidget`: Python discards "edited state", calls JS `disableMapEditing()`, reloads original KML in map. Releases KML file lock if acquired.
 
 ---
 **Task 12: Refine Table Filters & Evaluation Status (from CA2 Part 3)**
@@ -444,11 +457,17 @@ This report provides an in-depth, task-by-task breakdown for updating the "KML-E
     * **Functionality:** Allows users to effectively filter the main data table based on the new v5 metadata, especially the `kml_file_status`. Ensures the `evaluation_status` feature (dropdown and row coloring) remains operational and accurate.
     * **Alignment with v4 Modules & Modifications:**
         * **`ui/main_window.py`**:
-            * **`PolygonFilterProxyModel` class**:
-                * **Modification (`filterAcceptsRow` method):** The logic for filtering by "Record Status" (v4) will be adapted/replaced to filter by the new `kml_file_status` column from the source model (`PolygonTableModel`). Users will select from "Created", "Errored", "Edited", "File Deleted" in the filter dropdown.
-                * Other filters (UUID, Date Added, Export Status) will be checked to ensure they correctly access data from the v5 `PolygonTableModel` structure.
-            * **`EvaluationStatusDelegate` and `PolygonTableModel.data()` for `BackgroundRole`**: This functionality is intended to be preserved. Ensure that the column index for `evaluation_status` is correctly used by the delegate and the `data()` method for background coloring, matching the updated `PolygonTableModel`.
-    * **Folder and File Structure:** Primarily modifications within `ui/main_window.py`.
+            * **Refactor:** The `PolygonTableModel`, `PolygonFilterProxyModel`, and `EvaluationStatusDelegate` classes are no longer defined in `ui/main_window.py`. `MainWindow` now imports and instantiates them from their new locations (`ui/table_models.py` and `ui/table_delegates.py`).
+        * **`ui/table_models.py` (New Module):**
+            * **`PolygonTableModel` class (Moved):** This class now resides here.
+                * **Modification (`setData` for `evaluation_status`):** Instead of directly updating the database, the `setData` method (when handling `evaluation_status` changes from the delegate) will now call a method on the `DataHandler` instance (e.g., `data_handler.update_evaluation_status_in_db(record_id, new_status)`) to perform the database update. This ensures that DB operations are centralized and can be managed by `LockHandler` via `DataHandler`.
+            * **`PolygonFilterProxyModel` class (Moved):** This class now resides here.
+                * **Modification (`filterAcceptsRow` method):** Logic for filtering by "Record Status" (v4) is adapted to filter by the new `kml_file_status` column from the source model (`PolygonTableModel`). Other filters (UUID, Date Added, Export Status) will be checked to ensure they correctly access data from the v5 `PolygonTableModel` structure.
+        * **`ui/table_delegates.py` (New Module):**
+            * **`EvaluationStatusDelegate` class (Moved):** This class now resides here. Its interaction with `PolygonTableModel` remains conceptually similar, but the model itself is now in `ui/table_models.py`.
+    * **Folder and File Structure:**
+        * **New Module:** `ui/table_models.py` (contains `PolygonTableModel`, `PolygonFilterProxyModel`).
+        * **New Module:** `ui/table_delegates.py` (contains `EvaluationStatusDelegate`).
     * **UI Structure:**
         * The "Filter Panel" `QGroupBox` in `MainWindow`.
         * The `QComboBox` for "Record Status" filter will now be populated with the values of `kml_file_status` (e.g., "All", "Created", "Errored", "Edited", "File Deleted").
@@ -456,11 +475,13 @@ This report provides an in-depth, task-by-task breakdown for updating the "KML-E
     * **Libraries Structure & Connections:**
         * **`PySide6` (`QtCore.QSortFilterProxyModel`, `QtWidgets`):** For the filter model and UI elements.
     * **Connections of Modules and UI Elements:**
-        * User changes filter criteria in the Filter Panel UI.
-        * Signals from these UI elements (e.g., `QLineEdit.textChanged`, `QComboBox.currentIndexChanged`) trigger methods in `MainWindow` like `apply_filters()`.
-        * `apply_filters()` calls setter methods on the `PolygonFilterProxyModel` instance (e.g., `set_kml_file_status_filter(text)`).
-        * `PolygonFilterProxyModel` re-evaluates its filter, causing the `QTableView` to update.
-        * Changes to `evaluation_status` via the delegate in the table trigger `PolygonTableModel.setData()`, which updates the DB (with DB lock) and emits `dataChanged` to refresh the view (including background color).
+        * User changes filter criteria in the Filter Panel UI in `MainWindow`.
+        * Signals from these UI elements trigger methods in `MainWindow` like `apply_filters()`.
+        * `MainWindow.apply_filters()` calls setter methods on the `PolygonFilterProxyModel` instance (now imported from `ui.table_models`).
+        * `PolygonFilterProxyModel` re-evaluates its filter, causing the `QTableView` in `MainWindow` to update.
+        * Changes to `evaluation_status` via the `EvaluationStatusDelegate` (in `ui.table_delegates`) in the table trigger `PolygonTableModel.setData()` (in `ui.table_models`).
+        * `PolygonTableModel.setData()` calls `DataHandler.update_evaluation_status_in_db()`.
+        * `DataHandler` performs the database update (with DB lock via `LockHandler`) and `PolygonTableModel` emits `dataChanged` to refresh the view.
 
 ---
 **Task 13: Revised KML Download/Export (from CA1 Part 4)**
@@ -473,23 +494,21 @@ This report provides an in-depth, task-by-task breakdown for updating the "KML-E
         * **"Multiple Individual KML Files" mode:** Copies the individual KML files (associated with checked table rows) directly from the KML storage folder to a user-selected output directory.
         * Updates the `kml_export_count` and `last_kml_export_date` in the database for each successfully exported record (requires DB lock).
     * **Alignment with v4 Modules & Modifications:**
-        * **`ui/main_window.py` (`handle_generate_kml` method)**:
-            * **Major Refactor:**
-                1.  Get list of checked item `db_id`s from `PolygonTableModel`.
-                2.  For each `db_id`, fetch the corresponding `kml_file_name` from the database (via `DatabaseManager.get_polygon_data_by_id()`).
-                3.  Construct the full path to each KML file using `kml_root_path` from `CredentialManager`.
-                4.  Filter out records where KML file doesn't exist or `kml_file_status` is "Errored" or "File Deleted".
-                5.  Prompt user for output folder and KML output mode (using `OutputModeDialog`).
-                6.  **If "Single" mode:**
-                    a.  Create a new `simplekml.Kml` object for the consolidated output.
-                    b.  For each valid source KML file: Parse it (e.g., using `simplekml` if it supports robust parsing of its own files, or `lxml`), extract its placemarks (name, description, geometry), and add them as new placemarks to the consolidated KML object. This is more complex than simply merging KML text. The easiest way if using `simplekml` might be to re-create each placemark's geometry and description in the new KML object.
-                    c.  Save the consolidated KML file.
-                7.  **If "Multiple" mode:**
-                    a.  For each valid source KML file, copy it (using `shutil.copy()`) to the user's output folder.
-                8.  For each record successfully included in the export, update its `kml_export_count` and `last_kml_export_date` in the database (this requires acquiring DB lock once for all updates).
-                9.  Refresh table to show updated export counts.
-        * **`core/kml_generator.py`**: Its role in *direct* KML generation during export is diminished, as KMLs already exist. However, its methods for creating placemark descriptions or structuring KML features might be reused if reconstructing placemarks for the "Single Consolidated" mode.
-    * **Folder and File Structure:** Reads KMLs from the configured KML storage folder. Writes exported KMLs to user-chosen location.
+        * **`ui/main_window.py` (`handle_generate_kml` method):**
+            * **Major Refactor:** The `handle_generate_kml` method in `MainWindow` now primarily acts as an entry point, delegating the core logic for KML export to the `DataHandler` class in `ui/data_handlers.py`.
+        * **`ui/data_handlers.py` (`DataHandler` class):**
+            * **`handle_generate_kml` method:** This method now contains the detailed logic for KML export.
+                * Gets list of checked item `db_id`s from `PolygonTableModel`.
+                * Fetches `kml_file_name` from `DatabaseManager` for each `db_id`.
+                * Constructs full KML paths using `kml_root_path` from `CredentialManager`.
+                * Filters records based on KML file existence and status.
+                * Prompts user for output folder and KML output mode (dialog initiated by `MainWindow`, result passed to `DataHandler`, or `DataHandler` shows dialog).
+                * **If "Single" mode:** Utilizes `core.kml_utils.merge_kml_files` (which uses `lxml`) to parse source KMLs and merge their placemarks into a new KML file.
+                * **If "Multiple" mode:** Copies the individual KML files using `shutil`.
+                * Updates database export statuses for processed records (via `DatabaseManager` and with DB lock via `LockHandler`).
+        * **`core/kml_generator.py`**: Its role in direct KML generation during export is diminished, as KMLs are pre-existing and merging is handled by `core.kml_utils`.
+        * **`core/kml_utils.py`**: Contains the `merge_kml_files` function, used by `DataHandler` for the "Single Consolidated KML File" mode.
+    * **Folder and File Structure:** Reads KMLs from the configured KML storage folder. Writes exported KMLs to user-chosen location. `ui/data_handlers.py` and `core/kml_utils.py` are key for this functionality.
     * **UI Structure:**
         * Existing "Generate KML for Checked Rows..." action and `OutputModeDialog` are used.
     * **Libraries Structure & Connections:**
@@ -498,8 +517,12 @@ This report provides an in-depth, task-by-task breakdown for updating the "KML-E
         * **`shutil`** (Python built-in): For file copying in "Multiple" mode.
         * **`PySide6`**: For `QFileDialog`.
     * **Connections of Modules and UI Elements:**
-        * `MainWindow` (UI action) -> `PolygonTableModel` (get checked IDs) -> `DatabaseManager` (get `kml_file_name`s) -> `CredentialManager` (get KML root path).
-        * Logic in `MainWindow` handles KML file operations (parsing/copying) and then calls `DatabaseManager` (with DB lock) to update export statuses.
+        * `MainWindow` (UI "Generate KML" action) -> calls `DataHandler.handle_generate_kml()`.
+        * `DataHandler` -> `PolygonTableModel` (get checked IDs) -> `DatabaseManager` (get `kml_file_name`s) -> `CredentialManager` (get KML root path).
+        * `DataHandler` handles KML file operations:
+            * For "Single" mode: calls `core.kml_utils.merge_kml_files`.
+            * For "Multiple" mode: uses `shutil.copy()`.
+        * `DataHandler` then calls `DatabaseManager` (with `LockHandler` for DB lock) to update export statuses.
 
 ---
 **Task 14: Central App Path Sharing UI & Connected App Network Checks (from CA4 Part 4)**

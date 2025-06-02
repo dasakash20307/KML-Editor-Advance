@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QMessageBox, QFileDialog, QApplication
 from core.data_processor import process_csv_row_data, CSV_HEADERS, process_api_row_data
 from core.api_handler import fetch_data_from_mwater_api
 from core.kml_generator import add_polygon_to_kml_object
+from core.kml_utils import merge_kml_files
 # from database.db_manager import DatabaseManager # Type hinted in __init__
 # from core.credential_manager import CredentialManager # Type hinted in __init__
 # from .lock_handlers import LockHandler # Type hinted in __init__
@@ -594,26 +595,30 @@ class DataHandler(QObject):
                         self.log_message_callback(f"Error copying KML '{record_info['kml_file_name']}': {e}", "error")
                 
             elif kml_output_mode == "single":
-                # Placeholder for actual KML merging logic
-                self.log_message_callback("Single KML export (merging) is not yet fully implemented with existing file logic.", "warning")
-                QMessageBox.information(self.main_window_ref, "Feature Pending", "Merging existing KML files into a single file is complex and will be implemented later. For now, please use 'Multiple' files mode if you need to export existing KMLs.")
-                # To prevent DB update if no files are actually processed for single mode yet:
-                # return False # Or handle differently if partial success is possible
+                source_kml_paths = [record['source_path'] for record in records_with_kml_files]
+                if not source_kml_paths:
+                    self.log_message_callback("No source KML paths found for merging.", "warning")
+                    # QMessageBox.information(self.main_window_ref, "KML Export", "No KML files available to merge.") # Already handled by records_with_kml_files check
+                    # return False # This would prevent the generic message at the end.
+                else:
+                    timestamp_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+                    count_str = len(source_kml_paths)
+                    merged_kml_filename = f"Consolidated_KML_{timestamp_str}_{count_str}files.kml"
+                    full_output_path = os.path.join(output_folder, merged_kml_filename)
 
-                # If we were to re-generate for single mode (temporary workaround, not user's request):
-                # timestamp_str = datetime.datetime.now().strftime('%d.%m.%y')
-                # consolidated_filename = f"Consolidate_ALL_KML_{timestamp_str}_{len(records_with_kml_files)}.kml"
-                # kml_doc = simplekml.Kml(name=f"Consolidated - {timestamp_str}")
-                # for record_info in records_with_kml_files:
-                #     db_record = self.db_manager.get_polygon_data_by_id(record_info['id']) # Re-fetch full record
-                #     if db_record and db_record.get('status') == 'valid_for_kml': # Check status again if re-generating
-                #         if add_polygon_to_kml_object(kml_doc, db_record):
-                #             ids_for_db_update.append(record_info['id'])
-                # if kml_doc.features:
-                #     kml_doc.save(os.path.join(output_folder, consolidated_filename))
-                #     files_exported_count = 1 # Only one file generated
-                # else:
-                #     self.log_message_callback("No features to save in consolidated KML.", "warning")
+                    self.log_message_callback(f"Attempting to merge {len(source_kml_paths)} KML files into '{full_output_path}'.", "info")
+                    
+                    merge_successful = merge_kml_files(source_kml_paths, full_output_path)
+                    
+                    if merge_successful:
+                        files_exported_count = 1 # One consolidated file is created
+                        # Add all DB IDs of the records that contributed to the merged file
+                        ids_for_db_update.extend([record['id'] for record in records_with_kml_files])
+                        self.log_message_callback(f"Successfully merged KMLs into '{merged_kml_filename}'.", "success")
+                    else:
+                        self.log_message_callback(f"Failed to merge KML files into '{merged_kml_filename}'. Check console/logs for details from kml_utils.", "error")
+                        # QMessageBox.warning(self.main_window_ref, "KML Merge Error", f"Could not merge KML files. See logs for details.")
+                        # No files_exported_count increment, no ids_for_db_update
 
             # Update export status in DB only if files were actually processed
             if ids_for_db_update:

@@ -120,7 +120,7 @@ The plan is divided into two sequential tasks: first, the code refactoring, and 
             *   Navigate to the descriptions for Task 8 and Task 9.
             *   In the "Folder and File Structure" section, explicitly mention that the `DatabaseLockManager` and `KMLFileLockManager` logic (which might currently be in `core/sync_manager.py`) will be *utilized* by the new `LockHandler` class in `ui/lock_handlers.py`. Clarify that the `LockHandler` acts as the interface for UI-triggered locking operations.
             *   In the "Connections of Modules and UI Elements" section for Tasks 8, 9, 10, 11, 12, and 13, update the descriptions to show that modules needing locks (e.g., `DataHandler`, `KMLHandler`, and potentially the KML Editor widget's save logic) will interact with the `LockHandler` instance, which in turn uses the underlying lock managers from `core/sync_manager.py`.
-        7.  **Review and Refine:** Read through the updated sections to ensure clarity, accuracy, and consistency with the new modular structure. Make sure the language clearly indicates what *was* in `MainWindow` and where it *has been moved* or *is now handled*.
+        7.  **Review and Refine:** Read through the updated sections to ensure clarity, accuracy, and consistency with the new modular structure. Make sure the language clearly indicates what *was* in `MainWindow` and where it *has been moved* or *is now handled`.
     *   **Prerequisites:** Task 1 (Modularize `ui/main_window.py`) must be completed before starting this task.
     *   **Impact:** Ensures project documentation accurately reflects the code structure.
 
@@ -150,3 +150,46 @@ Use the following template to log progress for each task:
 
 **Verification:**
 - [How the completion of this task was verified]
+```
+### Task: KML Merging Feature Implementation
+
+**Start Date:** 2025-06-03
+**End Date:** 2025-06-03
+**Status:** Completed
+**Effort:** 1.5 hours
+
+**Notes:**
+- Implemented the KML merging functionality for the "Single Consolidated KML File" export mode.
+- Added `lxml` dependency to `requirements.txt`.
+- Created `core/kml_utils.py` with the `merge_kml_files` function, which uses `lxml` to parse and merge Placemark elements from multiple KML files into a single output KML file.
+- Integrated the `merge_kml_files` function into `ui/data_handlers.py`'s `handle_generate_kml` method for the "single" output mode.
+- Encountered and resolved `ModuleNotFoundError: No module named 'lxml'` by ensuring `lxml` was installed specifically into the project's virtual environment.
+- Addressed persistent Pylance errors in `core/kml_utils.py` related to `lxml.etree.SubElement` parameters and XPath namespace handling. The XPath issue (`empty namespace prefix is not supported`) was resolved by consistently using prefixed XPath queries (`kml:Placemark`). A remaining Pylance `attrib` warning is considered cosmetic and does not affect runtime.
+
+**Code Changes:**
+- `requirements.txt`
+- `core/kml_utils.py`
+- `ui/data_handlers.py`
+
+**Verification:**
+- User to test the "Single" KML export functionality to confirm successful merging and file creation.
+
+### Task: Update `v5_task_and_Concept.md` Documentation
+
+**Start Date:** 2025-06-03
+**End Date:** 2025-06-03
+**Status:** Completed
+**Effort:** 1 hour
+
+**Notes:**
+- Modified `v5_task_and_Concept.md` to accurately reflect the code structure after the modularization of `ui/main_window.py`.
+- Updated the "Alignment with v4 Modules & Modifications" and "Connections of Modules and UI Elements" sections for Tasks 8, 9, 10, 11, 12, and 13.
+- Clarified that logic/classes previously in `ui/main_window.py` have been moved to `ui/data_handlers.py`, `ui/kml_handlers.py`, `ui/lock_handlers.py`, `ui/table_models.py`, and `ui/table_delegates.py`.
+- Updated module connection descriptions to reflect the new delegation patterns.
+- Encountered difficulties with `replace_in_file` due to the complexity and size of the document, leading to multiple failed attempts and necessitating a `write_to_file` fallback for comprehensive update.
+
+**Code Changes:**
+- `v5_task_and_Concept.md`
+
+**Verification:**
+- Confirmed by reviewing the updated content of `v5_task_and_Concept.md` to ensure accuracy and consistency with the new modular structure.
