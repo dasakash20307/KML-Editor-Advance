@@ -328,18 +328,15 @@ class MainWindow(QMainWindow):
         if self.db_manager is None: QMessageBox.critical(self, "Initialization Error", "Database Manager not provided."); sys.exit(1)
         if self.credential_manager is None: QMessageBox.critical(self, "Initialization Error", "Credential Manager not provided."); sys.exit(1)
 
-        # Initialize DatabaseLockManager (Basic from previous subtask)
+        # Initialize DatabaseLockManager
         self.db_lock_manager = None
         if self.db_manager and self.credential_manager:
             db_path = self.credential_manager.get_db_path()
             if db_path:
                 self.db_lock_manager = DatabaseLockManager(db_path, self.credential_manager, logger_callable=self.log_message)
-                # self.log_message("DatabaseLockManager initialized.", "info") # Logging will be added later
             else:
-                # self.log_message("Failed to initialize DatabaseLockManager: DB path not found.", "error")
                 QMessageBox.critical(self, "Locking Error", "Could not initialize database lock manager: DB path missing.")
         else:
-            # self.log_message("Failed to initialize DatabaseLockManager: DB Manager or Credential Manager missing.", "error")
             QMessageBox.critical(self, "Locking Error", "Could not initialize database lock manager: core components missing.")
 
         # KMLFileLockManager Initialization
@@ -348,7 +345,6 @@ class MainWindow(QMainWindow):
             kml_folder_path = self.credential_manager.get_kml_folder_path()
             if kml_folder_path:
                 self.kml_file_lock_manager = KMLFileLockManager(kml_folder_path, self.credential_manager, logger_callable=self.log_message)
-                # self.log_message("KMLFileLockManager initialized.", "info") # Log later
             else:
                 QMessageBox.critical(self, "Locking Error", "Could not initialize KML lock manager: KML folder path missing.")
         else:
@@ -357,47 +353,46 @@ class MainWindow(QMainWindow):
         self.db_lock_retry_timer = QTimer(self)
         self.db_lock_retry_timer.setSingleShot(True)
 
-        # Attributes for advanced lock retry logic
-        self.MAX_LOCK_RETRIES = 5
-        self.LOCK_RETRY_TIMEOUT_MS = 7000 # 7 seconds
+        # Attributes for DB lock retry logic
+        self.MAX_LOCK_RETRIES = 5 # Shared for DB and KML for now
+        self.LOCK_RETRY_TIMEOUT_MS = 7000 # Shared for DB and KML for now
         self.db_lock_retry_attempts = 0
-        self.current_retry_operation = None # Stores the method to call on retry (e.g., self.handle_delete_checked_rows)
-        self.current_retry_args = None    # Stores args for the retry_operation
-        self.current_retry_kwargs = None  # Stores kwargs for the retry_operation
+        self.current_retry_operation = None
+        self.current_retry_args = None
+        self.current_retry_kwargs = None
 
-        # Ensure the timer's timeout is connected
-        if hasattr(self, 'db_lock_retry_timer'): # Should exist
-            try: # Disconnect first to avoid multiple connections if this block runs multiple times
-                self.db_lock_retry_timer.timeout.disconnect(self._handle_lock_retry_timeout)
+        # Ensure DB timer's timeout is connected
+        if hasattr(self, 'db_lock_retry_timer'):
+            try:
+                self.db_lock_retry_timer.timeout.disconnect(self._handle_db_lock_retry_timeout)
             except (TypeError, RuntimeError):
-                pass # It's fine if it wasn't connected before
-            self.db_lock_retry_timer.timeout.connect(self._handle_lock_retry_timeout)
+                pass
+            self.db_lock_retry_timer.timeout.connect(self._handle_db_lock_retry_timeout)
         else:
-            # Fallback: Initialize if it was somehow missed. This should not ideally happen.
             self.db_lock_retry_timer = QTimer(self)
             self.db_lock_retry_timer.setSingleShot(True)
-            self.db_lock_retry_timer.timeout.connect(self._handle_lock_retry_timeout) # Connect DB timer here too
-            # self.log_message is not available yet in __init__, so use print for this unlikely case
+            self.db_lock_retry_timer.timeout.connect(self._handle_db_lock_retry_timeout)
             print("MainWindow WARN: db_lock_retry_timer was re-initialized during attribute patching in __init__.")
 
-        # KML Lock Retry Attributes (already present from previous steps, ensuring connection here)
+        # KML Lock Retry Attributes
         self.kml_lock_retry_attempts = 0
-        self.current_kml_retry_operation_type = None
+        self.current_kml_retry_operation = None # Stores the callable for KML retry
         self.current_kml_retry_args = None
         self.current_kml_retry_kwargs = None
-        if not hasattr(self, 'kml_lock_retry_timer'): # Should have been initialized
-            self.kml_lock_retry_timer = QTimer(self)
-            self.kml_lock_retry_timer.setSingleShot(True)
-            print("MainWindow WARN: kml_lock_retry_timer was re-initialized.")
 
-        # Connect KML timer (should be outside the db_lock_retry_timer's if/else)
-        if hasattr(self, 'kml_lock_retry_timer') and self.kml_lock_retry_timer: # Ensure kml_lock_retry_timer exists
+        self.kml_lock_retry_timer = QTimer(self) # Ensure timer is created
+        self.kml_lock_retry_timer.setSingleShot(True)
+
+        self.MAX_KML_LOCK_RETRIES = self.MAX_LOCK_RETRIES
+        self.KML_LOCK_RETRY_TIMEOUT_MS = self.LOCK_RETRY_TIMEOUT_MS
+
+        if hasattr(self, 'kml_lock_retry_timer') and self.kml_lock_retry_timer:
             try:
                 self.kml_lock_retry_timer.timeout.disconnect(self._handle_kml_lock_retry_timeout)
             except (TypeError, RuntimeError):
                 pass
             self.kml_lock_retry_timer.timeout.connect(self._handle_kml_lock_retry_timeout)
-        else:
+        else: # Should ideally not happen if initialized above
             print("MainWindow WARN: kml_lock_retry_timer was not properly initialized before attempting to connect timeout.")
 
 
@@ -639,12 +634,12 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'db_lock_retry_timer') and self.db_lock_retry_timer.isActive():
             self.db_lock_retry_timer.stop()
 
-    def _handle_lock_retry_timeout(self):
+    def _handle_db_lock_retry_timeout(self):
         # This method is called when the db_lock_retry_timer times out.
         # It re-invokes the originally requested public method.
         if self.current_retry_operation:
             operation_name = self.current_retry_operation.__name__ if hasattr(self.current_retry_operation, '__name__') else str(self.current_retry_operation)
-            self.log_message(f"Lock retry timer timeout. Re-attempting original operation: {operation_name}", "info")
+            self.log_message(f"DB Lock retry timer timeout. Re-attempting original operation: {operation_name}", "info") # Updated log
 
             operation_to_call = self.current_retry_operation
             args = self.current_retry_args if self.current_retry_args is not None else []
@@ -653,11 +648,139 @@ class MainWindow(QMainWindow):
             if callable(operation_to_call):
                 operation_to_call(*args, **kwargs)
             else:
-                self.log_message(f"Error: Stored retry operation {operation_name} is not callable.", "error")
+                self.log_message(f"Error: Stored DB retry operation {operation_name} is not callable.", "error") # Updated log
                 self._reset_retry_state()
         else:
-            self.log_message("MainWindow WARN: _handle_lock_retry_timeout called with no current_retry_operation.", "warning")
+            self.log_message("MainWindow WARN: _handle_db_lock_retry_timeout called with no current_retry_operation (DB).", "warning") # Updated log
             self._reset_retry_state()
+
+    # --- KML Lock Retry Framework ---
+    def _reset_kml_retry_state(self):
+        self.kml_lock_retry_attempts = 0
+        self.current_kml_retry_operation = None # Changed from current_kml_retry_operation_type
+        self.current_kml_retry_args = None
+        self.current_kml_retry_kwargs = None
+        if hasattr(self, 'kml_lock_retry_timer') and self.kml_lock_retry_timer.isActive():
+            self.kml_lock_retry_timer.stop()
+
+    def _handle_kml_lock_retry_timeout(self):
+        if not self.current_kml_retry_operation: # Check the callable
+            self.log_message("KML Lock retry timeout with no operation stored. Resetting.", "warning")
+            self._reset_kml_retry_state()
+            return
+
+        operation_name = getattr(self.current_kml_retry_operation, '__name__', 'Unnamed KML operation')
+
+        if self.kml_lock_retry_attempts > 0:
+            self.log_message(f"KML Lock retry timer timeout for {operation_name}. Attempts left: {self.kml_lock_retry_attempts}", "info")
+            self.kml_lock_retry_attempts -= 1
+
+            operation_to_call = self.current_kml_retry_operation
+            args = self.current_kml_retry_args if self.current_kml_retry_args is not None else []
+            kwargs = self.current_kml_retry_kwargs if self.current_kml_retry_kwargs is not None else {}
+
+            self.log_message(f"Retrying {operation_name}. Attempts left: {self.kml_lock_retry_attempts}", "debug")
+
+            if callable(operation_to_call):
+                operation_to_call(*args, **kwargs)
+            else:
+                self.log_message(f"Error: Stored KML retry operation {operation_name} is not callable.", "error")
+                self._reset_kml_retry_state()
+        else:
+            self.log_message(f"Max KML lock retries reached for {operation_name}. Operation aborted.", "error")
+            QMessageBox.warning(self, "KML Lock Busy",
+                                f"Could not acquire lock for KML operation '{operation_name}' after multiple retries. Please try again later.")
+            self._reset_kml_retry_state()
+
+    def _execute_kml_operation_with_lock(self, kml_filename: str, operation_callable: callable,
+                                         operation_type_for_retry: str, # Description for logging/display
+                                         original_public_method_ref: callable,
+                                         original_public_method_args: tuple,
+                                         original_public_method_kwargs: dict,
+                                         *args_for_op_callable, **kwargs_for_op_callable):
+        if not self.kml_file_lock_manager:
+            self.log_message(f"Cannot perform '{operation_type_for_retry}' on '{kml_filename}': KMLFileLockManager not initialized.", "critical")
+            QMessageBox.critical(self, "Critical Error", "KML File Lock Manager not available. Please restart.")
+            return None
+
+        is_new_retry_series = not (self.current_kml_retry_operation == original_public_method_ref and
+                                   self.current_kml_retry_args == original_public_method_args and
+                                   self.current_kml_retry_kwargs == original_public_method_kwargs)
+
+        if is_new_retry_series:
+            self._reset_kml_retry_state()
+            self.kml_lock_retry_attempts = self.MAX_KML_LOCK_RETRIES
+
+        lock_status = self.kml_file_lock_manager.acquire_kml_lock(kml_filename, operation_description=operation_type_for_retry)
+        result = None
+
+        if lock_status is True:
+            self.log_message(f"KML lock acquired for '{kml_filename}' ({operation_type_for_retry}). Executing.", "info")
+            self._reset_kml_retry_state()
+            try:
+                result = operation_callable(*args_for_op_callable, **kwargs_for_op_callable)
+            except Exception as e:
+                self.log_message(f"Exception during KML locked operation '{operation_type_for_retry}' on '{kml_filename}': {e}", "error")
+                QMessageBox.critical(self, "Operation Error", f"An error occurred during '{operation_type_for_retry}' on '{kml_filename}':\n{e}")
+                result = None
+            finally:
+                self.kml_file_lock_manager.release_kml_lock(kml_filename)
+            return result
+
+        elif lock_status == "STALE_LOCK_DETECTED":
+            self._reset_kml_retry_state()
+            lock_info = self.kml_file_lock_manager.get_kml_lock_info(kml_filename)
+            holder_nickname = lock_info.get('holder_nickname', 'Unknown') if lock_info else 'Unknown'
+
+            reply = QMessageBox.question(self, "Stale KML Lock",
+                                         f"KML file '{kml_filename}' is locked by '{holder_nickname}', but the lock appears stale.\nDo you want to override it?",
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.Yes:
+                if self.kml_file_lock_manager.force_acquire_kml_lock(kml_filename, operation_description=f"Forced {operation_type_for_retry}"):
+                    self.log_message(f"KML lock forcibly acquired for '{kml_filename}'. Executing '{operation_type_for_retry}'.", "info")
+                    try:
+                        result = operation_callable(*args_for_op_callable, **kwargs_for_op_callable)
+                    except Exception as e_force:
+                        self.log_message(f"Exception during KML locked op (force acquire) '{operation_type_for_retry}' on '{kml_filename}': {e_force}", "error")
+                        result = None
+                    finally:
+                        self.kml_file_lock_manager.release_kml_lock(kml_filename)
+                    return result
+                else:
+                    QMessageBox.critical(self, "Lock Override Failed", f"Failed to override the stale KML lock for '{kml_filename}'.")
+                    return None
+            else:
+                self.log_message(f"User chose not to override stale KML lock for '{kml_filename}'. Operation '{operation_type_for_retry}' aborted.", "info")
+                return None
+
+        elif lock_status is False: # Busy
+            if self.kml_lock_retry_attempts > 0:
+                self.current_kml_retry_operation = original_public_method_ref
+                self.current_kml_retry_args = original_public_method_args
+                self.current_kml_retry_kwargs = original_public_method_kwargs
+
+                self.log_message(f"KML file '{kml_filename}' is locked. Will retry '{operation_type_for_retry}'. Attempts left: {self.kml_lock_retry_attempts}", "warning")
+                self.update_status_bar(f"KML file '{kml_filename}' is locked. Retrying {self.kml_lock_retry_attempts} more times...")
+                if hasattr(self, 'kml_lock_retry_timer'):
+                    self.kml_lock_retry_timer.start(self.KML_LOCK_RETRY_TIMEOUT_MS)
+                return "RETRYING"
+            else: # No attempts left (self.kml_lock_retry_attempts was already decremented by handler or this is first try and it's 0)
+                self.log_message(f"Max KML lock retries will be reached for '{kml_filename}' ({operation_type_for_retry}) if current attempt fails or no retries configured. Operation aborted.", "error")
+                QMessageBox.warning(self, "KML File Busy", f"KML file '{kml_filename}' is locked by another process. Please try again later.")
+                self._reset_kml_retry_state()
+                return None
+
+        elif lock_status == "ERROR":
+            self.log_message(f"Error acquiring KML lock for '{kml_filename}' ({operation_type_for_retry}).", "error")
+            QMessageBox.critical(self, "KML Lock Error", f"An error occurred while trying to lock KML file '{kml_filename}'. Check logs.")
+            self._reset_kml_retry_state()
+            return None
+
+        self.log_message(f"Unhandled KML lock status '{lock_status}' for '{kml_filename}'. Operation aborted.", "error") # Changed from self._log to self.log_message
+        self._reset_kml_retry_state()
+        return None
+
+    # --- End KML Lock Retry Framework ---
 
     def _execute_db_operation_with_lock(self, operation_callable, operation_desc, lock_duration=60,
                                         retry_callable_for_timer=None,
@@ -1281,3 +1404,5 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 self.log_message(f"Error deleting temp KML {self.current_temp_kml_path}:{e}","error")
         super().closeEvent(event)
+
+[end of ui/main_window.py]
