@@ -1404,5 +1404,3 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 self.log_message(f"Error deleting temp KML {self.current_temp_kml_path}:{e}","error")
         super().closeEvent(event)
-
-[end of ui/main_window.py]
