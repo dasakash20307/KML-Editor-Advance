@@ -199,7 +199,7 @@ class DataHandler(QObject):
             kml_saved_successfully = False
             lock_acquired_for_kml = False
             full_kml_path = os.path.join(kml_root_path, kml_file_name)
-            db_data = processed_flat.copy()
+            db_data = processed_flat.copy() # status is still in db_data here
 
             if processed_flat.get('status') == 'valid_for_kml':
                 kml_op_description = f"Creating KML {kml_file_name} during import from {source_description}"
@@ -255,7 +255,7 @@ class DataHandler(QObject):
             db_data['device_code'] = api_device_code if api_device_code else device_id
             db_data['editor_device_id'] = device_id
             db_data['editor_device_nickname'] = device_nickname
-            db_data.pop('status', None)
+            # db_data.pop('status', None) # <<< THIS LINE IS REMOVED TO KEEP STATUS IN DB_DATA
             final_error_messages = "\n".join(filter(None, current_errors))
             db_data['error_messages'] = final_error_messages if final_error_messages else None
             db_data["last_modified"] = datetime.datetime.now().isoformat()
@@ -517,72 +517,123 @@ class DataHandler(QObject):
             retry_callable_for_timer=self.handle_clear_all_data
         )
 
-    def handle_generate_kml(self, output_mode_dialog_class, kml_output_mode=None): # Pass OutputModeDialog class
+    def handle_generate_kml(self, output_mode_dialog_class, kml_output_mode=None):
         checked_db_ids = self.source_model.get_checked_item_db_ids()
         if not checked_db_ids:
-            QMessageBox.information(self.main_window_ref, "Generate KML", "No records checked.")
+            QMessageBox.information(self.main_window_ref, "Export KMLs", "No records checked.")
             return
 
-        records_data = [self.db_manager.get_polygon_data_by_id(db_id) for db_id in checked_db_ids]
-        valid_for_kml = [r for r in records_data if r and r.get('status') == 'valid_for_kml']
+        primary_kml_storage_path = self.credential_manager.get_kml_folder_path()
+        if not primary_kml_storage_path:
+            self.log_message_callback("Primary KML storage path not configured. Cannot export KMLs.", "error")
+            QMessageBox.critical(self.main_window_ref, "Configuration Error", "Primary KML storage path is not configured.")
+            return
+
+        records_with_kml_files = []
+        missing_kml_info = []
+        for db_id in checked_db_ids:
+            record = self.db_manager.get_polygon_data_by_id(db_id)
+            if record:
+                kml_file_name = record.get('kml_file_name')
+                if kml_file_name and isinstance(kml_file_name, str) and kml_file_name.strip():
+                    source_kml_path = os.path.join(primary_kml_storage_path, kml_file_name)
+                    if os.path.exists(source_kml_path):
+                        records_with_kml_files.append({
+                            'id': record.get('id'), # DB ID
+                            'uuid': record.get('uuid'),
+                            'kml_file_name': kml_file_name,
+                            'source_path': source_kml_path
+                        })
+                    else:
+                        missing_kml_info.append(f"DB ID {db_id} (UUID: {record.get('uuid', 'N/A')}): File '{kml_file_name}' not found.")
+                else:
+                    missing_kml_info.append(f"DB ID {db_id} (UUID: {record.get('uuid', 'N/A')}): KML file name missing in database.")
+            else:
+                missing_kml_info.append(f"DB ID {db_id}: Record not found in database.")
         
-        if not valid_for_kml:
-            QMessageBox.information(self.main_window_ref, "Generate KML", "None of the checked records are valid for KML generation (e.g. missing coordinates).")
+        if missing_kml_info:
+            self.log_message_callback(f"KML Export: Some checked records are missing KML files or data: {'; '.join(missing_kml_info)}", "warning")
+            QMessageBox.warning(self.main_window_ref, "KML Files Missing",
+                                "Could not find KML files for some checked records:\n- " + "\n- ".join(missing_kml_info) +
+                                "\n\nOnly records with existing KML files will be processed.")
+
+        if not records_with_kml_files:
+            QMessageBox.information(self.main_window_ref, "Export KMLs", "No valid KML files found for the selected records.")
             return
 
-        if kml_output_mode is None: # If not provided (e.g. called from menu)
-            dialog = output_mode_dialog_class(self.main_window_ref) # Use passed dialog class
+        if kml_output_mode is None:
+            dialog = output_mode_dialog_class(self.main_window_ref)
             kml_output_mode = dialog.get_selected_mode()
             if not kml_output_mode:
-                self.log_message_callback("KML generation cancelled (mode selection).", "info")
+                self.log_message_callback("KML export cancelled (mode selection).", "info")
                 return
         
         output_folder = QFileDialog.getExistingDirectory(self.main_window_ref, "Select Output Folder for KML Files", os.path.expanduser("~/Documents"))
         if not output_folder:
-            self.log_message_callback("KML generation cancelled (folder selection).", "info")
+            self.log_message_callback("KML export cancelled (folder selection).", "info")
             return
 
-        def do_kml_generation_operation():
-            self.log_message_callback(f"Generating KMLs to: {output_folder} (Mode: {kml_output_mode})", "info")
-            files_generated_count = 0
+        # Need to import shutil for file copying
+        import shutil
+
+        def do_kml_export_operation():
+            self.log_message_callback(f"Exporting KMLs to: {output_folder} (Mode: {kml_output_mode})", "info")
+            files_exported_count = 0
             ids_for_db_update = []
-            
-            if kml_output_mode == "single":
-                timestamp_str = datetime.datetime.now().strftime('%d.%m.%y')
-                consolidated_filename = f"Consolidate_ALL_KML_{timestamp_str}_{len(valid_for_kml)}.kml"
-                kml_doc = simplekml.Kml(name=f"Consolidated - {timestamp_str}")
-                for record_dict in valid_for_kml:
-                    if self.lock_handler.db_lock_manager: self.lock_handler.db_lock_manager.update_heartbeat() # Assuming heartbeat needed for long ops
-                    if add_polygon_to_kml_object(kml_doc, record_dict): # Expects a dict
-                        ids_for_db_update.append(record_dict['id'])
-                if kml_doc.features:
-                    kml_doc.save(os.path.join(output_folder, consolidated_filename))
-                    files_generated_count = 1
-            elif kml_output_mode == "multiple":
-                for record_dict in valid_for_kml:
+
+            if kml_output_mode == "multiple":
+                for record_info in records_with_kml_files:
                     if self.lock_handler.db_lock_manager: self.lock_handler.db_lock_manager.update_heartbeat()
-                    doc_name = record_dict.get('uuid', f"polygon_{record_dict['id']}")
-                    kml_doc = simplekml.Kml(name=doc_name)
-                    if add_polygon_to_kml_object(kml_doc, record_dict):
-                        kml_doc.save(os.path.join(output_folder, f"{doc_name}.kml"))
-                        ids_for_db_update.append(record_dict['id'])
-                        files_generated_count += 1
-            
-            for record_id in ids_for_db_update: # Update export status
-                if self.lock_handler.db_lock_manager: self.lock_handler.db_lock_manager.update_heartbeat()
-                self.db_manager.update_kml_export_status(record_id)
-
-            if ids_for_db_update: self.data_changed_signal.emit()
+                    dest_kml_path = os.path.join(output_folder, record_info['kml_file_name'])
+                    try:
+                        shutil.copy2(record_info['source_path'], dest_kml_path)
+                        files_exported_count += 1
+                        ids_for_db_update.append(record_info['id'])
+                        self.log_message_callback(f"Copied '{record_info['kml_file_name']}' to '{dest_kml_path}'", "info")
+                    except Exception as e:
+                        self.log_message_callback(f"Error copying KML '{record_info['kml_file_name']}': {e}", "error")
                 
-            msg = f"{files_generated_count} KML file(s) generated for {len(ids_for_db_update)} records." if files_generated_count > 0 else "No KML files were generated."
-            self.log_message_callback(msg, "success" if files_generated_count > 0 else "info")
-            QMessageBox.information(self.main_window_ref, "KML Generation", msg)
-            return True # Indicates success for lock handler
+            elif kml_output_mode == "single":
+                # Placeholder for actual KML merging logic
+                self.log_message_callback("Single KML export (merging) is not yet fully implemented with existing file logic.", "warning")
+                QMessageBox.information(self.main_window_ref, "Feature Pending", "Merging existing KML files into a single file is complex and will be implemented later. For now, please use 'Multiple' files mode if you need to export existing KMLs.")
+                # To prevent DB update if no files are actually processed for single mode yet:
+                # return False # Or handle differently if partial success is possible
 
-        estimated_duration = min(max(len(valid_for_kml) * 2, 30), 300)
+                # If we were to re-generate for single mode (temporary workaround, not user's request):
+                # timestamp_str = datetime.datetime.now().strftime('%d.%m.%y')
+                # consolidated_filename = f"Consolidate_ALL_KML_{timestamp_str}_{len(records_with_kml_files)}.kml"
+                # kml_doc = simplekml.Kml(name=f"Consolidated - {timestamp_str}")
+                # for record_info in records_with_kml_files:
+                #     db_record = self.db_manager.get_polygon_data_by_id(record_info['id']) # Re-fetch full record
+                #     if db_record and db_record.get('status') == 'valid_for_kml': # Check status again if re-generating
+                #         if add_polygon_to_kml_object(kml_doc, db_record):
+                #             ids_for_db_update.append(record_info['id'])
+                # if kml_doc.features:
+                #     kml_doc.save(os.path.join(output_folder, consolidated_filename))
+                #     files_exported_count = 1 # Only one file generated
+                # else:
+                #     self.log_message_callback("No features to save in consolidated KML.", "warning")
+
+            # Update export status in DB only if files were actually processed
+            if ids_for_db_update:
+                for record_id in ids_for_db_update:
+                    if self.lock_handler.db_lock_manager: self.lock_handler.db_lock_manager.update_heartbeat()
+                    self.db_manager.update_kml_export_status(record_id)
+                self.data_changed_signal.emit()
+                
+            msg = f"{files_exported_count} KML file(s) exported for {len(ids_for_db_update)} records." if files_exported_count > 0 else "No KML files were exported."
+            if kml_output_mode == "single" and files_exported_count == 0 : # Adjust message if single mode was placeholder
+                 msg = "Single KML export (merging) is pending implementation. No files were exported."
+
+            self.log_message_callback(msg, "success" if files_exported_count > 0 and not (kml_output_mode == "single" and files_exported_count == 0) else "info")
+            QMessageBox.information(self.main_window_ref, "KML Export", msg)
+            return True
+
+        estimated_duration = min(max(len(records_with_kml_files) * 1, 10), 300) # Copying is faster
         self.lock_handler._execute_db_operation_with_lock(
-            do_kml_generation_operation,
-            f"Generating KMLs and updating {len(valid_for_kml)} export statuses",
+            do_kml_export_operation,
+            f"Exporting {len(records_with_kml_files)} KML files",
             lock_duration=estimated_duration,
-            retry_callable_for_timer=lambda: self.handle_generate_kml(output_mode_dialog_class, kml_output_mode) # Pass current mode for retry
+            retry_callable_for_timer=lambda: self.handle_generate_kml(output_mode_dialog_class, kml_output_mode)
         )

@@ -14,7 +14,7 @@ class CredentialManager:
         "kml_line_color_hex": "#000000",  # Black
         "kml_line_width_px": 1,
         "kml_view_mode": "Outline and Fill",  # Options: "Outline and Fill", "Outline Only", "Fill Only"
-        "kml_zoom_offset": 0 # Integer, e.g., -2 to zoom out, +1 to zoom in from default fit.
+        "kml_max_zoom": 18 # Integer, e.g., 18 (typical max for many tile layers)
     }
 
     def __init__(self):
@@ -156,7 +156,7 @@ class CredentialManager:
             value_str = self._get_setting(key)
             if value_str is not None:
                 has_any_setting_from_db = True # At least one setting was found
-                if key in ["kml_fill_opacity_percent", "kml_line_width_px", "kml_zoom_offset"]:
+                if key in ["kml_fill_opacity_percent", "kml_line_width_px", "kml_max_zoom"]:
                     try:
                         settings_from_db[key] = int(value_str)
                     except ValueError:

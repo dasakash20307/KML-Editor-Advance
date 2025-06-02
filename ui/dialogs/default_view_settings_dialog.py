@@ -65,11 +65,11 @@ class DefaultViewSettingsDialog(QDialog):
         self.view_mode_combo.setToolTip("Select the default KML view mode")
         form_layout.addRow(QLabel("View Mode:"), self.view_mode_combo)
 
-        # 6. Zoom Level Offset
-        self.zoom_offset_spinbox = QSpinBox()
-        self.zoom_offset_spinbox.setRange(-5, 5) # Example range
-        self.zoom_offset_spinbox.setToolTip("Adjust zoom level after fitting to KML bounds (-5 to +5)")
-        form_layout.addRow(QLabel("Zoom Level Offset:"), self.zoom_offset_spinbox)
+        # 6. Maximum Zoom Level
+        self.max_zoom_spinbox = QSpinBox()
+        self.max_zoom_spinbox.setRange(1, 22) # Typical map zoom range (e.g., OSM goes up to 19-20, some higher)
+        self.max_zoom_spinbox.setToolTip("Set the maximum zoom level allowed for the map (e.g., 1-20).")
+        form_layout.addRow(QLabel("Maximum Zoom:"), self.max_zoom_spinbox)
 
         main_layout.addLayout(form_layout)
 
@@ -123,7 +123,7 @@ class DefaultViewSettingsDialog(QDialog):
         if view_mode in self.view_modes:
             self.view_mode_combo.setCurrentText(view_mode)
 
-        self.zoom_offset_spinbox.setValue(settings.get("kml_zoom_offset", CredentialManager.DEFAULT_KML_VIEW_SETTINGS["kml_zoom_offset"]))
+        self.max_zoom_spinbox.setValue(settings.get("kml_max_zoom", CredentialManager.DEFAULT_KML_VIEW_SETTINGS.get("kml_max_zoom", 18)))
 
 
     def _populate_fields_with_defaults(self):
@@ -142,7 +142,7 @@ class DefaultViewSettingsDialog(QDialog):
         if defaults["kml_view_mode"] in self.view_modes:
             self.view_mode_combo.setCurrentText(defaults["kml_view_mode"])
 
-        self.zoom_offset_spinbox.setValue(defaults["kml_zoom_offset"])
+        self.max_zoom_spinbox.setValue(defaults.get("kml_max_zoom", 18))
 
     def open_fill_color_dialog(self):
         current_color = QColor(self._fill_color_hex)
@@ -165,7 +165,7 @@ class DefaultViewSettingsDialog(QDialog):
             "kml_line_color_hex": self._line_color_hex,
             "kml_line_width_px": self.line_width_spinbox.value(),
             "kml_view_mode": self.view_mode_combo.currentText(),
-            "kml_zoom_offset": self.zoom_offset_spinbox.value()
+            "kml_max_zoom": self.max_zoom_spinbox.value()
         }
         return settings
 
@@ -219,7 +219,7 @@ if __name__ == '__main__':
             "kml_line_color_hex": "#aabbcc",
             "kml_line_width_px": 2,
             "kml_view_mode": "Outline Only",
-            "kml_zoom_offset": -2
+            "kml_max_zoom": 18 # Updated to match new setting
         }
         def get_kml_default_view_settings(self):
             print("Dummy CM: get_kml_default_view_settings called")
@@ -286,7 +286,8 @@ if __name__ == '__main__':
     dialog_to_save._line_color_hex = test_settings_to_save["kml_line_color_hex"]
     dialog_to_save.line_width_spinbox.setValue(test_settings_to_save["kml_line_width_px"])
     dialog_to_save.view_mode_combo.setCurrentText(test_settings_to_save["kml_view_mode"])
-    dialog_to_save.zoom_offset_spinbox.setValue(test_settings_to_save["kml_zoom_offset"])
+    # Assuming test_settings_to_save is updated to use kml_max_zoom
+    dialog_to_save.max_zoom_spinbox.setValue(test_settings_to_save.get("kml_max_zoom", 18))
 
     dialog_to_save.accept() # This will call save_kml_default_view_settings
 

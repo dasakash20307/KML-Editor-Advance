@@ -183,7 +183,10 @@ class MapViewWidget(QWidget):
         Creates a new Folium map, adds current features, adjusts view based on parameters,
         and updates the web view.
         """
-        zoom_offset = self.credential_manager.get_kml_default_view_settings().get("kml_zoom_offset", 0)
+        settings = self.credential_manager.get_kml_default_view_settings()
+        # zoom_offset is no longer used directly here for map init, but kept for point logic if needed
+        zoom_offset = settings.get("kml_zoom_offset", 0) # This key will be removed, but keep for now if point logic uses it
+        max_zoom_setting = settings.get("kml_max_zoom", 18) # Default to 18 if not found
 
         # Default map initialization parameters
         map_location = self._current_center
@@ -198,17 +201,17 @@ class MapViewWidget(QWidget):
         self.current_folium_map = folium.Map(
             location=map_location,
             zoom_start=map_zoom,
-            max_zoom=18,
+            max_zoom=max_zoom_setting, # Use the new setting
             tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
             attr='Esri World Imagery',
             control_scale=True
         )
-        folium.TileLayer('openstreetmap', name='OpenStreetMap', max_zoom=18).add_to(self.current_folium_map)
-        folium.TileLayer('CartoDB positron', name='CartoDB Positron (Light)', max_zoom=18).add_to(self.current_folium_map)
+        folium.TileLayer('openstreetmap', name='OpenStreetMap', max_zoom=max_zoom_setting).add_to(self.current_folium_map)
+        folium.TileLayer('CartoDB positron', name='CartoDB Positron (Light)', max_zoom=max_zoom_setting).add_to(self.current_folium_map)
         folium.TileLayer(
             tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-            attr='Esri', name='Esri Satellite (Default)', overlay=False, control=True, 
-            min_zoom=0, max_zoom=18
+            attr='Esri', name='Esri Satellite (Default)', overlay=False, control=True,
+            min_zoom=0, max_zoom=max_zoom_setting # Use the new setting
         ).add_to(self.current_folium_map)
 
         for feature_item in self._current_features: # Add current features
@@ -281,7 +284,17 @@ class MapViewWidget(QWidget):
         stroke_color = settings.get("kml_line_color_hex", CredentialManager.DEFAULT_KML_VIEW_SETTINGS["kml_line_color_hex"])
         stroke_width_val = settings.get("kml_line_width_px", CredentialManager.DEFAULT_KML_VIEW_SETTINGS["kml_line_width_px"])
         view_mode = settings.get("kml_view_mode", CredentialManager.DEFAULT_KML_VIEW_SETTINGS["kml_view_mode"])
-        zoom_offset = settings.get("kml_zoom_offset", CredentialManager.DEFAULT_KML_VIEW_SETTINGS["kml_zoom_offset"])
+        # zoom_offset is no longer the primary way to control zoom for polygons.
+        # max_zoom_setting is now used in _render_and_update_map.
+        # However, point logic might still use an offset concept if desired.
+        # For now, let's assume zoom_offset is effectively replaced by max_zoom for overall control.
+        # If a specific offset for points is still needed, it should be handled carefully.
+        # The previous change to point zoom calculation: `base_zoom_for_point - zoom_offset`
+        # might need to be re-evaluated if `zoom_offset` is removed from settings.
+        # Let's retrieve it for now, but be mindful.
+        zoom_offset = settings.get("kml_zoom_offset", 0) # This key will be removed from DEFAULT_KML_VIEW_SETTINGS
+                                                        # so this .get() will likely return 0 or the default from CredentialManager if that key is still there.
+                                                        # The new "kml_max_zoom" is used in _render_and_update_map.
 
         if view_mode == "Outline Only": fill_opacity_val = 0.0
         elif view_mode == "Fill Only": stroke_width_val = 0
