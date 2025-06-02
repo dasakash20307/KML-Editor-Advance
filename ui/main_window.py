@@ -29,7 +29,7 @@ from .dialogs.api_sources_dialog import APISourcesDialog
 from .dialogs.output_mode_dialog import OutputModeDialog
 from .dialogs.default_view_settings_dialog import DefaultViewSettingsDialog
 from .dialogs import APIImportProgressDialog
-from .widgets.map_view_widget import MapViewWidget
+from .widgets.kml_editor_view_widget import KMLEditorViewWidget # UPDATED
 from .widgets.google_earth_webview_widget import GoogleEarthWebViewWidget
 from .table_models import PolygonTableModel, PolygonFilterProxyModel
 from .table_delegates import EvaluationStatusDelegate
@@ -130,7 +130,9 @@ class MainWindow(QMainWindow):
             credential_manager=self.credential_manager,
             log_message_callback=self.log_message,
             map_stack=self.map_stack,
-            map_view_widget=self.map_view_widget,
+            # map_view_widget=self.map_view_widget, # OLD
+            kml_editor_view_widget=self.kml_editor_widget, # NEW
+            lock_handler=self.lock_handler, # NEW
             google_earth_view_widget=self.google_earth_view_widget,
             table_view=self.table_view,
             source_model=self.source_model,
@@ -225,10 +227,14 @@ class MainWindow(QMainWindow):
         self.data_handler.data_changed_signal.connect(self.load_data_into_table)
 
         # Connections to KMLHandler
-        self.table_view.selectionModel().selectionChanged.connect(self.on_table_selection_changed) # MainWindow's method will call KMLHandler's
+        self.table_view.selectionModel().selectionChanged.connect(self.kml_handler.on_table_selection_changed) # Directly connect to KMLHandler's method
         self.ge_instructions_action.triggered.connect(self.kml_handler._show_ge_instructions_popup)
-        if hasattr(self.kml_handler, 'kml_data_updated_signal'): # Check if signal exists
+        if hasattr(self.kml_handler, 'kml_data_updated_signal'):
              self.kml_handler.kml_data_updated_signal.connect(self.load_data_into_table)
+        
+        # Connection for saving KML from KMLEditorViewWidget
+        if hasattr(self.kml_editor_widget, 'save_triggered_signal'):
+            self.kml_editor_widget.save_triggered_signal.connect(self._handle_save_kml_changes_triggered)
 
 
     def _create_status_bar(self):
@@ -236,13 +242,15 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self._main_status_bar)
         self._main_status_bar.showMessage("Ready.",3000)
 
-    def _setup_main_content_area_models_views(self): # Split from _setup_main_content_area
+    def _setup_main_content_area_models_views(self):
         # This part needs to be called before DataHandler and KMLHandler instantiation
-        self.map_view_widget = MapViewWidget(self.credential_manager, self)
+        # self.map_view_widget = MapViewWidget(self.credential_manager, self) # OLD
+        self.kml_editor_widget = KMLEditorViewWidget(log_message_callback=self.log_message, parent=self) # NEW
         self.google_earth_view_widget = GoogleEarthWebViewWidget(self)
         self.map_stack = QStackedWidget(self)
-        self.map_stack.addWidget(self.map_view_widget)
-        self.map_stack.addWidget(self.google_earth_view_widget)
+        # self.map_stack.addWidget(self.map_view_widget) # OLD
+        self.map_stack.addWidget(self.kml_editor_widget) # NEW - KML Editor at index 0
+        self.map_stack.addWidget(self.google_earth_view_widget) # GE View at index 1
 
         self.source_model = PolygonTableModel(parent=self, db_manager_instance=self.db_manager)
         self.filter_proxy_model = PolygonFilterProxyModel(self)
@@ -283,62 +291,72 @@ class MainWindow(QMainWindow):
         self.table_view.setColumnWidth(PolygonTableModel.UUID_COL,130); self.table_view.setColumnWidth(PolygonTableModel.RESPONSE_CODE_COL,120); self.table_view.setColumnWidth(PolygonTableModel.EVALUATION_STATUS_COL,150); self.table_view.setColumnWidth(PolygonTableModel.FARMER_NAME_COL,150); self.table_view.setColumnWidth(PolygonTableModel.VILLAGE_COL,120); self.table_view.setColumnWidth(PolygonTableModel.DATE_ADDED_COL,140); self.table_view.setColumnWidth(PolygonTableModel.KML_FILE_NAME_COL,150); self.table_view.setColumnWidth(PolygonTableModel.KML_FILE_STATUS_COL,110); self.table_view.setColumnWidth(PolygonTableModel.EDIT_COUNT_COL,90); self.table_view.setColumnWidth(PolygonTableModel.LAST_EDIT_DATE_COL,140); self.table_view.setColumnWidth(PolygonTableModel.EDITOR_DEVICE_ID_COL,130); self.table_view.setColumnWidth(PolygonTableModel.EDITOR_NICKNAME_COL,130); self.table_view.setColumnWidth(PolygonTableModel.DEVICE_CODE_COL,140); self.table_view.setColumnWidth(PolygonTableModel.EXPORT_COUNT_COL,100); self.table_view.setColumnWidth(PolygonTableModel.LAST_EXPORTED_COL,140); self.table_view.setColumnWidth(PolygonTableModel.LAST_MODIFIED_COL,140)
 
         table_layout.addWidget(self.table_view); self.right_splitter.addWidget(table_container)
-        # self.table_view.selectionModel().selectionChanged.connect(self.on_table_selection_changed) # Moved to _connect_signals
-
+        
         log_container = QWidget(); log_layout = QVBoxLayout(log_container); log_layout.setContentsMargins(0,10,0,0); log_label = QLabel("Status and Logs:"); log_layout.addWidget(log_label); self.log_text_edit_qt_actual = QTextEdit(); self.log_text_edit_qt_actual.setReadOnly(True); self.log_text_edit_qt_actual.setFont(QFont("Segoe UI",9)); log_layout.addWidget(self.log_text_edit_qt_actual); self.right_splitter.addWidget(log_container)
         self.right_splitter.setStretchFactor(0,3); self.right_splitter.setStretchFactor(1,1); right_pane_layout.addWidget(self.right_splitter,1); self.main_splitter.addWidget(right_pane_widget)
         self.main_splitter.setStretchFactor(0,1); self.main_splitter.setStretchFactor(1,2); self.main_layout.addWidget(self.main_splitter,1)
 
     def toggle_all_checkboxes(self,state_int): self.source_model.set_all_checkboxes(Qt.CheckState(state_int))
 
-    def on_table_selection_changed(self,selected,deselected):
-        # This method now primarily handles map updates. KML/GE logic is delegated.
-        self.kml_handler.on_table_selection_changed(selected, deselected) # Delegate to KML Handler
+    # on_table_selection_changed is now primarily handled by KMLHandler,
+    # which is directly connected to table_view.selectionModel().selectionChanged.
+    # The old on_table_selection_changed in MainWindow can be removed or simplified if it had other duties.
+    # For now, let's remove the duplicated logic for map view updates from here.
+    # def on_table_selection_changed(self,selected,deselected):
+    #     # This method now primarily handles map updates. KML/GE logic is delegated.
+    #     # self.kml_handler.on_table_selection_changed(selected, deselected) # Delegate to KML Handler
+    #     pass # Logic moved to KMLHandler.on_table_selection_changed
 
-        # Keep map update logic here for now, or move to MapViewWidget listening to table selection
-        selected_proxy_indexes=self.table_view.selectionModel().selectedRows()
-        polygon_record=None
-        db_id = None
-        if selected_proxy_indexes:
-            source_model_index=self.filter_proxy_model.mapToSource(selected_proxy_indexes[0])
-            if source_model_index.isValid():
-                db_id_item=self.source_model.data(source_model_index.siblingAtColumn(PolygonTableModel.DB_ID_COL))
-                try:
-                    db_id=int(db_id_item)
-                    polygon_record=self.db_manager.get_polygon_data_by_id(db_id)
-                except (ValueError,TypeError): polygon_record=None
-                except Exception: polygon_record=None # General exception
 
-        # This part updates the MapViewWidget (non-GE, non-KML part of original method)
-        if self.map_stack.currentIndex() == 0: # Map View is active
-            if polygon_record and polygon_record.get('status') == 'valid_for_kml':
-                coords_lat_lon, utm_valid = [], True
-                for i in range(1, 5):
-                    e, n = polygon_record.get(f'p{i}_easting'), polygon_record.get(f'p{i}_northing')
-                    zn, zl = polygon_record.get(f'p{i}_zone_num'), polygon_record.get(f'p{i}_zone_letter')
-                    if None in [e, n, zn, zl]: utm_valid = False; break
-                    try:
-                        lat, lon = utm.to_latlon(e, n, int(zn), zl)
-                        coords_lat_lon.append((lat, lon))
-                    except Exception: utm_valid = False; break
-                if utm_valid and len(coords_lat_lon) == 4:
-                    self.map_view_widget.display_polygon(coords_lat_lon, coords_lat_lon[0])
-                elif hasattr(self.map_view_widget, 'clear_map'):
-                    self.map_view_widget.clear_map()
-            # If KML file exists but record not 'valid_for_kml' (e.g. no UTM), still try to load KML on map
-            elif polygon_record and polygon_record.get('kml_file_name'):
-                kml_file_name = polygon_record.get('kml_file_name')
-                main_kml_folder_path = self.credential_manager.get_kml_folder_path()
-                if kml_file_name and isinstance(kml_file_name, str) and kml_file_name.strip() and main_kml_folder_path:
-                    full_kml_path = os.path.join(main_kml_folder_path, kml_file_name.strip())
-                    if os.path.exists(full_kml_path):
-                        self.map_view_widget.load_kml_for_display(full_kml_path) # MapViewWidget needs this method
-                    # No DB update for missing file here, KMLHandler's on_table_selection_changed handles that
-                else: # Fallback to clear map if no valid KML path
-                    if hasattr(self.map_view_widget, 'clear_map'):
-                        self.map_view_widget.clear_map()
-            elif hasattr(self.map_view_widget, 'clear_map'): # Default clear
-                self.map_view_widget.clear_map()
+    def _handle_save_kml_changes_triggered(self):
+        self.log_message("MainWindow: Save KML changes triggered.", "info")
+        
+        # Retrieve necessary data from KMLEditorViewWidget
+        # These attributes (current_db_id, current_kml_filename) were set in KMLHandler.on_table_selection_changed
+        db_id = getattr(self.kml_editor_widget, 'current_db_id', None)
+        original_kml_filename = getattr(self.kml_editor_widget, 'current_kml_filename', None)
+        
+        edited_name = self.kml_editor_widget.placemark_name_edit.text()
+        edited_description = self.kml_editor_widget.placemark_description_edit.toPlainText()
+
+        if db_id is None or original_kml_filename is None:
+            self.log_message("Error: DB ID or original KML filename not available in KML Editor for saving.", "error")
+            QMessageBox.critical(self, "Save Error", "Cannot save changes: Missing context (DB ID or original filename).\nPlease re-select the item from the table.")
+            self.kml_editor_widget.exit_edit_mode(reload_original_kml=True) # Revert editor
+            return
+
+        # Define a callback for when JS returns the geometry
+        def _on_geometry_received(geometry_json_str):
+            self.log_message(f"MainWindow: Received geometry from JS: {geometry_json_str[:100]}...", "debug")
+            if geometry_json_str is None or geometry_json_str.lower() == "null":
+                self.log_message("Error: Failed to retrieve edited geometry from map. Save aborted.", "error")
+                QMessageBox.warning(self, "Save Error", "Could not retrieve edited geometry from the map. Save operation cancelled.")
+                self.kml_editor_widget.exit_edit_mode(reload_original_kml=True) # Revert editor UI
+                return
+
+            # Call KMLHandler to perform the save operation
+            save_success = self.kml_handler.save_edited_kml(
+                db_id, original_kml_filename, geometry_json_str, 
+                edited_name, edited_description
+            )
+            
+            # KMLHandler.save_edited_kml now handles reloading the KML into the editor or clearing it.
+            # It also handles user messages for success/failure.
+            # So, MainWindow just needs to ensure the editor exits edit mode if it's still in it,
+            # though KMLHandler.save_edited_kml should manage display_kml which calls exit_edit_mode.
+            # A failsafe call to exit_edit_mode might be okay if KMLHandler's display_kml doesn't always get called on failure paths.
+            if not save_success:
+                 # If save failed, KMLHandler should have reloaded original or cleared.
+                 # Ensure editor is out of edit mode.
+                self.kml_editor_widget.exit_edit_mode(reload_original_kml=True) # Ensure exit with original data on fail
+            else:
+                # On success, KMLHandler reloads the new KML which calls exit_edit_mode.
+                pass
+
+
+        # Request the edited geometry from JavaScript
+        self.kml_editor_widget.get_edited_data_from_js(_on_geometry_received)
+
 
     def refresh_api_source_dropdown(self):
         if hasattr(self,'api_source_combo_toolbar'):
@@ -364,9 +382,17 @@ class MainWindow(QMainWindow):
         self.toggle_ge_view_action.blockSignals(True);self.toggle_ge_view_button.blockSignals(True)
         self.toggle_ge_view_action.setChecked(checked);self.toggle_ge_view_button.setChecked(checked);self.toggle_ge_view_button.setText(f"GE View:{'ON'if checked else'OFF'}")
         self.toggle_ge_view_action.blockSignals(original_action_blocked);self.toggle_ge_view_button.blockSignals(original_button_blocked)
-        if checked:self.map_stack.setCurrentIndex(1);self.google_earth_view_widget.set_focus_on_webview()
-        else:self.map_stack.setCurrentIndex(0)
-        self.log_message(f"Google Earth View Toggled:{'ON'if checked else'OFF'}","info")
+        
+        current_map_index = 0 # Default to KML Editor view
+        if checked:
+            current_map_index = 1 # Google Earth View
+            self.google_earth_view_widget.set_focus_on_webview()
+        
+        self.map_stack.setCurrentIndex(current_map_index)
+        # Manually trigger selection change to update the newly visible map view
+        self.kml_handler.on_table_selection_changed(None, None) # Pass dummy selection to re-trigger logic
+        self.log_message(f"View Toggled. Active map index: {current_map_index} ({'GE View ON' if checked else 'KML Editor ON'})","info")
+
 
     def handle_about(self):QMessageBox.about(self,f"About {APP_NAME_MW}",f"<b>{APP_NAME_MW}</b><br>Version:{APP_VERSION_MW}<br><br>{ORGANIZATION_TAGLINE_MW}<br><br>Processes geographic data for KML generation.")
     def handle_show_ge_instructions(self): # This now calls KMLHandler's method
@@ -383,7 +409,7 @@ class MainWindow(QMainWindow):
 
     def open_default_kml_view_settings_dialog(self):
         dialog = DefaultViewSettingsDialog(self.credential_manager, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted: # Changed to QDialog.DialogCode.Accepted
+        if dialog.exec() == QDialog.DialogCode.Accepted: 
             self.log_message("Default KML view settings saved.", "info")
         else:
             self.log_message("Default KML view settings dialog cancelled.", "info")
@@ -395,7 +421,8 @@ class MainWindow(QMainWindow):
         except Exception as e:self.log_message(f"Error loading data into table:{e}","error");QMessageBox.warning(self,"Load Data Error",f"Could not load records:{e}")
 
     def closeEvent(self,event):
-        if hasattr(self,'map_view_widget') and self.map_view_widget: self.map_view_widget.cleanup()
+        # if hasattr(self,'map_view_widget') and self.map_view_widget: self.map_view_widget.cleanup() # OLD
+        if hasattr(self,'kml_editor_widget') and self.kml_editor_widget: self.kml_editor_widget.cleanup() # NEW
         if hasattr(self,'google_earth_view_widget') and hasattr(self.google_earth_view_widget,'cleanup'): self.google_earth_view_widget.cleanup()
         if hasattr(self,'db_manager') and self.db_manager: self.db_manager.close()
         if hasattr(self, 'kml_handler'): self.kml_handler.cleanup_temp_kml() # Cleanup temp KML
