@@ -1,7 +1,7 @@
 import os
 import json
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone # Added timezone
 
 # Try to import QMessageBox for stale lock prompting, but make it optional
 try:
