@@ -647,6 +647,8 @@ The implementation of Task 8 and its subsequent fixes involved a significant deb
 The successful implementation of Task 8 provides a critical mechanism for data integrity in a shared environment. The resolution of the subsequent runtime errors ensures the application is stable and usable with this new locking feature.
 ---
 ---
+[Task 9 Log File (Add Task 10 at Next or relevant next task)]
+---
 **Update Date:** 2025-06-02
 **Version:** Beta.v5.0.6.Dev-ADas
 **Author:** AI Assistant (Jules)
@@ -717,5 +719,80 @@ The implementation and integration of KML locking, along with subsequent related
 4.  **Incremental Testing:** Add temporary debug prints or simple assertions during development of complex logic to catch issues earlier.
 5.  **Robust Imports:** Ensure all necessary modules/objects are explicitly imported where first used.
 ---
+---
+[Task 10 Log File (Add Task 11 at Next or relevant next task)]
+---
+**Update Date:** 2025-06-08
+**Version:** Beta.v5.0.7.Dev-ADas (Reflects Task 10 completion)
+**Author:** AI Assistant (Jules)
+**Task Reference:** Task 10: Enhanced CSV Import & Template Export (from CA2 Part 2)
 
-[end of Project_Logfile.md]
+**Objective:**
+To update the CSV import functionality to align with new v5 data requirements, including KML generation and storage with appropriate locking. Also, to add a feature allowing users to export a CSV template to guide their data preparation.
+
+**Core Components Implemented/Modified:**
+
+1.  **`core/data_processor.py` (Significantly Modified):**
+    *   **`CSV_HEADERS` Constant:** Updated to include all mandatory V5 metadata columns (e.g., `uuid`, `response_code`, `farmer_name`, `village_name`, `block`, `district`, `proposed_area_acre`, 4-corner point data) and new example columns for data intended for KML descriptions (`kml_desc_survey_date`, `kml_desc_crop_type`, `kml_desc_notes`). Header names in the CSV file now directly match internal field names for consistency (e.g., `farmer_name` instead of "Name of the Farmer").
+    *   **`process_csv_row_data` Function:**
+        *   Revised to validate rows against the new V5 `CSV_HEADERS`.
+        *   Enhanced mandatory field checks (e.g., for `uuid`, `response_code`, `farmer_name`, `village_name`).
+        *   Ensures the output dictionary aligns with the V5 database schema and includes separate keys for the KML description example columns (e.g., `processed_flat['kml_desc_survey_date']`).
+        *   Status reporting (`valid_for_kml`, `error_missing_identifiers`, etc.) updated for V5 rules.
+    *   **Test Block (`if __name__ == '__main__':`)**: Updated to reflect changes to `CSV_HEADERS` and `process_csv_row_data`, including tests for KML description fields and various error conditions.
+
+2.  **`ui/data_handlers.py` (`DataHandler` Class - Enhanced):**
+    *   **`handle_export_csv_template()` (New Method):**
+        *   Generates a CSV header row using the updated `CSV_HEADERS.values()`.
+        *   Prompts the user for a save location using `QFileDialog.getSaveFileName` (defaulting to "v5_data_template.csv").
+        *   Writes the header row to a CSV file with `utf-8-sig` encoding.
+        *   Provides user feedback via logging and `QMessageBox`.
+    *   **`handle_import_csv()` (Refactored):**
+        *   Reads CSV data.
+        *   Defines a local worker function `do_csv_import_processing(rows)` which then calls `self._process_imported_data(rows, source_description, is_api_data=False)`.
+        *   This worker function execution is wrapped with `self.lock_handler._execute_db_operation_with_lock` to ensure the entire CSV batch import is under a database lock.
+    *   **`_process_imported_data()` (Significantly Enhanced for CSV):**
+        *   When `is_api_data` is `False`:
+            *   Calls the revised `process_csv_row_data(original_row_dict)`.
+            *   **DB Heartbeat:** `self.lock_handler.db_lock_manager.update_heartbeat()` is called at the start of each row's processing.
+            *   **KML Generation & Saving:**
+                *   For each valid row (`status == 'valid_for_kml'`), a KML file (`[UUID].kml`) is generated.
+                *   `KMLFileLockManager.acquire_kml_lock()` is used before KML creation/saving; stale locks are attempted to be overridden.
+                *   `simplekml.Kml()` and `add_polygon_to_kml_object()` (which uses `create_kml_description_for_placemark`) are used for KML content. The KML description fields from `processed_flat` (e.g. `kml_desc_survey_date`) are used by `create_kml_description_for_placemark`.
+                *   KML file is saved to the path from `CredentialManager`.
+                *   `KMLFileLockManager.release_kml_lock()` is called in a `finally` block.
+            *   **Database Metadata Preparation:**
+                *   `kml_file_name` and `kml_file_status` ("Created", "Errored", "Error - KML Lock Failed") are set.
+                *   `device_code`, `editor_device_id`, `editor_device_nickname` are set from `CredentialManager`.
+                *   `date_added` and `last_modified` are set to current processing time for new CSV records.
+                *   The `status` field from `processed_flat` is correctly popped before DB save.
+            *   Duplicate `response_code` check is maintained.
+            *   `APIImportProgressDialog` provides user feedback.
+
+3.  **`ui/main_window.py` (`MainWindow` Class - Modified):**
+    *   **`handle_export_csv_template()` (New Method):** Calls `self.data_handler.handle_export_csv_template()`.
+    *   **Menu Integration:** A new `QAction` ("Export CSV Template...") added to the "Data" menu, connected to `self.handle_export_csv_template`.
+
+**Debugging Journey & Key Fixes (General Observations from Task 10 Implementation):**
+
+*   **Clarity in `CSV_HEADERS`:** Ensured `CSV_HEADERS` in `core/data_processor.py` serves as the single source of truth for CSV column names, with its values being the exact strings appearing in the CSV file.
+*   **Locking Strategy for Batch Operations:** Confirmed that wrapping the entire CSV processing loop (within `handle_import_csv` calling `_process_imported_data`) inside `_execute_db_operation_with_lock` is the correct approach for ensuring atomicity at the batch level, with heartbeats essential for responsiveness.
+*   **KML Description Data Flow:** Verified that fields intended for KML descriptions (e.g., `kml_desc_survey_date`) are correctly extracted by `process_csv_row_data` and then utilized by `create_kml_description_for_placemark` (called by `add_polygon_to_kml_object`) during KML generation. These fields are specifically for the KML content and not stored as separate columns in the main `polygon_data` table.
+*   **Response Code Handling for CSV:** Corrected logic in `_process_imported_data` to accurately retrieve the `response_code` from CSV rows by looking up the actual header name (e.g., "Response Code" if that's the value in `CSV_HEADERS["response_code"]`) in the `original_row_dict`.
+
+**Alignment with Requirements:**
+*   **Enhanced CSV Import:** Functionality aligns with V5 data requirements. KML files are generated and stored with metadata. Locking mechanisms are used for KML files and database operations. Creator's device ID/nickname is stored. `APIImportProgressDialog` provides feedback. Duplicate handling based on `response_code` is maintained.
+*   **Template Export CSV:** Users can export a blank CSV file with V5 headers, including 4-corner point data and example KML description columns.
+*   **Module Alignment:**
+    *   `core/data_processor.py`: `CSV_HEADERS` and `process_csv_row_data` updated.
+    *   `ui/main_window.py`: Methods act as entry points to `DataHandler`; new QAction for template export added.
+    *   `ui/data_handlers.py`: `DataHandler` encapsulates core CSV import/export logic, KML generation orchestration, and DB saving.
+    *   `core/kml_generator.py`: Used by `DataHandler` for KML generation.
+
+**Notes for Future Tasks & Development Process:**
+
+1.  **Configuration for KML Description Fields:** If the list of fields that should go into the KML description becomes highly dynamic or user-configurable, consider moving the definition of these "KML description example columns" from `CSV_HEADERS` to a more dedicated configuration spot or making `create_kml_description_for_placemark` more flexible in how it selects fields.
+2.  **Granular Error Reporting in Batch Imports:** For large CSV imports, enhance `APIImportProgressDialog` or the logging to provide a more detailed summary of errors per row, perhaps allowing users to download a report of rows that failed and why.
+3.  **Testing with Diverse CSV Formats:** Always test CSV import with files from different sources, paying attention to encoding issues (UTF-8, UTF-8-SIG), line endings (CRLF, LF), and quoting/escaping variations if they arise. The current implementation uses `utf-8-sig` which is a good standard.
+4.  **Refining Stale Lock Overrides:** While stale lock detection is in place, the UI/UX for handling stale lock overrides, especially in batch processes like CSV import (where prompting for each file might be disruptive), could be refined. The current approach of automatically attempting override for KML locks during CSV import is a pragmatic choice for batch processing.
+5.  **Code Reusability between API and CSV Processing:** While `process_api_row_data` and `process_csv_row_data` are distinct, continually assess if common sub-logic (e.g., specific validation steps, point data structuring beyond initial parsing) can be refactored into shared utility functions within `core/data_processor.py` to reduce redundancy.

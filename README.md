@@ -8,7 +8,8 @@ The **Dilasa Advance KML Tool** is a Windows desktop application developed for D
 
 *   **Data Management:**
     *   **Data Ingestion (KML-First):**
-        *   Import farmer and plot data via user-provided CSV files or by fetching directly from configured mWater API sources.
+        *   Import farmer and plot data via user-provided CSV files (aligned with V5 metadata requirements, including automatic KML generation and storage per record) or by fetching directly from configured mWater API sources.
+        *   - **CSV Template Export:** Allows users to export a blank CSV file containing all V5 headers (mandatory metadata, 4-corner point data, and example KML description columns) to guide data preparation for import.
         *   **Immediate KML Generation:** For each valid record from an import, a KML file is immediately generated with a dynamic description (based on record data) and stored persistently in the user-configured KML storage folder. This KML file becomes the primary representation of the plot's geographic data.
         *   **Duplicate Handling:** The system checks for duplicate records based on `response_code` during the import process and skips already existing entries, logging the action.
     *   **Comprehensive Metadata Storage:**
@@ -40,7 +41,7 @@ The **Dilasa Advance KML Tool** is a Windows desktop application developed for D
 ## Main UI Components & Functions
 
 *   **Main Window:**
-    *   **Menu Bar:** Access to File (Export CSV), Data (Import CSV, Fetch from API, Manage API Sources, Delete Data), KML (Generate), View (Toggle Google Earth View), and Help (About, GE Instructions).
+    *   **Menu Bar:** Access to File (Export CSV), Data (Import CSV, Fetch from API, Manage API Sources, **Export CSV Template...**, Delete Data), KML (Generate), View (Toggle Google Earth View), and Help (About, GE Instructions).
     *   **Toolbar:** Quick access buttons for common actions like Import CSV, API Fetch, Toggle GE View, Generate KML, and Delete Checked Rows.
     *   **Map/Google Earth View Pane:** Displays either the Folium map or the Google Earth Web View.
     *   **Data Table Pane:**

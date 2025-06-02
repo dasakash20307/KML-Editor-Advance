@@ -193,3 +193,34 @@ Use the following template to log progress for each task:
 
 **Verification:**
 - Confirmed by reviewing the updated content of `v5_task_and_Concept.md` to ensure accuracy and consistency with the new modular structure.
+### Task: Task 10 - Enhanced CSV Import & Template Export (V5 Alignment)
+
+**Start Date:** 2025-06-08
+**End Date:** 2025-06-08
+**Status:** Completed
+**Effort:** (As per overall Task 10 execution)
+
+**Notes:**
+- This task focused on aligning CSV import/export functionalities with the V5 project requirements.
+- **Enhanced CSV Import:**
+    - `core/data_processor.py` was updated: `CSV_HEADERS` now reflects V5 standards (including example KML description columns), and `process_csv_row_data` was revised for V5 validation and data structuring.
+    - `ui/data_handlers.py` (`DataHandler` class) was significantly enhanced:
+        - The `_process_imported_data` method now correctly uses the V5-aligned `process_csv_row_data`.
+        - Implemented KML generation for each valid CSV row, including dynamic descriptions based on new CSV columns.
+        - KML file saving is managed with file locks (`KMLFileLockManager`).
+        - The entire CSV import batch operation in `handle_import_csv` is now wrapped in a database lock (`LockHandler._execute_db_operation_with_lock`) with heartbeats.
+        - V5 metadata (KML filename, "Created" status, creator's device ID/nickname) is stored in the database.
+- **CSV Template Export:**
+    - New functionality added to allow users to export a blank CSV template based on the V5 `CSV_HEADERS`.
+    - Implemented via `handle_export_csv_template` in `DataHandler` and a corresponding new `QAction` and method in `MainWindow`.
+- This task builds upon the modular structure established by previous refactoring (e.g., extensive use of `DataHandler`).
+- For a comprehensive breakdown of Task 10 implementation, debugging, and specific code changes, please refer to the entry for **Task 10** in `Project_Logfile.md`.
+
+**Code Changes:**
+- `core/data_processor.py`
+- `ui/data_handlers.py`
+- `ui/main_window.py`
+
+**Verification:**
+- Verified through successful execution of subtasks for updating `core/data_processor.py`, implementing CSV template export, and enhancing the CSV import logic in `DataHandler`.
+- Conceptual testing plan outlined for manual verification by the developer.
