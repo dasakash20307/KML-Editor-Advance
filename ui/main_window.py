@@ -364,7 +364,7 @@ class MainWindow(QMainWindow):
             # Fallback: Initialize if it was somehow missed. This should not ideally happen.
             self.db_lock_retry_timer = QTimer(self)
             self.db_lock_retry_timer.setSingleShot(True)
-            self.db_lock_retry_timer.timeout.connect(self._handle_lock_retry_timeout)
+        self.kml_lock_retry_timer.timeout.connect(self._handle_kml_lock_retry_timeout) # Connect KML timer
             # self.log_message is not available yet in __init__, so use print for this unlikely case
             print("MainWindow WARN: db_lock_retry_timer was re-initialized during attribute patching in __init__.")
 
@@ -778,19 +778,80 @@ class MainWindow(QMainWindow):
             if processed_flat.get('error_messages'):
                 if isinstance(processed_flat['error_messages'],str):current_errors.append(f"Data processing issues:{processed_flat['error_messages']}")
                 elif isinstance(processed_flat['error_messages'],list):current_errors.extend(processed_flat['error_messages'])
-            kml_file_name,kml_content_ok,kml_saved_successfully=f"{processed_flat['uuid']}.kml",False,False
+
+            kml_file_name = f"{processed_flat['uuid']}.kml"
+            kml_content_ok = False
+            kml_saved_successfully = False
+            lock_acquired_for_kml = False
+            full_kml_path = os.path.join(kml_root_path, kml_file_name)
+            db_data = processed_flat.copy() # Prepare db_data for status updates regardless of KML outcome
+
             if processed_flat.get('status')=='valid_for_kml':
-                kml_doc=simplekml.Kml()
-                try:
-                    kml_content_ok=add_polygon_to_kml_object(kml_doc,processed_flat)
-                    if not kml_content_ok:current_errors.append("Failed KML content gen.")
-                except Exception as e_kml_gen:kml_content_ok=False;current_errors.append(f"KML gen exception:{e_kml_gen}");self.log_message(f"KML Gen Ex for {processed_flat['uuid']}:{e_kml_gen}","error")
-                if kml_content_ok:
-                    full_kml_path=os.path.join(kml_root_path,kml_file_name)
-                    try:kml_doc.save(full_kml_path);kml_saved_successfully=True;self.log_message(f"KML saved:{full_kml_path}","info")
-                    except Exception as e_kml_save:kml_saved_successfully=False;error_msg=f"Failed KML save'{full_kml_path}':{e_kml_save}";current_errors.append(error_msg);self.log_message(error_msg,"error")
-            else:msg=f"Skipping KML gen for RC'{rc_from_row}'(UUID {processed_flat['uuid']}),status:'{processed_flat.get('status')}'";current_errors.append(msg);self.log_message(msg,"info")
-            db_data=processed_flat.copy();db_data['kml_file_name']=kml_file_name;db_data['kml_file_status']="Created"if kml_saved_successfully else"Errored"
+                kml_op_description = f"Creating KML {kml_file_name} during import from {source_description}"
+
+                if self.kml_file_lock_manager:
+                    kml_lock_status = self.kml_file_lock_manager.acquire_kml_lock(kml_file_name, operation_description=kml_op_description)
+
+                    if kml_lock_status is True:
+                        lock_acquired_for_kml = True
+                    elif kml_lock_status == "STALE_LOCK_DETECTED":
+                        lock_info = self.kml_file_lock_manager.get_kml_lock_info(kml_file_name)
+                        holder_nick = lock_info.get('holder_nickname', 'Unknown') if lock_info else 'Unknown'
+                        # No GUI interaction in this loop; default to not overriding for batch.
+                        # User can later use "force" options if needed, or a dedicated "fix stale locks" tool.
+                        self.log_message(f"Stale KML lock by '{holder_nick}' for '{kml_file_name}'. Skipping KML save. User can force later.", "warning")
+                        current_errors.append(f"KML stale lock by {holder_nick} for {kml_file_name}, not overridden in batch.")
+                        # Forcing override in batch is too risky without direct user input per file.
+                        # Consider if a global "force override stale locks" setting for import is desired in future.
+                        # For now, we treat stale as busy in batch mode.
+                        # Alternatively, could attempt force_acquire here if a specific flag is set.
+                        # For simplicity, let's treat stale as non-acquirable in batch:
+                        # lock_acquired_for_kml = False; # Ensure it's false
+                    elif kml_lock_status is False: # Busy
+                        self.log_message(f"KML file '{kml_file_name}' is busy (locked). Skipping KML save.", "warning")
+                        current_errors.append(f"KML lock busy for {kml_file_name}.")
+                    elif kml_lock_status == "ERROR":
+                        self.log_message(f"Error acquiring KML lock for '{kml_file_name}'. Skipping KML save.", "error")
+                        current_errors.append(f"KML lock acquisition error for {kml_file_name}.")
+                else: # kml_file_lock_manager not available
+                    self.log_message(f"KMLFileLockManager not available. Cannot ensure safe KML creation for {kml_file_name}.", "error")
+                    current_errors.append(f"KML lock manager unavailable for {kml_file_name}.")
+
+                if lock_acquired_for_kml:
+                    kml_doc=simplekml.Kml()
+                    try:
+                        kml_content_ok=add_polygon_to_kml_object(kml_doc,processed_flat)
+                        if not kml_content_ok: current_errors.append("Failed KML content generation.")
+                    except Exception as e_kml_gen:
+                        kml_content_ok=False; current_errors.append(f"KML generation exception: {e_kml_gen}")
+                        self.log_message(f"KML Gen Exception for {processed_flat['uuid']}: {e_kml_gen}","error")
+
+                    if kml_content_ok:
+                        try:
+                            kml_doc.save(full_kml_path)
+                            kml_saved_successfully=True
+                            self.log_message(f"KML saved: {full_kml_path}","info")
+                        except Exception as e_kml_save:
+                            kml_saved_successfully=False; error_msg=f"Failed KML save for '{full_kml_path}': {e_kml_save}"
+                            current_errors.append(error_msg); self.log_message(error_msg,"error")
+
+                    self.kml_file_lock_manager.release_kml_lock(kml_file_name) # Release lock
+                # If lock_acquired_for_kml is False, kml_saved_successfully remains False
+            else: # Not 'valid_for_kml'
+                msg=f"Skipping KML generation for RC '{rc_from_row}' (UUID {processed_flat['uuid']}), status: '{processed_flat.get('status')}'"
+                current_errors.append(msg); self.log_message(msg,"info")
+
+            # Update DB data based on KML processing outcome
+            db_data['kml_file_name']=kml_file_name
+            if kml_saved_successfully:
+                db_data['kml_file_status']="Created"
+            elif processed_flat.get('status')=='valid_for_kml' and not lock_acquired_for_kml : # Was valid, but lock prevented save
+                 db_data['kml_file_status'] = "Error - KML Lock Failed"
+                 # Error message for lock failure already added to current_errors
+            else: # Other errors (gen error, save error after lock, or not valid_for_kml)
+                 db_data['kml_file_status']="Errored"
+                 # Error messages from KML gen/save already added to current_errors
+
             api_device_code=processed_flat.get('device_code');db_data['device_code']=api_device_code if api_device_code else device_id
             db_data['editor_device_id']=device_id;db_data['editor_device_nickname']=device_nickname;db_data.pop('status',None)
             final_error_messages="\n".join(filter(None,current_errors));db_data['error_messages']=final_error_messages if final_error_messages else None
@@ -822,37 +883,187 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Delete Checked", "No records checked.")
             return
 
-        # Define the actual database operation
-        def db_operation():
-            # Confirmation dialog is part of the operation flow
-            if QMessageBox.question(self, "Confirm Delete",
-                                    f"Delete {len(checked_ids)} checked record(s) permanently?",
+        kml_folder_path = self.credential_manager.get_kml_folder_path()
+        if not kml_folder_path:
+            self.log_message("KML folder path not configured. Cannot check KML locks for deletion.", "error")
+            QMessageBox.critical(self, "Configuration Error", "KML folder path is not configured. KML files cannot be managed.")
+            return
+
+        if not self.kml_file_lock_manager:
+            self.log_message("KMLFileLockManager not available. Proceeding with DB deletion only, KML files will not be deleted or checked for locks.", "error")
+            QMessageBox.warning(self, "KML Lock Error", "KML Lock Manager is not available. KML files will not be deleted.")
+            # Fallback to old behavior if KML lock manager is missing (delete DB records only)
+            # This part can be removed if strict KML lock checking is mandatory before any deletion
+            # For now, let's allow DB deletion to proceed if KML part fails to initialize.
+            # Define the actual database operation
+            def db_only_operation():
+                if QMessageBox.question(self, "Confirm Delete (DB Only)",
+                                        f"Delete {len(checked_ids)} checked record(s) from database only (KMLs not checked/deleted)?",
+                                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                        QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+                    if self.db_manager.delete_polygon_data(checked_ids):
+                        self.log_message(f"{len(checked_ids)} checked record(s) deleted from DB.", "info")
+                        return True
+                    else: # DB error
+                        self.log_message("Failed to delete records from database.", "error")
+                        QMessageBox.warning(self, "DB Error", "Could not delete records from the database.")
+                        return False
+                return False # User cancelled
+
+            operation_succeeded = self._execute_db_operation_with_lock(
+                operation_callable=db_only_operation,
+                operation_desc=f"Deleting {len(checked_ids)} DB records (KMLs not handled)",
+                lock_duration=30,
+                retry_callable_for_timer=self.handle_delete_checked_rows
+            )
+            if operation_succeeded: self.load_data_into_table()
+            return # End execution here if KML lock manager is missing
+
+        # --- New logic with KML lock checking ---
+        db_ids_to_delete = []
+        kml_paths_to_delete = []
+        skipped_locked_kmls_info = [] # Store (kml_file_name, holder_nickname)
+
+        for db_id in checked_ids:
+            record_data = self.db_manager.get_polygon_data_by_id(db_id)
+            if not record_data:
+                self.log_message(f"Record with DB ID {db_id} not found. Skipping.", "warning")
+                continue
+
+            kml_file_name = record_data.get('kml_file_name')
+            can_delete_record_and_kml = True
+
+            if kml_file_name and isinstance(kml_file_name, str) and kml_file_name.strip():
+                is_locked_by_other, lock_holder = False, "Unknown"
+                lock_info = self.kml_file_lock_manager.get_kml_lock_info(kml_file_name)
+
+                if lock_info:
+                    current_device_id = self.credential_manager.get_device_id()
+                    if lock_info.get('holder_device_id') != current_device_id:
+                        # Check for staleness before declaring it locked by other
+                        heartbeat_iso = lock_info.get('heartbeat_time_iso')
+                        duration = lock_info.get('expected_duration_seconds', self.kml_file_lock_manager.DEFAULT_KML_LOCK_DURATION_SECONDS)
+                        grace = self.kml_file_lock_manager.STALE_LOCK_GRACE_PERIOD_SECONDS
+                        try:
+                            heartbeat_dt = datetime.datetime.fromisoformat(heartbeat_iso)
+                            if heartbeat_dt.tzinfo is None: heartbeat_dt = heartbeat_dt.replace(tzinfo=datetime.timezone.utc)
+                            if heartbeat_dt + datetime.timedelta(seconds=(duration + grace)) < datetime.datetime.now(datetime.timezone.utc):
+                                # It's stale, technically not locked by active other
+                                self.log_message(f"KML '{kml_file_name}' has a stale lock by {lock_info.get('holder_nickname', 'Unknown')}. Treating as deletable.", "info")
+                                # Potentially, one might want to force-acquire and release to clean up the stale lock file here.
+                                # For now, just proceed with deletion.
+                            else:
+                                is_locked_by_other = True # Actively locked by other
+                                lock_holder = lock_info.get('holder_nickname', 'Unknown')
+                        except ValueError: # Invalid ISO format
+                             self.log_message(f"KML '{kml_file_name}' has malformed lock (heartbeat). Treating as deletable with caution.", "warning")
+
+
+                if is_locked_by_other:
+                    skipped_locked_kmls_info.append((kml_file_name, lock_holder))
+                    self.log_message(f"Skipping deletion of KML '{kml_file_name}' (and DB record {db_id}) as it's locked by {lock_holder}.", "warning")
+                    can_delete_record_and_kml = False
+
+            if can_delete_record_and_kml:
+                db_ids_to_delete.append(db_id)
+                if kml_file_name and isinstance(kml_file_name, str) and kml_file_name.strip():
+                    full_kml_path = os.path.join(kml_folder_path, kml_file_name.strip())
+                    # We add to list even if not os.path.exists, DB part should still be deleted.
+                    # os.remove will handle non-existent file gracefully if needed, or we check before remove.
+                    kml_paths_to_delete.append(full_kml_path)
+
+        if skipped_locked_kmls_info:
+            msg = "The following KML files (and their database records) are locked by other users and were not deleted:\n"
+            for name, holder in skipped_locked_kmls_info:
+                msg += f"- '{name}' (locked by {holder})\n"
+            QMessageBox.information(self, "Some Deletions Skipped", msg)
+
+        if not db_ids_to_delete:
+            self.log_message("No records eligible for deletion after KML lock checks.", "info")
+            if not skipped_locked_kmls_info: # Only show if no other message was displayed
+                 QMessageBox.information(self, "Delete Checked", "No records were eligible for deletion.")
+            return
+
+        # Define the actual database and file operation for eligible items
+        def locked_db_and_file_operation():
+            confirm_msg = f"Delete {len(db_ids_to_delete)} DB record(s)"
+            if kml_paths_to_delete: # Only mention KMLs if some are slated for deletion
+                confirm_msg += f" and {len(kml_paths_to_delete)} associated KML file(s)"
+            confirm_msg += " permanently?"
+
+            if QMessageBox.question(self, "Confirm Delete", confirm_msg,
                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                     QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
-                if self.db_manager.delete_polygon_data(checked_ids):
-                    self.log_message(f"{len(checked_ids)} checked record(s) deleted.", "info")
-                    return True # Indicate success of DB action
-                else:
-                    self.log_message("Failed to delete records from database.", "error")
-                    QMessageBox.warning(self, "DB Error", "Could not delete records from the database.")
-                    return False # Indicate failure of DB action
-            else:
-                self.log_message("Delete operation cancelled by user.", "info")
-                return False # User cancelled, so operation "failed" or was not completed
+                db_delete_success = True # Assume success if no DB IDs to delete
+                if db_ids_to_delete:
+                    if self.db_manager.delete_polygon_data(db_ids_to_delete):
+                        self.log_message(f"{len(db_ids_to_delete)} DB record(s) deleted.", "info")
+                    else:
+                        self.log_message("Failed to delete records from database.", "error")
+                        QMessageBox.warning(self, "DB Error", "Could not delete records from the database.")
+                        db_delete_success = False # DB deletion failed
 
-        # Execute the operation with lock handling
-        operation_succeeded = self._execute_db_operation_with_lock(
-            operation_callable=db_operation,
-            operation_desc=f"Deleting {len(checked_ids)} checked row(s)", # More specific desc
-            lock_duration=30,
+                if not db_delete_success:
+                    return False # Stop if DB deletion failed
+
+                # Proceed with KML file deletion if DB part was successful or not needed
+                kml_errors = 0
+                for path in kml_paths_to_delete:
+                    if os.path.exists(path): # Check before attempting to delete
+                        try:
+                            # Before deleting actual KML, attempt to acquire its lock (forcefully if needed)
+                            # This is to ensure we are the "last one out" and clean up the .lock file too.
+                            kml_fname_only = os.path.basename(path)
+                            lock_op_desc = f"Finalizing KML deletion for {kml_fname_only}"
+                            # Try to acquire, then force acquire if stale, then release.
+                            # If actively locked by self (shouldn't happen if logic is right), release.
+                            # If actively locked by other (should have been caught already), this is a problem.
+
+                            temp_lock_status = self.kml_file_lock_manager.acquire_kml_lock(kml_fname_only, lock_op_desc, expected_duration_seconds=30)
+                            lock_cleaned_for_delete = False
+
+                            if temp_lock_status is True: # Acquired (or was already ours)
+                                lock_cleaned_for_delete = True # Will be released after os.remove
+                            elif temp_lock_status == "STALE_LOCK_DETECTED":
+                                if self.kml_file_lock_manager.force_acquire_kml_lock(kml_fname_only, lock_op_desc, expected_duration_seconds=30):
+                                    lock_cleaned_for_delete = True
+                                else:
+                                    self.log_message(f"Could not force acquire stale lock for KML {kml_fname_only} prior to deletion. File may remain.", "warning")
+                            else: # Busy or Error
+                                 self.log_message(f"KML {kml_fname_only} became busy/errored unexpectedly before deletion. File may remain. Status: {temp_lock_status}", "warning")
+
+                            if lock_cleaned_for_delete:
+                                os.remove(path)
+                                self.kml_file_lock_manager.release_kml_lock(kml_fname_only) # Release the lock we just acquired/forced
+                                self.log_message(f"KML file '{kml_fname_only}' deleted.", "info")
+                            else:
+                                # If we couldn't secure the lock for cleanup, we probably shouldn't delete the KML
+                                self.log_message(f"Did not delete KML file '{kml_fname_only}' due to inability to secure its lock for cleanup.", "warning")
+                                kml_errors +=1
+
+                        except Exception as e_kml_del:
+                            self.log_message(f"Error deleting KML file '{os.path.basename(path)}': {e_kml_del}", "error")
+                            kml_errors += 1
+                    else:
+                        self.log_message(f"KML file '{os.path.basename(path)}' was not found on disk for deletion (already deleted or moved).", "info")
+
+                if kml_errors > 0:
+                    QMessageBox.warning(self, "KML Deletion Errors", f"{kml_errors} KML file(s) encountered issues during deletion. Check logs.")
+
+                return True # Overall operation considered done, even with KML errors if DB was fine
+            else: # User cancelled confirmation
+                self.log_message("Delete operation cancelled by user.", "info")
+                return False
+
+        operation_succeeded_final = self._execute_db_operation_with_lock(
+            operation_callable=locked_db_and_file_operation,
+            operation_desc=f"Deleting {len(db_ids_to_delete)} DB records and related KMLs",
+            lock_duration=max(30, len(db_ids_to_delete) // 2), # Scaled lock duration
             retry_callable_for_timer=self.handle_delete_checked_rows
-            # No args/kwargs needed for handle_delete_checked_rows itself for retry
         )
 
-        if operation_succeeded:
-            self.load_data_into_table() # Refresh table only if the core DB operation succeeded
-        # If not successful (lock issue or db_operation returned False),
-        # _execute_db_operation_with_lock or db_operation would have handled user feedback.
+        if operation_succeeded_final:
+            self.load_data_into_table()
 
     def handle_clear_all_data(self):
         if not self.db_lock_manager:

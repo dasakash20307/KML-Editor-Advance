@@ -268,6 +268,287 @@ class MockCredentialManager:
     def get_device_id(self): return self._device_id
     def get_device_nickname(self): return self._device_nickname
 
+
+# --- KMLFileLockManager Class ---
+from pathlib import Path
+from typing import Optional, Union
+# Assuming CredentialManager would be imported from a module like core.credential_manager
+# For now, we'll use a forward reference string 'CredentialManager' if needed for type hints
+# or rely on the MockCredentialManager structure.
+
+class KMLFileLockManager:
+    def __init__(self, kml_folder_path_str: str, credential_manager): # credential_manager: 'CredentialManager'
+        self.kml_folder_path = Path(kml_folder_path_str)
+        self.credential_manager = credential_manager
+        self.STALE_LOCK_GRACE_PERIOD_SECONDS: int = 300
+        self.DEFAULT_KML_LOCK_DURATION_SECONDS: int = 300
+
+        if not self.kml_folder_path.is_dir():
+            try:
+                self.kml_folder_path.mkdir(parents=True, exist_ok=True)
+                print(f"KMLFileLockManager: KML folder created at {self.kml_folder_path}")
+            except OSError as e:
+                print(f"KMLFileLockManager: ERROR - Could not create KML folder at {self.kml_folder_path}: {e}")
+                # Potentially raise an error or set a state indicating failure
+                # For now, path operations will likely fail if dir doesn't exist.
+
+    def _get_lock_file_path(self, kml_filename: str) -> Path:
+        """Constructs and returns the full path for a KML lock file."""
+        return self.kml_folder_path / f"{kml_filename}.lock"
+
+    def acquire_kml_lock(self, kml_filename: str, operation_description: str = "KML file operation",
+                         expected_duration_seconds: int = None) -> Union[bool, str]:
+        lock_file_path = self._get_lock_file_path(kml_filename)
+        effective_duration_seconds = expected_duration_seconds or self.DEFAULT_KML_LOCK_DURATION_SECONDS
+
+        current_device_id = self.credential_manager.get_device_id()
+        current_device_nickname = self.credential_manager.get_device_nickname()
+
+        if not current_device_id or not current_device_nickname:
+            print("KMLFileLockManager: ERROR (acquire) - Device ID or Nickname not available.")
+            return "ERROR"
+
+        try:
+            if lock_file_path.exists():
+                lock_data = None
+                try:
+                    with open(lock_file_path, 'r') as f:
+                        lock_data = json.load(f)
+                except (IOError, json.JSONDecodeError) as e:
+                    print(f"KMLFileLockManager: WARNING (acquire) - Could not read/parse lock file '{lock_file_path}': {e}. Assuming stale.")
+                    return "STALE_LOCK_DETECTED"
+
+                holder_device_id = lock_data.get('holder_device_id')
+                heartbeat_time_iso_str = lock_data.get('heartbeat_time_iso')
+                lock_expected_duration = lock_data.get('expected_duration_seconds', self.DEFAULT_KML_LOCK_DURATION_SECONDS)
+
+                if holder_device_id == current_device_id:
+                    print(f"KMLFileLockManager: Lock for '{kml_filename}' already held by this device ('{current_device_nickname}'). Updating.")
+                    return self.update_kml_heartbeat(kml_filename,
+                                                     new_operation_description=operation_description,
+                                                     new_expected_duration=effective_duration_seconds)
+
+                if heartbeat_time_iso_str:
+                    try:
+                        # Ensure datetime objects are timezone-aware for comparison
+                        heartbeat_dt = datetime.fromisoformat(heartbeat_time_iso_str)
+                        if heartbeat_dt.tzinfo is None:
+                             heartbeat_dt = heartbeat_dt.replace(tzinfo=timezone.utc) # Assume UTC
+
+                        staleness_threshold = heartbeat_dt + timedelta(seconds=(lock_expected_duration + self.STALE_LOCK_GRACE_PERIOD_SECONDS))
+                        if staleness_threshold < datetime.now(timezone.utc):
+                            holder_nickname = lock_data.get('holder_nickname', 'Unknown Device')
+                            print(f"KMLFileLockManager: Stale lock for '{kml_filename}' detected. Held by {holder_nickname}. Last heartbeat: {heartbeat_time_iso_str}")
+                            return "STALE_LOCK_DETECTED"
+                    except ValueError:
+                        print(f"KMLFileLockManager: WARNING (acquire) - Could not parse heartbeat timestamp '{heartbeat_time_iso_str}' for '{kml_filename}'. Assuming stale.")
+                        return "STALE_LOCK_DETECTED"
+                else:
+                    print(f"KMLFileLockManager: WARNING (acquire) - Lock file for '{kml_filename}' missing heartbeat. Assuming stale.")
+                    return "STALE_LOCK_DETECTED"
+
+                holder_nickname = lock_data.get('holder_nickname', "Unknown Device")
+                print(f"KMLFileLockManager: Lock for '{kml_filename}' is busy. Held by {holder_nickname}.")
+                return False # Busy
+
+            else: # Lock file does not exist, create it
+                new_lock_data = {
+                    'holder_device_id': current_device_id,
+                    'holder_nickname': current_device_nickname,
+                    'start_time_iso': datetime.now(timezone.utc).isoformat(),
+                    'expected_duration_seconds': effective_duration_seconds,
+                    'operation_description': operation_description,
+                    'heartbeat_time_iso': datetime.now(timezone.utc).isoformat()
+                }
+                with open(lock_file_path, 'w') as f:
+                    json.dump(new_lock_data, f, indent=4)
+                print(f"KMLFileLockManager: Lock acquired for '{kml_filename}' by {current_device_nickname}.")
+                return True
+
+        except IOError as e:
+            print(f"KMLFileLockManager: IOError during acquire_kml_lock for '{kml_filename}': {e}")
+            return "ERROR"
+        except Exception as e_unhandled:
+            print(f"KMLFileLockManager: Unexpected error in acquire_kml_lock for '{kml_filename}': {e_unhandled}")
+            return "ERROR"
+
+    def force_acquire_kml_lock(self, kml_filename: str, operation_description: str = "KML file operation",
+                               expected_duration_seconds: int = None) -> bool:
+        lock_file_path = self._get_lock_file_path(kml_filename)
+        effective_duration_seconds = expected_duration_seconds or self.DEFAULT_KML_LOCK_DURATION_SECONDS
+
+        current_device_id = self.credential_manager.get_device_id()
+        current_device_nickname = self.credential_manager.get_device_nickname()
+
+        if not current_device_id or not current_device_nickname:
+            print("KMLFileLockManager: ERROR (force_acquire) - Device ID or Nickname not available.")
+            return False
+
+        try:
+            if lock_file_path.exists():
+                try:
+                    os.remove(lock_file_path)
+                    print(f"KMLFileLockManager: Removed existing lock file '{lock_file_path}' for force acquire by {current_device_nickname}.")
+                except OSError as e_remove:
+                    print(f"KMLFileLockManager: ERROR (force_acquire) - Failed to remove existing lock file '{lock_file_path}': {e_remove}")
+                    return False
+
+            new_lock_data = {
+                'holder_device_id': current_device_id,
+                'holder_nickname': current_device_nickname,
+                'start_time_iso': datetime.now(timezone.utc).isoformat(),
+                'expected_duration_seconds': effective_duration_seconds,
+                'operation_description': operation_description,
+                'heartbeat_time_iso': datetime.now(timezone.utc).isoformat()
+            }
+            with open(lock_file_path, 'w') as f:
+                json.dump(new_lock_data, f, indent=4)
+            print(f"KMLFileLockManager: Lock forcibly acquired for '{kml_filename}' by {current_device_nickname}.")
+            return True
+        except IOError as e:
+            print(f"KMLFileLockManager: IOError during force_acquire_kml_lock for '{kml_filename}': {e}")
+            return False
+        except Exception as e_unhandled:
+            print(f"KMLFileLockManager: Unexpected error in force_acquire_kml_lock for '{kml_filename}': {e_unhandled}")
+            return False
+
+    def release_kml_lock(self, kml_filename: str) -> bool:
+        lock_file_path = self._get_lock_file_path(kml_filename)
+        current_device_id = self.credential_manager.get_device_id()
+
+        if not current_device_id:
+            print("KMLFileLockManager: ERROR (release) - Device ID not available. Cannot verify ownership.")
+            return False
+
+        try:
+            if lock_file_path.exists():
+                lock_data = None
+                try:
+                    with open(lock_file_path, 'r') as f:
+                        lock_data = json.load(f)
+                except (IOError, json.JSONDecodeError) as e:
+                    print(f"KMLFileLockManager: WARNING (release) - Could not read/parse lock file '{lock_file_path}': {e}. Cannot verify ownership to release.")
+                    return False
+
+                holder_device_id = lock_data.get('holder_device_id')
+                if holder_device_id == current_device_id:
+                    try:
+                        os.remove(lock_file_path)
+                        print(f"KMLFileLockManager: Lock released for '{kml_filename}' by {self.credential_manager.get_device_nickname()}.")
+                        return True
+                    except OSError as e_remove:
+                        print(f"KMLFileLockManager: ERROR (release) - Failed to remove lock file '{lock_file_path}': {e_remove}")
+                        return False
+                else:
+                    holder_nickname = lock_data.get('holder_nickname', 'another device')
+                    current_nickname = self.credential_manager.get_device_nickname()
+                    print(f"KMLFileLockManager: WARNING (release) - {current_nickname} attempted to release lock for '{kml_filename}' held by {holder_nickname} (ID: {holder_device_id}). Denied.")
+                    return False
+            else:
+                print(f"KMLFileLockManager: Lock for '{kml_filename}' not found on release (already released or never acquired).")
+                return True
+        except IOError as e:
+            print(f"KMLFileLockManager: IOError during release_kml_lock for '{kml_filename}': {e}")
+            return False
+        except Exception as e_unhandled:
+            print(f"KMLFileLockManager: Unexpected error in release_kml_lock for '{kml_filename}': {e_unhandled}")
+            return False
+
+
+    def update_kml_heartbeat(self, kml_filename: str, new_operation_description: str = None,
+                             new_expected_duration: int = None) -> bool:
+        lock_file_path = self._get_lock_file_path(kml_filename)
+        current_device_id = self.credential_manager.get_device_id()
+
+        if not current_device_id:
+            print("KMLFileLockManager: ERROR (heartbeat) - Device ID not available.")
+            return False
+
+        try:
+            if lock_file_path.exists():
+                lock_data = None
+                try:
+                    with open(lock_file_path, 'r') as f:
+                        lock_data = json.load(f)
+                except (IOError, json.JSONDecodeError) as e:
+                    print(f"KMLFileLockManager: ERROR (heartbeat) - Could not read/parse lock file '{lock_file_path}': {e}")
+                    return False
+
+                if lock_data.get('holder_device_id') == current_device_id:
+                    lock_data['heartbeat_time_iso'] = datetime.now(timezone.utc).isoformat()
+                    if new_operation_description is not None:
+                        lock_data['operation_description'] = new_operation_description
+                    if new_expected_duration is not None:
+                        lock_data['expected_duration_seconds'] = new_expected_duration
+
+                    try:
+                        with open(lock_file_path, 'w') as f:
+                            json.dump(lock_data, f, indent=4)
+                        return True
+                    except IOError as e_write:
+                        print(f"KMLFileLockManager: ERROR (heartbeat) - Failed to write updated lock file '{lock_file_path}': {e_write}")
+                        return False
+                else:
+                    holder_nickname = lock_data.get('holder_nickname', 'another device')
+                    print(f"KMLFileLockManager: WARNING (heartbeat) - Attempt to update heartbeat for lock on '{kml_filename}' held by {holder_nickname}. Denied for {self.credential_manager.get_device_nickname()}.")
+                    return False
+            else:
+                print(f"KMLFileLockManager: WARNING (heartbeat) - Lock file '{lock_file_path}' not found for heartbeat update.")
+                return False
+        except IOError as e:
+            print(f"KMLFileLockManager: IOError during update_kml_heartbeat for '{kml_filename}': {e}")
+            return False
+        except Exception as e_unhandled:
+            print(f"KMLFileLockManager: Unexpected error in update_kml_heartbeat for '{kml_filename}': {e_unhandled}")
+            return False
+
+    def get_kml_lock_info(self, kml_filename: str) -> Optional[dict]:
+        lock_file_path = self._get_lock_file_path(kml_filename)
+        try:
+            if lock_file_path.exists():
+                with open(lock_file_path, 'r') as f:
+                    return json.load(f)
+            return None
+        except (IOError, json.JSONDecodeError) as e:
+            print(f"KMLFileLockManager: Error reading lock info for '{kml_filename}' from '{lock_file_path}': {e}")
+            return None
+        except Exception as e_unhandled:
+            print(f"KMLFileLockManager: Unexpected error in get_kml_lock_info for '{kml_filename}': {e_unhandled}")
+            return None
+
+
+    def is_kml_locked(self, kml_filename: str) -> bool:
+        lock_info = self.get_kml_lock_info(kml_filename)
+
+        if not lock_info:
+            return False
+
+        holder_device_id = lock_info.get('holder_device_id')
+        if holder_device_id == self.credential_manager.get_device_id():
+            return False
+
+        heartbeat_time_iso_str = lock_info.get('heartbeat_time_iso')
+        lock_expected_duration = lock_info.get('expected_duration_seconds', self.DEFAULT_KML_LOCK_DURATION_SECONDS)
+
+        if not heartbeat_time_iso_str:
+            print(f"KMLFileLockManager: WARNING (is_locked) - Lock for '{kml_filename}' is malformed (missing heartbeat). Treating as not locked.")
+            return False
+
+        try:
+            heartbeat_dt = datetime.fromisoformat(heartbeat_time_iso_str)
+            if heartbeat_dt.tzinfo is None:
+                heartbeat_dt = heartbeat_dt.replace(tzinfo=timezone.utc)
+
+            staleness_threshold = heartbeat_dt + timedelta(seconds=(lock_expected_duration + self.STALE_LOCK_GRACE_PERIOD_SECONDS))
+            if staleness_threshold < datetime.now(timezone.utc):
+                return False
+        except ValueError:
+            print(f"KMLFileLockManager: WARNING (is_locked) - Could not parse heartbeat for '{kml_filename}'. Treating as not locked.")
+            return False
+
+        return True
+
+
 if __name__ == '__main__':
     print("--- Testing DatabaseLockManager ---")
     # Setup a test directory for mock db and lock files

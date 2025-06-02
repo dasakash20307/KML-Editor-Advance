@@ -39,6 +39,37 @@ class MapViewWidget(QWidget):
         self.current_map = None # Initialize current_map
         self._initialize_map()
 
+    # TODO: Task 9 - KML Locking Integration for Editing
+    # When "Edit" is clicked (likely in a context menu or button not yet created in this widget directly,
+    # but this widget might be controlled by an editor widget/dialog):
+    # 1. kml_filename = ... (determined from the currently loaded/selected KML)
+    # 2. main_window_instance = self.find_main_window() # Helper to get MainWindow, or pass MainWindow instance
+    #    (May need to implement find_main_window or ensure MainWindow instance is available via parent or signal)
+    # 3. Example for acquiring lock before entering edit mode:
+    #    lock_status = main_window_instance.kml_file_lock_manager.acquire_kml_lock(kml_filename, "KML Edit Session")
+    # 4. If lock_status is True:
+    #    proceed_with_edit_mode() # Enable UI for editing KML features
+    # 5. Else if lock_status == "STALE_LOCK_DETECTED":
+    #    # Delegate stale lock handling to MainWindow or a shared utility that can show QMessageBox
+    #    # e.g., main_window_instance.handle_stale_kml_lock_override_for_edit(kml_filename, callback_on_success=proceed_with_edit_mode)
+    #    pass # Placeholder for stale lock handling; likely involves main_window interaction
+    # 6. Else (lock_status is False (busy) or "ERROR"):
+    #    QMessageBox.warning(self, "Cannot Edit", f"Cannot edit KML '{kml_filename}'. It might be locked by another user/process or an error occurred.")
+    #
+    # During an active edit session (if KML features are modified):
+    # - Periodically call: main_window_instance.kml_file_lock_manager.update_kml_heartbeat(kml_filename)
+    #   (e.g., on a timer, or after significant edits)
+    #
+    # On "Save" action (after editing):
+    # - Perform save operation...
+    # - Finally, always release the lock:
+    #   main_window_instance.kml_file_lock_manager.release_kml_lock(kml_filename)
+    #
+    # On "Cancel" action (discarding edits):
+    # - Finally, always release the lock:
+    #   main_window_instance.kml_file_lock_manager.release_kml_lock(kml_filename)
+
+
     @staticmethod
     def _parse_kml_data(kml_content_string: str) -> tuple[list[tuple[float, float]] | None, str | None, bool, str | None]:
         """
