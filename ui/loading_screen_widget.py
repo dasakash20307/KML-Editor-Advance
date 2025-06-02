@@ -28,7 +28,7 @@ class LoadingScreenWidget(QWidget):
 
         # Define initial size - this can be adjusted
         self.setFixedSize(600, 450) # Or use dynamic sizing based on content
-        self.setAttribute(Qt.WA_StyledBackground, True) # For QSS border-radius
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True) # For QSS border-radius
 
         # Main layout
         main_layout = QVBoxLayout(self)
@@ -184,7 +184,8 @@ if __name__ == '__main__':
     else:
         app = QApplication.instance()
 
-    app.setStyle("Fusion")
+    if app: # Ensure app instance exists before calling setStyle
+        QApplication.setStyle("Fusion") # Use static call
 
     APP_NAME_TEST = "KML Editor Advance"
     COMPANY_NAME_TEST = "Dilasa Janvikash Pratishthan"
@@ -230,4 +231,8 @@ if __name__ == '__main__':
     timer.timeout.connect(simulate_loading)
     timer.start(300) # ms interval
 
-    sys.exit(app.exec())
+    if app: # Ensure app instance exists before calling exec
+        sys.exit(app.exec())
+    else:
+        print("Error: QApplication instance could not be created or found.")
+        sys.exit(1)

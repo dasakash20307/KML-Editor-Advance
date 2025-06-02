@@ -8,14 +8,14 @@ from PySide6.QtWidgets import QApplication, QMessageBox, QCheckBox
 
 from core.kml_generator import add_polygon_to_kml_object
 # Import PolygonTableModel to access its constants like DB_ID_COL
-from ui.table_models import PolygonTableModel
+from ui.table_models import PolygonTableModel 
 
 class KMLHandler(QObject):
     # Signal to indicate KML status might have been updated in DB, so table might need refresh
-    kml_data_updated_signal = Signal()
+    kml_data_updated_signal = Signal() 
 
-    def __init__(self, main_window_ref, db_manager, credential_manager,
-                 log_message_callback,
+    def __init__(self, main_window_ref, db_manager, credential_manager, 
+                 log_message_callback, 
                  map_stack, map_view_widget, google_earth_view_widget,
                  table_view, source_model, filter_proxy_model, parent=None):
         super().__init__(parent)
@@ -23,11 +23,11 @@ class KMLHandler(QObject):
         self.db_manager = db_manager
         self.credential_manager = credential_manager
         self.log_message_callback = log_message_callback
-
+        
         self.map_stack = map_stack
         self.map_view_widget = map_view_widget
         self.google_earth_view_widget = google_earth_view_widget
-
+        
         self.table_view = table_view
         self.source_model = source_model # This is PolygonTableModel instance
         self.filter_proxy_model = filter_proxy_model # This is PolygonFilterProxyModel instance
@@ -55,7 +55,7 @@ class KMLHandler(QObject):
                 except Exception as e:
                     self.log_message_callback(f"Map/GE: Error fetching record: {e}", "error")
                     polygon_record = None
-
+        
         if self.map_stack.currentIndex() == 1:  # GE View is active
             if polygon_record and polygon_record.get('status') == 'valid_for_kml':
                 self._trigger_ge_polygon_upload(polygon_record)
@@ -106,7 +106,7 @@ class KMLHandler(QObject):
     def _trigger_ge_polygon_upload(self, polygon_record):
         self.log_message_callback(f"GE View: Processing polygon UUID {polygon_record.get('uuid')} for GE upload.", "info")
         kml_doc = simplekml.Kml(name=str(polygon_record.get('uuid', 'Polygon')))
-
+        
         if add_polygon_to_kml_object(kml_doc, polygon_record):
             try:
                 if self.current_temp_kml_path and os.path.exists(self.current_temp_kml_path):
@@ -115,16 +115,16 @@ class KMLHandler(QObject):
                         self.log_message_callback(f"Old temp KML deleted: {self.current_temp_kml_path}", "info")
                     except Exception as e_del:
                         self.log_message_callback(f"Error deleting old temp KML {self.current_temp_kml_path}: {e_del}", "error")
-
+                
                 fd, temp_kml_path = tempfile.mkstemp(suffix=".kml", prefix="ge_poly_")
                 os.close(fd)
                 kml_doc.save(temp_kml_path)
                 self.current_temp_kml_path = temp_kml_path
                 self.log_message_callback(f"Temp KML saved to: {self.current_temp_kml_path}", "info")
-
+                
                 QApplication.clipboard().setText(self.current_temp_kml_path)
                 self.log_message_callback("KML path copied to clipboard.", "info")
-
+                
                 if self.show_ge_instructions_popup_again:
                     self._show_ge_instructions_popup()
             except Exception as e_kml_save:

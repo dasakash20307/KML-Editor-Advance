@@ -190,8 +190,30 @@ if __name__ == '__main__':
     # This dummy doesn't need a real DB for this basic test.
     import platformdirs # Import for the real CredentialManager instantiation path
     import os # Import for os.path operations
-    class DummyCredentialManager:
-        DEFAULT_KML_VIEW_SETTINGS = {
+    
+    # Make DummyCredentialManager inherit from CredentialManager to satisfy type hint
+    class DummyCredentialManager(CredentialManager): 
+        def __init__(self):
+            # Need to call super, but CredentialManager might need a path.
+            # For a dummy, we might not want to initialize a real settings file.
+            # Let's assume CredentialManager's __init__ can be called without args,
+            # or handles None/default path for settings for this dummy scenario.
+            # If CredentialManager.__init__ strictly requires a path, this might need adjustment
+            # or the Dummy should entirely mock the interface without calling super's __init__.
+            # For now, let's try without super().__init__() if it causes issues,
+            # as we are overriding the only methods used by the dialog.
+            # However, type checker might still complain if super().__init__ is not called.
+            # A better dummy might avoid inheritance and just provide the needed methods.
+            # Given the error, inheritance is the most direct fix for the type checker.
+            # Let's try a minimal super call if possible, or skip if it's too complex for dummy.
+            # For this test, we only care about the methods used by DefaultViewSettingsDialog.
+            # The real CredentialManager __init__ creates a settings file. We don't want that for this dummy.
+            # So, we will NOT call super().__init__() and just override methods.
+            # This makes it a structural subtype for the methods it implements.
+            # The type error is about "incompatible argument type", inheritance fixes this at static analysis level.
+            pass # No super().__init__() to avoid real file IO for a dummy
+
+        DEFAULT_KML_VIEW_SETTINGS = { # This will effectively override any class-level one in CredentialManager for this instance
             "kml_fill_color_hex": "#112233",
             "kml_fill_opacity_percent": 20,
             "kml_line_color_hex": "#aabbcc",

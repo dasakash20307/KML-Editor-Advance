@@ -103,7 +103,7 @@ class PolygonTableModel(QAbstractTableModel): # QAbstractTableModel inherits QOb
         if not index.isValid(): return False
         row, col = index.row(), index.column()
         if row >= len(self._data) or not self._data[row]: return False
-
+        
         db_id_any_type = self._data[row][0] # This is the DB ID
         try:
             db_id = int(db_id_any_type)
@@ -126,8 +126,8 @@ class PolygonTableModel(QAbstractTableModel): # QAbstractTableModel inherits QOb
             # Emit signal instead of direct DB update.
             # The actual DB update will be handled by DataHandler after connecting to this signal.
             self.evaluation_status_changed.emit(db_id, new_status)
-
-            # Optimistically update internal data and UI.
+            
+            # Optimistically update internal data and UI. 
             # If DB fails, MainWindow/DataHandler should refresh/revert.
             # This provides immediate feedback to the user.
             updated_record_list = list(self._data[row])
@@ -159,7 +159,7 @@ class PolygonTableModel(QAbstractTableModel): # QAbstractTableModel inherits QOb
         self._check_states = {int(db_id_key): state for db_id_key, state in self._check_states.items() if int(db_id_key) in current_ids}
         self.endResetModel()
 
-    def get_checked_item_db_ids(self):
+    def get_checked_item_db_ids(self): 
         # Ensure db_id is int
         return [int(db_id) for db_id, state in self._check_states.items() if state == Qt.CheckState.Checked]
 
@@ -185,23 +185,23 @@ class PolygonFilterProxyModel(QSortFilterProxyModel):
 
     def filterAcceptsRow(self, source_row, source_parent):
         source_model = self.sourceModel()
-        if not isinstance(source_model, PolygonTableModel):
+        if not isinstance(source_model, PolygonTableModel): 
             return False
-
+            
         if not source_model or source_row >= len(source_model._data): return False
         record = source_model._data[source_row]
-        if not record or len(record) < 17: return False
+        if not record or len(record) < 17: return False 
 
         if self.filter_uuid_text:
-            uuid_val_from_record = record[1]
+            uuid_val_from_record = record[1] 
             if uuid_val_from_record is None or self.filter_uuid_text not in str(uuid_val_from_record).lower(): return False
 
-        export_count_from_record = record[6]
+        export_count_from_record = record[6] 
         export_count = export_count_from_record if export_count_from_record is not None else 0
         if self.filter_export_status == "Exported" and export_count == 0: return False
         if self.filter_export_status == "Not Exported" and export_count > 0: return False
 
-        kml_status_val_from_record = record[11]
+        kml_status_val_from_record = record[11] 
         kml_status_val = str(kml_status_val_from_record).lower() if kml_status_val_from_record is not None else ""
         if self.filter_error_status == "Error Records" and not ("error" in kml_status_val or "deleted" in kml_status_val): return False
         elif self.filter_error_status == "Valid Records" and ("error" in kml_status_val or "deleted" in kml_status_val): return False

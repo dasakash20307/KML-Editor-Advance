@@ -63,7 +63,9 @@ class TestKMLParsing(unittest.TestCase):
 
         self.assertIsNone(error, f"Parsing error occurred: {error}")
         self.assertIsNotNone(coords, "Coordinates should not be None for valid point KML.")
-        self.assertEqual(len(coords), 1, "Point KML should have one coordinate tuple.")
+        if coords is not None: # Explicit check before len()
+            self.assertEqual(len(coords), 1, "Point KML should have one coordinate tuple.")
+        # If coords is None, assertIsNotNone should have failed. This is an extra guard.
         self.assertEqual(desc, "Description for Point Placemark")
         self.assertTrue(is_point, "Should be identified as Point.")
         expected_coords = [(37.422289, -122.082203)]
@@ -102,7 +104,9 @@ class TestKMLParsing(unittest.TestCase):
         coords, desc, is_point, error = MapViewWidget._parse_kml_data(kml_content)
 
         self.assertIsNotNone(error, "Error should be reported for malformed KML.")
-        self.assertIn("XML ParseError", error, "Error message should indicate XML parsing issue.")
+        if error is not None: # Explicit check before assertIn
+            self.assertIn("XML ParseError", error, "Error message should indicate XML parsing issue.")
+        # If error is None, assertIsNotNone should have failed. This is an extra guard.
         self.assertIsNone(coords)
         # Description might be the default error string or None, depending on implementation
         self.assertEqual(desc, "Error parsing KML.")

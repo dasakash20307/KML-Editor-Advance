@@ -119,7 +119,7 @@ class DataHandler(QObject):
             self.log_message_callback(f"API data processing aborted: api_map not provided for {source_description}.", "error")
             QMessageBox.critical(self.main_window_ref, "Processing Error", "API map is missing for API data processing.")
             return
-
+        
         if is_api_data:
             cleaned_row_list = []
             for api_row_original_keys in row_list:
@@ -145,7 +145,7 @@ class DataHandler(QObject):
         progress_dialog = APIImportProgressDialog(self.main_window_ref)
         progress_dialog.set_total_records(len(row_list))
         progress_dialog.show()
-
+        
         processed_in_loop, skipped_in_loop, new_added_in_loop = 0, 0, 0
 
         for i, original_row_dict in enumerate(row_list):
@@ -164,7 +164,7 @@ class DataHandler(QObject):
                     if k.lstrip('\ufeff') == response_code_header_key:
                         rc_from_row = v_csv.strip() if v_csv else ""
                         break
-
+            
             if not rc_from_row:
                 msg = f"Row {i+1} from {source_description} skipped: Missing Response Code."
                 self.log_message_callback(msg, "error"); current_errors.append("Missing Response Code.")
@@ -181,13 +181,13 @@ class DataHandler(QObject):
                 continue
 
             processed_flat = process_api_row_data(original_row_dict, api_map) if is_api_data and api_map else process_csv_row_data(original_row_dict)
-
+            
             if not processed_flat.get("uuid"):
                 generated_uuid = str(uuid.uuid4())
                 self.log_message_callback(f"UUID missing for RC '{rc_from_row}'. Generated: {generated_uuid}", "warning")
                 current_errors.append(f"UUID missing,generated:{generated_uuid}")
                 processed_flat["uuid"] = generated_uuid
-
+            
             if processed_flat.get('error_messages'):
                 if isinstance(processed_flat['error_messages'], str):
                     current_errors.append(f"Data processing issues:{processed_flat['error_messages']}")
@@ -230,7 +230,7 @@ class DataHandler(QObject):
                     except Exception as e_kml_gen:
                         kml_content_ok = False; current_errors.append(f"KML generation exception: {e_kml_gen}")
                         self.log_message_callback(f"KML Gen Exception for {processed_flat['uuid']}: {e_kml_gen}", "error")
-
+                    
                     if kml_content_ok:
                         try:
                             kml_doc.save(full_kml_path)
@@ -239,7 +239,7 @@ class DataHandler(QObject):
                         except Exception as e_kml_save:
                             kml_saved_successfully = False; error_msg = f"Failed KML save for '{full_kml_path}': {e_kml_save}"
                             current_errors.append(error_msg); self.log_message_callback(error_msg, "error")
-
+                    
                     self.lock_handler.kml_file_lock_manager.release_kml_lock(kml_file_name)
             else:
                 msg = f"Skipping KML generation for RC '{rc_from_row}' (UUID {processed_flat['uuid']}), status: '{processed_flat.get('status')}'"
@@ -250,7 +250,7 @@ class DataHandler(QObject):
             elif processed_flat.get('status') == 'valid_for_kml' and not lock_acquired_for_kml:
                 db_data['kml_file_status'] = "Error - KML Lock Failed"
             else: db_data['kml_file_status'] = "Errored"
-
+            
             api_device_code = processed_flat.get('device_code')
             db_data['device_code'] = api_device_code if api_device_code else device_id
             db_data['editor_device_id'] = device_id
@@ -272,19 +272,19 @@ class DataHandler(QObject):
             else:
                 self.log_message_callback(f"Failed to save RC'{rc_from_row}'(UUID {db_data['uuid']})to DB.", "error")
                 skipped_in_loop += 1
-
+            
             progress_dialog.update_progress(processed_in_loop, skipped_in_loop, new_added_in_loop)
             if progress_dialog.was_cancelled():
                 self.log_message_callback("Import cancelled by user.", "info")
                 break
-
+        
         progress_dialog.close()
         self.data_changed_signal.emit() # Signal MainWindow to refresh table
         self.log_message_callback(f"Import from {source_description}:Attempted:{processed_in_loop},New Added:{new_added_in_loop},Skipped:{skipped_in_loop}.", "info")
 
     def handle_export_displayed_data_csv(self):
         # model_to_export is self.table_view.model() which is the proxy model
-        model_to_export = self.table_view.model()
+        model_to_export = self.table_view.model() 
         if not model_to_export or model_to_export.rowCount() == 0:
             QMessageBox.information(self.main_window_ref, "Export Data", "No data to export.")
             return
@@ -294,7 +294,7 @@ class DataHandler(QObject):
             return
         try:
             # headers are from the source model (PolygonTableModel)
-            headers = self.source_model._headers
+            headers = self.source_model._headers 
             with open(filepath, 'w', newline='', encoding='utf-8-sig') as csvfile:
                 writer = csv.writer(csvfile)
                 writer.writerow(headers[1:]) # Skip checkbox column header
@@ -318,7 +318,7 @@ class DataHandler(QObject):
             self.log_message_callback("KML folder path not configured. Cannot check KML locks for deletion.", "error")
             QMessageBox.critical(self.main_window_ref, "Configuration Error", "KML folder path is not configured. KML files cannot be managed.")
             return
-
+        
         if not self.lock_handler.kml_file_lock_manager:
              self.log_message_callback("KMLFileLockManager not available. Proceeding with DB deletion only.", "error")
              QMessageBox.warning(self.main_window_ref, "KML Lock Error", "KML Lock Manager is not available. KML files will not be deleted (if locked by others).")
@@ -330,7 +330,7 @@ class DataHandler(QObject):
                          return True
                      self.log_message_callback("DB deletion failed.", "error"); return False
                  return False
-
+             
              op_success = self.lock_handler._execute_db_operation_with_lock(
                  db_only_op, f"Deleting {len(checked_db_ids)} DB records (KMLs not checked)",
                  retry_callable_for_timer=self.handle_delete_checked_rows # Pass the public method for retry
@@ -347,7 +347,7 @@ class DataHandler(QObject):
             if not record_data:
                 self.log_message_callback(f"Record with DB ID {db_id} not found for deletion. Skipping.", "warning")
                 continue
-
+            
             kml_file_name = record_data.get('kml_file_name')
             can_delete_this_record = True
 
@@ -365,8 +365,8 @@ class DataHandler(QObject):
                             if heartbeat_dt + datetime.timedelta(seconds=3600) < datetime.datetime.now(datetime.timezone.utc):
                                 is_stale = True
                         except: # Invalid date format
-                            is_stale = True
-
+                            is_stale = True 
+                        
                         if not is_stale: # Actively locked by other
                             skipped_locked_kmls_info.append((kml_file_name, lock_info.get('holder_nickname', 'Unknown')))
                             self.log_message_callback(f"Skipping KML '{kml_file_name}' (DB ID {db_id}), locked by {lock_info.get('holder_nickname', 'Unknown')}.", "warning")
@@ -379,7 +379,7 @@ class DataHandler(QObject):
                 db_ids_to_delete.append(db_id)
                 if kml_file_name and isinstance(kml_file_name, str) and kml_file_name.strip():
                      kml_paths_to_delete.append(os.path.join(kml_folder_path, kml_file_name.strip()))
-
+        
         if skipped_locked_kmls_info:
             msg = "The following KML files (and their DB records) seem locked by other users/processes and were not included in this delete operation:\n"
             for name, holder in skipped_locked_kmls_info: msg += f"- '{name}' (locked by {holder})\n"
@@ -405,7 +405,7 @@ class DataHandler(QObject):
                         db_delete_success = False
                     else:
                         self.log_message_callback(f"{len(db_ids_to_delete)} DB record(s) deleted.", "info")
-
+                
                 if not db_delete_success: return False
 
                 kml_errors = 0
@@ -418,7 +418,7 @@ class DataHandler(QObject):
                         # as KMLFileLockManager itself handles lock files on delete if designed so.
                         # For now, explicit lock/release around os.remove.
                         kml_lock_status = self.lock_handler.kml_file_lock_manager.acquire_kml_lock(kml_fname_only, lock_op_desc_kml, 10)
-
+                        
                         if kml_lock_status is True or kml_lock_status == "STALE_LOCK_DETECTED": # Allow deleting if stale
                             if kml_lock_status == "STALE_LOCK_DETECTED":
                                 self.log_message_callback(f"Forcing acquire of stale lock for KML {kml_fname_only} for deletion.", "warning")
@@ -437,10 +437,10 @@ class DataHandler(QObject):
                             kml_errors +=1
                     else:
                          self.log_message_callback(f"KML file '{os.path.basename(path)}' not found for deletion.", "info")
-
+                
                 if kml_errors > 0:
                     QMessageBox.warning(self.main_window_ref, "KML Deletion Errors", f"{kml_errors} KML file(s) encountered issues during deletion. Check logs.")
-
+                
                 self.data_changed_signal.emit()
                 return True
             else:
@@ -448,11 +448,11 @@ class DataHandler(QObject):
                 return False
 
         self.lock_handler._execute_db_operation_with_lock(
-            actual_delete_operation,
+            actual_delete_operation, 
             f"Deleting {len(db_ids_to_delete)} DB records and KMLs",
             retry_callable_for_timer=self.handle_delete_checked_rows # Pass the public method for retry
         )
-
+        
     def handle_clear_all_data(self):
         if not self.credential_manager or self.credential_manager.get_app_mode() != "Central App":
             self.log_message_callback("Clear all data attempted in non-Central App mode or missing CredentialManager.", "error")
@@ -464,7 +464,7 @@ class DataHandler(QObject):
                                     "Delete ALL polygon data from the database permanently?\nThis includes associated KML files if possible.\nThis cannot be undone.",
                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                     QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
-
+                
                 all_records = self.db_manager.get_all_polygon_data_for_display() # Get records before deleting from DB
                 kml_deletion_errors = 0
                 kml_folder_path = self.credential_manager.get_kml_folder_path()
@@ -473,7 +473,7 @@ class DataHandler(QObject):
                     self.log_message_callback("Failed to clear all data from database.", "error")
                     QMessageBox.warning(self.main_window_ref, "DB Error", "Could not clear all data from the database.")
                     return False
-
+                
                 self.log_message_callback("All polygon data deleted from database.", "info")
                 if self.source_model: self.source_model._check_states.clear() # Clear checks in UI model
 
@@ -500,7 +500,7 @@ class DataHandler(QObject):
                                 else:
                                     self.log_message_callback(f"Could not acquire lock for KML {kml_file_name}. It may not be deleted.", "warning")
                                     kml_deletion_errors +=1
-
+                
                 if kml_deletion_errors > 0:
                      QMessageBox.warning(self.main_window_ref, "KML Deletion Issues", f"{kml_deletion_errors} KML file(s) encountered issues during deletion. Check logs.")
 
@@ -511,7 +511,7 @@ class DataHandler(QObject):
                 return False
 
         self.lock_handler._execute_db_operation_with_lock(
-            do_clear_operation,
+            do_clear_operation, 
             "Clearing all KML files and database records",
             lock_duration=120, # Longer duration for potentially many KML files
             retry_callable_for_timer=self.handle_clear_all_data
@@ -525,7 +525,7 @@ class DataHandler(QObject):
 
         records_data = [self.db_manager.get_polygon_data_by_id(db_id) for db_id in checked_db_ids]
         valid_for_kml = [r for r in records_data if r and r.get('status') == 'valid_for_kml']
-
+        
         if not valid_for_kml:
             QMessageBox.information(self.main_window_ref, "Generate KML", "None of the checked records are valid for KML generation (e.g. missing coordinates).")
             return
@@ -536,7 +536,7 @@ class DataHandler(QObject):
             if not kml_output_mode:
                 self.log_message_callback("KML generation cancelled (mode selection).", "info")
                 return
-
+        
         output_folder = QFileDialog.getExistingDirectory(self.main_window_ref, "Select Output Folder for KML Files", os.path.expanduser("~/Documents"))
         if not output_folder:
             self.log_message_callback("KML generation cancelled (folder selection).", "info")
@@ -546,7 +546,7 @@ class DataHandler(QObject):
             self.log_message_callback(f"Generating KMLs to: {output_folder} (Mode: {kml_output_mode})", "info")
             files_generated_count = 0
             ids_for_db_update = []
-
+            
             if kml_output_mode == "single":
                 timestamp_str = datetime.datetime.now().strftime('%d.%m.%y')
                 consolidated_filename = f"Consolidate_ALL_KML_{timestamp_str}_{len(valid_for_kml)}.kml"
@@ -567,13 +567,13 @@ class DataHandler(QObject):
                         kml_doc.save(os.path.join(output_folder, f"{doc_name}.kml"))
                         ids_for_db_update.append(record_dict['id'])
                         files_generated_count += 1
-
+            
             for record_id in ids_for_db_update: # Update export status
                 if self.lock_handler.db_lock_manager: self.lock_handler.db_lock_manager.update_heartbeat()
                 self.db_manager.update_kml_export_status(record_id)
 
             if ids_for_db_update: self.data_changed_signal.emit()
-
+                
             msg = f"{files_generated_count} KML file(s) generated for {len(ids_for_db_update)} records." if files_generated_count > 0 else "No KML files were generated."
             self.log_message_callback(msg, "success" if files_generated_count > 0 else "info")
             QMessageBox.information(self.main_window_ref, "KML Generation", msg)

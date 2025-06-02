@@ -483,23 +483,30 @@ if __name__ == '__main__':
         print(f"Updating evaluation status for ID {poly_id1} to 'Not Eligible'")
         db_manager.update_evaluation_status(poly_id1, "Not Eligible")
         updated_record = db_manager.get_polygon_data_by_id(poly_id1)
-        print(f"Record {poly_id1} after eval status update: Status='{updated_record.get('evaluation_status')}', LastMod='{updated_record.get('last_modified')}'")
-
-        # Test for update_kml_file_status
-        print(f"Updating KML file status for ID {poly_id1} to 'File Deleted'")
-        original_last_modified = updated_record.get('last_modified')
-        update_kml_success = db_manager.update_kml_file_status(poly_id1, "File Deleted")
-        if update_kml_success:
-            record_after_kml_update = db_manager.get_polygon_data_by_id(poly_id1)
-            print(f"Record {poly_id1} after KML status update: KML Status='{record_after_kml_update.get('kml_file_status')}', LastMod='{record_after_kml_update.get('last_modified')}'")
-            if record_after_kml_update.get('kml_file_status') == "File Deleted":
-                print(f"SUCCESS: KML status correctly updated for ID {poly_id1}.")
+        if updated_record:
+            print(f"Record {poly_id1} after eval status update: Status='{updated_record.get('evaluation_status')}', LastMod='{updated_record.get('last_modified')}'")
+            original_last_modified = updated_record.get('last_modified') # Moved inside the check
+            # Test for update_kml_file_status
+            print(f"Updating KML file status for ID {poly_id1} to 'File Deleted'")
+            update_kml_success = db_manager.update_kml_file_status(poly_id1, "File Deleted")
+            if update_kml_success:
+                record_after_kml_update = db_manager.get_polygon_data_by_id(poly_id1)
+                if record_after_kml_update:
+                    print(f"Record {poly_id1} after KML status update: KML Status='{record_after_kml_update.get('kml_file_status')}', LastMod='{record_after_kml_update.get('last_modified')}'")
+                    if record_after_kml_update.get('kml_file_status') == "File Deleted":
+                        print(f"SUCCESS: KML status correctly updated for ID {poly_id1}.")
+                    else:
+                        print(f"FAILURE: KML status NOT updated for ID {poly_id1}.")
+                    if record_after_kml_update.get('last_modified') != original_last_modified:
+                         print(f"SUCCESS: last_modified timestamp updated for ID {poly_id1}.")
+                    else:
+                        print(f"FAILURE: last_modified timestamp NOT updated for ID {poly_id1}.")
+                else:
+                    print(f"FAILURE: Could not retrieve record {poly_id1} after KML status update.")
             else:
-                print(f"FAILURE: KML status NOT updated for ID {poly_id1}.")
-            if record_after_kml_update.get('last_modified') != original_last_modified:
-                 print(f"SUCCESS: last_modified timestamp updated for ID {poly_id1}.")
-            else:
-                print(f"FAILURE: last_modified timestamp NOT updated for ID {poly_id1}.")
+                print(f"FAILURE: update_kml_file_status returned False for ID {poly_id1}.")
+        else:
+            print(f"Record {poly_id1} not found after eval status update attempt.")
         else:
             print(f"FAILURE: update_kml_file_status returned False for ID {poly_id1}.")
 
@@ -524,13 +531,18 @@ if __name__ == '__main__':
     for poly_row in all_polys:
         print(poly_row)
     
-    if poly_id1_overwrite: # Use the ID from the overwritten record if it exists
+    if poly_id1_overwrite: 
         full_poly1 = db_manager.get_polygon_data_by_id(poly_id1_overwrite)
-        print(f"\nFull data for polygon ID {poly_id1_overwrite}: {full_poly1}")
-        if full_poly1:
+        if full_poly1: # Check if full_poly1 is not None
+            print(f"\nFull data for polygon ID {poly_id1_overwrite}: {full_poly1}")
             db_manager.update_kml_export_status(poly_id1_overwrite)
             updated_poly1 = db_manager.get_polygon_data_by_id(poly_id1_overwrite)
-            print(f"Updated KML export status for ID {poly_id1_overwrite}: Count={updated_poly1.get('kml_export_count')}, Date={updated_poly1.get('last_kml_export_date')}")
+            if updated_poly1: # Check if updated_poly1 is not None
+                print(f"Updated KML export status for ID {poly_id1_overwrite}: Count={updated_poly1.get('kml_export_count')}, Date={updated_poly1.get('last_kml_export_date')}")
+            else:
+                print(f"Could not retrieve record {poly_id1_overwrite} after updating KML export status.")
+        else:
+            print(f"Could not retrieve full data for polygon ID {poly_id1_overwrite}.")
 
     # db_manager.delete_all_polygon_data()
     # print("\nDeleted all polygon data.")

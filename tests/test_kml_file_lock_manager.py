@@ -206,10 +206,11 @@ class TestKMLFileLockManager(unittest.TestCase):
     def test_get_kml_lock_info_exists(self):
         self.lock_manager.acquire_kml_lock(self.sample_kml_filename, "Info Test", 123)
         lock_info = self.lock_manager.get_kml_lock_info(self.sample_kml_filename)
-        self.assertIsNotNone(lock_info)
-        self.assertEqual(lock_info['holder_device_id'], self.device_id_1)
-        self.assertEqual(lock_info['operation_description'], "Info Test")
-        self.assertEqual(lock_info['expected_duration_seconds'], 123)
+        self.assertIsNotNone(lock_info, "Lock info should not be None for an existing lock.")
+        # Using .get() for safer access, though assertIsNotNone should ensure lock_info is a dict
+        self.assertEqual(lock_info.get('holder_device_id'), self.device_id_1)
+        self.assertEqual(lock_info.get('operation_description'), "Info Test")
+        self.assertEqual(lock_info.get('expected_duration_seconds'), 123)
 
     def test_get_kml_lock_info_not_exists(self):
         lock_info = self.lock_manager.get_kml_lock_info("non_existent.kml")

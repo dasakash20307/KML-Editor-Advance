@@ -3,6 +3,8 @@ import json
 import time
 from datetime import datetime, timedelta, timezone # Added timezone
 
+from typing import Optional, Union # Added for Optional type hints
+
 # Try to import QMessageBox for stale lock prompting, but make it optional
 try:
     from PySide6.QtWidgets import QMessageBox
@@ -91,7 +93,7 @@ class DatabaseLockManager:
 
                 if holder_device_id == current_device_id:
                     self._log(f"Lock already held by this device ('{current_device_nickname}'). Updating heartbeat and operation.", "warning")
-                    lock_data['heartbeat_time_iso'] = datetime.now().isoformat()
+                    lock_data['heartbeat_time_iso'] = datetime.now(timezone.utc).isoformat() # Use timezone.utc
                     lock_data['operation_description'] = operation_description
                     lock_data['expected_duration_seconds'] = expected_duration_seconds
                     try:
@@ -107,7 +109,8 @@ class DatabaseLockManager:
                 if heartbeat_time_iso_str and expected_duration_from_file is not None:
                     try:
                         heartbeat_dt = datetime.fromisoformat(heartbeat_time_iso_str)
-                        if datetime.now() > (heartbeat_dt + timedelta(seconds=(expected_duration_from_file + grace_period_seconds))):
+                        if heartbeat_dt.tzinfo is None: heartbeat_dt = heartbeat_dt.replace(tzinfo=timezone.utc) # Make tz-aware
+                        if datetime.now(timezone.utc) > (heartbeat_dt + timedelta(seconds=(expected_duration_from_file + grace_period_seconds))): # Use timezone.utc
                             self._log(f"Stale lock detected. Held by {lock_data.get('holder_nickname', 'Unknown')}. Last heartbeat: {heartbeat_time_iso_str}", "info")
                             return "STALE_LOCK_DETECTED"
                     except ValueError:
@@ -124,10 +127,10 @@ class DatabaseLockManager:
             new_lock_data = {
                 'holder_device_id': current_device_id,
                 'holder_nickname': current_device_nickname,
-                'start_time_iso': datetime.now().isoformat(),
+                'start_time_iso': datetime.now(timezone.utc).isoformat(), # Use timezone.utc
                 'expected_duration_seconds': expected_duration_seconds,
                 'operation_description': operation_description,
-                'heartbeat_time_iso': datetime.now().isoformat()
+                'heartbeat_time_iso': datetime.now(timezone.utc).isoformat() # Use timezone.utc
             }
             with open(self.lock_file_path, 'w') as f:
                 json.dump(new_lock_data, f, indent=4)
@@ -161,10 +164,10 @@ class DatabaseLockManager:
             new_lock_data = {
                 'holder_device_id': current_device_id,
                 'holder_nickname': current_device_nickname,
-                'start_time_iso': datetime.now().isoformat(),
+                'start_time_iso': datetime.now(timezone.utc).isoformat(), # Use timezone.utc
                 'expected_duration_seconds': expected_duration_seconds,
                 'operation_description': operation_description,
-                'heartbeat_time_iso': datetime.now().isoformat()
+                'heartbeat_time_iso': datetime.now(timezone.utc).isoformat() # Use timezone.utc
             }
             with open(self.lock_file_path, 'w') as f:
                 json.dump(new_lock_data, f, indent=4)
@@ -245,7 +248,7 @@ class DatabaseLockManager:
             with open(self.lock_file_path, 'r+') as f:
                 lock_data = json.load(f)
                 if lock_data.get('holder_device_id') == current_device_id:
-                    lock_data['heartbeat_time_iso'] = datetime.now().isoformat()
+                    lock_data['heartbeat_time_iso'] = datetime.now(timezone.utc).isoformat() # Use timezone.utc
                     f.seek(0)
                     json.dump(lock_data, f, indent=4)
                     f.truncate()
@@ -281,7 +284,7 @@ from typing import Optional, Union
 
 class KMLFileLockManager:
     def __init__(self, kml_folder_path_str: str, credential_manager, logger_callable=None): # credential_manager: 'CredentialManager'
-        self.kml_folder_path = Path(kml_folder_path_str)
+        self.kml_folder_path = Path(kml_folder_path_str) if kml_folder_path_str else None # Handle None path
         self.credential_manager = credential_manager
         self.logger = logger_callable
         self.STALE_LOCK_GRACE_PERIOD_SECONDS: int = 300
@@ -305,12 +308,16 @@ class KMLFileLockManager:
 
     def _get_lock_file_path(self, kml_filename: str) -> Path:
         """Constructs and returns the full path for a KML lock file."""
+        if not self.kml_folder_path: return None # Return None if base path is None
         return self.kml_folder_path / f"{kml_filename}.lock"
 
     def acquire_kml_lock(self, kml_filename: str, operation_description: str = "KML file operation",
-                         expected_duration_seconds: int = None) -> Union[bool, str]:
+                         expected_duration_seconds: Optional[int] = None) -> Union[bool, str]:
         lock_file_path = self._get_lock_file_path(kml_filename)
-        effective_duration_seconds = expected_duration_seconds or self.DEFAULT_KML_LOCK_DURATION_SECONDS
+        if not lock_file_path: # Check if path construction failed
+            self._log("KML folder path not configured for lock file.", "error")
+            return "ERROR"
+        effective_duration_seconds = expected_duration_seconds if expected_duration_seconds is not None else self.DEFAULT_KML_LOCK_DURATION_SECONDS
 
         current_device_id = self.credential_manager.get_device_id()
         current_device_nickname = self.credential_manager.get_device_nickname()
@@ -389,9 +396,12 @@ class KMLFileLockManager:
             return "ERROR"
 
     def force_acquire_kml_lock(self, kml_filename: str, operation_description: str = "KML file operation",
-                               expected_duration_seconds: int = None) -> bool:
+                               expected_duration_seconds: Optional[int] = None) -> bool:
         lock_file_path = self._get_lock_file_path(kml_filename)
-        effective_duration_seconds = expected_duration_seconds or self.DEFAULT_KML_LOCK_DURATION_SECONDS
+        if not lock_file_path:
+            self._log("KML folder path not configured for lock file (force acquire).", "error")
+            return False
+        effective_duration_seconds = expected_duration_seconds if expected_duration_seconds is not None else self.DEFAULT_KML_LOCK_DURATION_SECONDS
 
         current_device_id = self.credential_manager.get_device_id()
         current_device_nickname = self.credential_manager.get_device_nickname()
@@ -430,8 +440,11 @@ class KMLFileLockManager:
 
     def release_kml_lock(self, kml_filename: str) -> bool:
         lock_file_path = self._get_lock_file_path(kml_filename)
+        if not lock_file_path: # Check if path construction failed
+            self._log("KML folder path not configured for lock file (release).", "warning")
+            return True # Consistent with original logic for DB lock if path is None
         current_device_id = self.credential_manager.get_device_id()
-        action_taken = False # To track if a loggable action (like deletion) occurred or was attempted by this device
+        action_taken = False
 
         if not current_device_id:
             self._log("Device ID not available. Cannot verify ownership to release KML lock.", "error")
@@ -481,9 +494,12 @@ class KMLFileLockManager:
             return False
 
 
-    def update_kml_heartbeat(self, kml_filename: str, new_operation_description: str = None,
-                             new_expected_duration: int = None) -> bool:
+    def update_kml_heartbeat(self, kml_filename: str, new_operation_description: Optional[str] = None,
+                             new_expected_duration: Optional[int] = None) -> bool:
         lock_file_path = self._get_lock_file_path(kml_filename)
+        if not lock_file_path: # Check if path construction failed
+            self._log("KML folder path not configured for lock file (heartbeat).", "warning")
+            return False
         current_device_id = self.credential_manager.get_device_id()
 
         if not current_device_id:
@@ -531,6 +547,7 @@ class KMLFileLockManager:
 
     def get_kml_lock_info(self, kml_filename: str) -> Optional[dict]:
         lock_file_path = self._get_lock_file_path(kml_filename)
+        if not lock_file_path: return None # Check if path construction failed
         try:
             if lock_file_path.exists():
                 with open(lock_file_path, 'r') as f:
