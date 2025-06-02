@@ -198,15 +198,17 @@ class MapViewWidget(QWidget):
         self.current_folium_map = folium.Map(
             location=map_location,
             zoom_start=map_zoom,
+            max_zoom=18,
             tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
             attr='Esri World Imagery',
             control_scale=True
         )
-        folium.TileLayer('openstreetmap', name='OpenStreetMap').add_to(self.current_folium_map)
-        folium.TileLayer('CartoDB positron', name='CartoDB Positron (Light)').add_to(self.current_folium_map)
+        folium.TileLayer('openstreetmap', name='OpenStreetMap', max_zoom=18).add_to(self.current_folium_map)
+        folium.TileLayer('CartoDB positron', name='CartoDB Positron (Light)', max_zoom=18).add_to(self.current_folium_map)
         folium.TileLayer(
             tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-            attr='Esri', name='Esri Satellite (Default)', overlay=False, control=True
+            attr='Esri', name='Esri Satellite (Default)', overlay=False, control=True, 
+            min_zoom=0, max_zoom=18
         ).add_to(self.current_folium_map)
 
         for feature_item in self._current_features: # Add current features
