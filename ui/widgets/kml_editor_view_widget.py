@@ -21,12 +21,12 @@ class KMLJSBridge(QObject):
         super().__init__(parent_widget) # Pass parent_widget to QObject constructor
         self._parent_widget = parent_widget
 
-    # Add @Slot decorators if you want to expose Python methods to be callable from JavaScript
-    # For example:
-    # @Slot(str)
-    # def jsCallPythonFunction(self, message_from_js):
-    #     print(f"KMLJSBridge: Received message from JS: {message_from_js}")
-    #     self._parent_widget.handle_message_from_js(message_from_js)
+    @Slot(str) # Add this decorator
+    def jsLogMessage(self, message: str): # Add this method
+        if hasattr(self._parent_widget, 'log_message_callback') and callable(self._parent_widget.log_message_callback):
+            self._parent_widget.log_message_callback(f"JS Log: {message}", "info_js") # Use a distinct level if desired
+        else:
+            print(f"JS Log (via Bridge): {message}")
 
 
 class KMLEditorViewWidget(QWidget):

@@ -50,11 +50,33 @@ function initMap() {
         })
     });
 
+    const osmSource = new ol.source.OSM();
+
+    osmSource.on('tileloadstart', function(event) {
+        // console.log('JS: Tile load start:', event.tile.src_); // Too verbose for normal operation
+    });
+
+    osmSource.on('tileloadend', function(event) {
+        // console.log('JS: Tile load end:', event.tile.src_); // Too verbose for normal operation
+    });
+
+    osmSource.on('tileloaderror', function(event) {
+        console.error('JS: Tile load error:', event.tile.src_);
+        if (webChannel) {
+            // Ensure the bridge and method exist before calling
+            if (webChannel.jsLogMessage) {
+                 webChannel.jsLogMessage("Error: Failed to load map tile: " + event.tile.src_);
+            } else {
+                console.error("JS: webChannel.jsLogMessage is not defined on the QWebChannel bridge.");
+            }
+        }
+    });
+
     map = new ol.Map({
         target: 'map', // ID of the div in kml_editor.html
         layers: [
             new ol.layer.Tile({
-                source: new ol.source.OSM() // OpenStreetMap base layer
+                source: osmSource // Use the variable here
             }),
             vectorLayer // Add the KML vector layer
         ],
