@@ -15,14 +15,15 @@ except ImportError:
 # from .credential_manager import CredentialManager
 
 class DatabaseLockManager:
-    def __init__(self, db_path_str: str, credential_manager): # Type hint: credential_manager: CredentialManager
+    def __init__(self, db_path_str: str, credential_manager, logger_callable=None): # Type hint: credential_manager: CredentialManager
         self.db_path_str = db_path_str
         self.credential_manager = credential_manager
+        self.logger = logger_callable
         self.lock_file_path = None
         self._current_lock_info_cache = None
 
         if not self.db_path_str or not os.path.basename(self.db_path_str):
-            print("DBLockManager: ERROR - Database path is invalid or empty.")
+            self._log("Database path is invalid or empty.", "error")
             self.db_path_str = None
         else:
             db_dir = os.path.dirname(self.db_path_str)
@@ -33,13 +34,18 @@ class DatabaseLockManager:
             db_name = os.path.basename(self.db_path_str)
             self.lock_file_path = os.path.join(db_dir, f"{db_name}.lock")
 
+    def _log(self, message, level='info'):
+        if self.logger:
+            self.logger(message, level)
+        else:
+            print(f"DBLockManager: [{level.upper()}] {message}")
+
     def _get_lock_file_path(self) -> str | None:
         return self.lock_file_path
 
     def get_current_lock_info(self) -> dict | None:
         if not self.lock_file_path:
-            # This case can happen if __init__ received an invalid db_path_str
-            print("DBLockManager: INFO (get_current_lock_info) - No lock file path configured (db_path_str might have been invalid).")
+            self._log("No lock file path configured (db_path_str might have been invalid).", "info")
             return None
         try:
             if os.path.exists(self.lock_file_path):
@@ -47,23 +53,23 @@ class DatabaseLockManager:
                     return json.load(f)
             return None # File doesn't exist, so no lock info
         except (IOError, json.JSONDecodeError) as e:
-            print(f"DBLockManager: Error reading lock file for info ('{self.lock_file_path}'): {e}")
+            self._log(f"Error reading lock file for info ('{self.lock_file_path}'): {e}", "error")
             return None # Corrupt or unreadable
 
     def acquire_lock(self, expected_duration_seconds: int, operation_description: str) -> str | bool:
         self._current_lock_info_cache = None
         if not self.lock_file_path:
-            print("DBLockManager: ERROR (acquire_lock) - Lock manager not properly initialized (no lock file path).")
+            self._log("Lock manager not properly initialized (no lock file path).", "error")
             return "ERROR"
         if not self.credential_manager:
-            print("DBLockManager: ERROR (acquire_lock) - CredentialManager not available.")
+            self._log("CredentialManager not available.", "error")
             return "ERROR"
 
         current_device_id = self.credential_manager.get_device_id()
         current_device_nickname = self.credential_manager.get_device_nickname()
 
         if not current_device_id or not current_device_nickname:
-            print("DBLockManager: ERROR (acquire_lock) - Device ID or Nickname not available from CredentialManager.")
+            self._log("Device ID or Nickname not available from CredentialManager.", "error")
             return "ERROR"
 
         grace_period_seconds = 60
@@ -76,7 +82,7 @@ class DatabaseLockManager:
                         lock_data = json.load(f)
                     self._current_lock_info_cache = lock_data
                 except (IOError, json.JSONDecodeError) as e:
-                    print(f"DBLockManager: WARNING (acquire_lock) - Could not read or parse existing lock file '{self.lock_file_path}': {e}. Assuming stale.")
+                    self._log(f"Could not read or parse existing lock file '{self.lock_file_path}': {e}. Assuming stale.", "warning")
                     return "STALE_LOCK_DETECTED"
 
                 holder_device_id = lock_data.get('holder_device_id')
@@ -84,7 +90,7 @@ class DatabaseLockManager:
                 expected_duration_from_file = lock_data.get('expected_duration_seconds')
 
                 if holder_device_id == current_device_id:
-                    print(f"DBLockManager: WARNING (acquire_lock) - Lock already held by this device ('{current_device_nickname}'). Updating heartbeat and operation.")
+                    self._log(f"Lock already held by this device ('{current_device_nickname}'). Updating heartbeat and operation.", "warning")
                     lock_data['heartbeat_time_iso'] = datetime.now().isoformat()
                     lock_data['operation_description'] = operation_description
                     lock_data['expected_duration_seconds'] = expected_duration_seconds
@@ -92,25 +98,26 @@ class DatabaseLockManager:
                         with open(self.lock_file_path, 'w') as f:
                             json.dump(lock_data, f, indent=4)
                         self._current_lock_info_cache = lock_data
+                        self._log(f"DB lock re-confirmed (heartbeat updated): {self.lock_file_path} by device {current_device_id}", "info")
                         return True
                     except IOError as e_write:
-                        print(f"DBLockManager: ERROR (acquire_lock) - Failed to update existing lock file: {e_write}")
+                        self._log(f"Failed to update existing lock file: {e_write}", "error")
                         return "ERROR"
 
                 if heartbeat_time_iso_str and expected_duration_from_file is not None:
                     try:
                         heartbeat_dt = datetime.fromisoformat(heartbeat_time_iso_str)
                         if datetime.now() > (heartbeat_dt + timedelta(seconds=(expected_duration_from_file + grace_period_seconds))):
-                            print(f"DBLockManager: Stale lock detected. Held by {lock_data.get('holder_nickname', 'Unknown')}. Last heartbeat: {heartbeat_time_iso_str}")
+                            self._log(f"Stale lock detected. Held by {lock_data.get('holder_nickname', 'Unknown')}. Last heartbeat: {heartbeat_time_iso_str}", "info")
                             return "STALE_LOCK_DETECTED"
                     except ValueError:
-                        print(f"DBLockManager: WARNING (acquire_lock) - Could not parse heartbeat timestamp '{heartbeat_time_iso_str}'. Assuming stale.")
+                        self._log(f"Could not parse heartbeat timestamp '{heartbeat_time_iso_str}'. Assuming stale.", "warning")
                         return "STALE_LOCK_DETECTED"
                 else:
-                    print(f"DBLockManager: WARNING (acquire_lock) - Lock file missing heartbeat or expected_duration. Assuming stale.")
+                    self._log("Lock file missing heartbeat or expected_duration. Assuming stale.", "warning")
                     return "STALE_LOCK_DETECTED"
 
-                print(f"DBLockManager: Lock held by another user: {lock_data.get('holder_nickname', 'Unknown')} for operation '{lock_data.get('operation_description', 'Unknown Op')}'")
+                self._log(f"Lock held by another user: {lock_data.get('holder_nickname', 'Unknown')} for operation '{lock_data.get('operation_description', 'Unknown Op')}'", "info")
                 return False
 
             # If lock file does not exist, create it
@@ -125,31 +132,31 @@ class DatabaseLockManager:
             with open(self.lock_file_path, 'w') as f:
                 json.dump(new_lock_data, f, indent=4)
             self._current_lock_info_cache = new_lock_data
-            print(f"DBLockManager: Lock acquired by {current_device_nickname} for '{operation_description}'.")
+            self._log(f"DB lock acquired: {self.lock_file_path} by device {current_device_id}", "info")
             return True
 
         except IOError as e:
-            print(f"DBLockManager: IOError during acquire_lock ('{self.lock_file_path}'): {e}")
+            self._log(f"IOError during acquire_lock ('{self.lock_file_path}'): {e}", "error")
             return "ERROR"
         except Exception as e_unhandled:
-            print(f"DBLockManager: Unexpected error in acquire_lock: {e_unhandled}")
+            self._log(f"Unexpected error in acquire_lock: {e_unhandled}", "error")
             return "ERROR"
 
     def force_acquire_lock(self, expected_duration_seconds: int, operation_description: str) -> bool:
         if not self.lock_file_path:
-            print("DBLockManager: ERROR (force_acquire) - Lock manager not properly initialized.")
+            self._log("Lock manager not properly initialized.", "error")
             return False
 
         current_device_id = self.credential_manager.get_device_id()
         current_device_nickname = self.credential_manager.get_device_nickname()
         if not current_device_id or not current_device_nickname:
-            print("DBLockManager: ERROR (force_acquire) - Device ID or Nickname not available.")
+            self._log("Device ID or Nickname not available.", "error")
             return False
 
         try:
             if os.path.exists(self.lock_file_path):
                 os.remove(self.lock_file_path)
-                print(f"DBLockManager: Removed existing lock file ('{self.lock_file_path}') for force acquire by {current_device_nickname}.")
+                self._log(f"Removed existing lock file ('{self.lock_file_path}') for force acquire by {current_device_nickname}.", "info")
 
             new_lock_data = {
                 'holder_device_id': current_device_id,
@@ -162,23 +169,23 @@ class DatabaseLockManager:
             with open(self.lock_file_path, 'w') as f:
                 json.dump(new_lock_data, f, indent=4)
             self._current_lock_info_cache = new_lock_data
-            print(f"DBLockManager: Lock forcibly acquired by {current_device_nickname} for '{operation_description}'.")
+            self._log(f"DB lock forcibly acquired: {self.lock_file_path} by device {current_device_id}", "warning")
             return True
         except (IOError, OSError) as e:
-            print(f"DBLockManager: ERROR (force_acquire) - Failed to remove or create lock file ('{self.lock_file_path}'): {e}")
+            self._log(f"Failed to remove or create lock file ('{self.lock_file_path}'): {e}", "error")
             return False
         except Exception as e_unhandled:
-            print(f"DBLockManager: Unexpected error in force_acquire_lock: {e_unhandled}")
+            self._log(f"Unexpected error in force_acquire_lock: {e_unhandled}", "error")
             return False
 
     def release_lock(self) -> bool:
         if not self.lock_file_path:
-            print("DBLockManager: WARNING (release) - No lock file path configured. Assuming released.")
+            self._log("No lock file path configured. Assuming released.", "warning")
             return True
 
         current_device_id = self.credential_manager.get_device_id()
         if not current_device_id:
-            print("DBLockManager: ERROR (release) - Cannot verify current device ID to release lock.")
+            self._log("Cannot verify current device ID to release lock.", "error")
             return False
 
         try:
@@ -188,54 +195,50 @@ class DatabaseLockManager:
                     with open(self.lock_file_path, 'r') as f:
                         lock_data_on_release = json.load(f)
                 except (IOError, json.JSONDecodeError) as e:
-                    print(f"DBLockManager: WARNING (release) - Could not read lock file '{self.lock_file_path}' during release: {e}.")
+                    self._log(f"Could not read lock file '{self.lock_file_path}' during release: {e}.", "warning")
                     if self._current_lock_info_cache and self._current_lock_info_cache.get('holder_device_id') == current_device_id:
-                        print(f"DBLockManager: (release) Lock file unreadable but cache indicates current device owns it. Attempting removal.")
-                        # Fall through to os.remove by not returning False yet
+                        self._log("Lock file unreadable but cache indicates current device owns it. Attempting removal.", "info")
                     else:
-                        print(f"DBLockManager: (release) Lock file unreadable and no cached ownership by this device. Not removing.")
+                        self._log("Lock file unreadable and no cached ownership by this device. Not removing.", "warning")
                         return False
 
                 if lock_data_on_release and lock_data_on_release.get('holder_device_id') == current_device_id:
                     os.remove(self.lock_file_path)
-                    print(f"DBLockManager: Lock released by {self.credential_manager.get_device_nickname()} from file '{self.lock_file_path}'.")
+                    self._log(f"DB lock released: {self.lock_file_path} by device {current_device_id}", "info")
                     self._current_lock_info_cache = None
                     return True
                 elif lock_data_on_release:
-                    print(f"DBLockManager: WARNING (release) - Attempt to release lock on '{self.lock_file_path}' held by {lock_data_on_release.get('holder_nickname', 'Unknown')}. Not released by {self.credential_manager.get_device_nickname()}.")
+                    self._log(f"Attempt to release lock on '{self.lock_file_path}' held by {lock_data_on_release.get('holder_nickname', 'Unknown')}. Not released by {self.credential_manager.get_device_nickname()}.", "warning")
                     return False
-                else:
+                else: # Unreadable lock file, but cache might allow release
                     if self._current_lock_info_cache and self._current_lock_info_cache.get('holder_device_id') == current_device_id:
                          os.remove(self.lock_file_path)
-                         print(f"DBLockManager: Lock released by {self.credential_manager.get_device_nickname()} from file '{self.lock_file_path}' (based on cache after read fail).")
+                         self._log(f"DB lock released: {self.lock_file_path} by device {current_device_id} (based on cache after read fail).", "info")
                          self._current_lock_info_cache = None
                          return True
-                    print(f"DBLockManager: WARNING (release) - Lock file '{self.lock_file_path}' was unreadable and not confirmed owned by cache.")
+                    self._log(f"Lock file '{self.lock_file_path}' was unreadable and not confirmed owned by cache.", "warning")
                     return False
-
-
             else: # Lock file does not exist
-                print(f"DBLockManager: Lock file '{self.lock_file_path}' not found on release (already released or never acquired).")
+                self._log(f"DB lock release attempted but no lock file found: {self.lock_file_path}", "debug")
                 self._current_lock_info_cache = None
                 return True
         except (IOError, OSError) as e:
-            print(f"DBLockManager: ERROR (release) - Failed to remove lock file '{self.lock_file_path}': {e}")
+            self._log(f"Failed to remove lock file '{self.lock_file_path}': {e}", "error")
             return False
         except Exception as e_unhandled:
-            print(f"DBLockManager: Unexpected error in release_lock: {e_unhandled}")
+            self._log(f"Unexpected error in release_lock: {e_unhandled}", "error")
             return False
-        # Fallback, though all paths should be covered.
         return False
 
 
     def update_heartbeat(self) -> bool:
         if not self.lock_file_path or not os.path.exists(self.lock_file_path):
-            print(f"DBLockManager: WARNING (heartbeat) - Lock file '{self.lock_file_path}' not found.")
+            self._log(f"Lock file '{self.lock_file_path}' not found.", "warning")
             return False
 
         current_device_id = self.credential_manager.get_device_id()
         if not current_device_id:
-            print("DBLockManager: ERROR (heartbeat) - Device ID not available.")
+            self._log("Device ID not available.", "error")
             return False
 
         try:
@@ -247,16 +250,16 @@ class DatabaseLockManager:
                     json.dump(lock_data, f, indent=4)
                     f.truncate()
                     self._current_lock_info_cache = lock_data
-                    # print(f"DBLockManager: Heartbeat updated by {self.credential_manager.get_device_nickname()}.") # Can be too verbose
+                    # self._log(f"Heartbeat updated by {self.credential_manager.get_device_nickname()}.", "debug") # Can be too verbose
                     return True
                 else:
-                    print(f"DBLockManager: WARNING (heartbeat) - Attempt to update heartbeat for lock on '{self.lock_file_path}' held by {lock_data.get('holder_nickname','Unknown')}. Denied for {self.credential_manager.get_device_nickname()}.")
+                    self._log(f"Attempt to update heartbeat for lock on '{self.lock_file_path}' held by {lock_data.get('holder_nickname','Unknown')}. Denied for {self.credential_manager.get_device_nickname()}.", "warning")
                     return False
         except (IOError, json.JSONDecodeError) as e:
-            print(f"DBLockManager: ERROR (heartbeat) - Failed to read/write lock file '{self.lock_file_path}': {e}")
+            self._log(f"Failed to read/write lock file '{self.lock_file_path}': {e}", "error")
             return False
         except Exception as e_unhandled:
-            print(f"DBLockManager: Unexpected error in update_heartbeat: {e_unhandled}")
+            self._log(f"Unexpected error in update_heartbeat: {e_unhandled}", "error")
             return False
 
 # --- Mock CredentialManager for testing (if needed directly in this file) ---
@@ -277,20 +280,28 @@ from typing import Optional, Union
 # or rely on the MockCredentialManager structure.
 
 class KMLFileLockManager:
-    def __init__(self, kml_folder_path_str: str, credential_manager): # credential_manager: 'CredentialManager'
+    def __init__(self, kml_folder_path_str: str, credential_manager, logger_callable=None): # credential_manager: 'CredentialManager'
         self.kml_folder_path = Path(kml_folder_path_str)
         self.credential_manager = credential_manager
+        self.logger = logger_callable
         self.STALE_LOCK_GRACE_PERIOD_SECONDS: int = 300
         self.DEFAULT_KML_LOCK_DURATION_SECONDS: int = 300
 
         if not self.kml_folder_path.is_dir():
             try:
                 self.kml_folder_path.mkdir(parents=True, exist_ok=True)
-                print(f"KMLFileLockManager: KML folder created at {self.kml_folder_path}")
+                self._log(f"KML folder created at {self.kml_folder_path}", "info")
             except OSError as e:
-                print(f"KMLFileLockManager: ERROR - Could not create KML folder at {self.kml_folder_path}: {e}")
+                self._log(f"Could not create KML folder at {self.kml_folder_path}: {e}", "error")
                 # Potentially raise an error or set a state indicating failure
                 # For now, path operations will likely fail if dir doesn't exist.
+
+    def _log(self, message, level='info'):
+        if self.logger:
+            self.logger(message, level)
+        else:
+            # Fallback to print if no logger is provided
+            print(f"KMLFileLockManager: [{level.upper()}] {message}")
 
     def _get_lock_file_path(self, kml_filename: str) -> Path:
         """Constructs and returns the full path for a KML lock file."""
@@ -305,7 +316,7 @@ class KMLFileLockManager:
         current_device_nickname = self.credential_manager.get_device_nickname()
 
         if not current_device_id or not current_device_nickname:
-            print("KMLFileLockManager: ERROR (acquire) - Device ID or Nickname not available.")
+            self._log("Device ID or Nickname not available.", "error")
             return "ERROR"
 
         try:
@@ -315,7 +326,7 @@ class KMLFileLockManager:
                     with open(lock_file_path, 'r') as f:
                         lock_data = json.load(f)
                 except (IOError, json.JSONDecodeError) as e:
-                    print(f"KMLFileLockManager: WARNING (acquire) - Could not read/parse lock file '{lock_file_path}': {e}. Assuming stale.")
+                    self._log(f"Could not read/parse lock file '{lock_file_path}': {e}. Assuming stale.", "warning")
                     return "STALE_LOCK_DETECTED"
 
                 holder_device_id = lock_data.get('holder_device_id')
@@ -323,32 +334,37 @@ class KMLFileLockManager:
                 lock_expected_duration = lock_data.get('expected_duration_seconds', self.DEFAULT_KML_LOCK_DURATION_SECONDS)
 
                 if holder_device_id == current_device_id:
-                    print(f"KMLFileLockManager: Lock for '{kml_filename}' already held by this device ('{current_device_nickname}'). Updating.")
-                    return self.update_kml_heartbeat(kml_filename,
-                                                     new_operation_description=operation_description,
-                                                     new_expected_duration=effective_duration_seconds)
+                    self._log(f"Lock for '{kml_filename}' already held by this device ('{current_device_nickname}'). Updating.", "info")
+                    if self.update_kml_heartbeat(kml_filename,
+                                                 new_operation_description=operation_description,
+                                                 new_expected_duration=effective_duration_seconds):
+                        # Log specific re-confirmation message
+                        self._log(f"KML lock re-confirmed (heartbeat updated) for '{kml_filename}': {lock_file_path} by device {current_device_id}", "info")
+                        return True
+                    else:
+                        # update_kml_heartbeat would have logged the error
+                        return "ERROR" # Failed to update existing lock
 
                 if heartbeat_time_iso_str:
                     try:
-                        # Ensure datetime objects are timezone-aware for comparison
                         heartbeat_dt = datetime.fromisoformat(heartbeat_time_iso_str)
                         if heartbeat_dt.tzinfo is None:
-                             heartbeat_dt = heartbeat_dt.replace(tzinfo=timezone.utc) # Assume UTC
+                             heartbeat_dt = heartbeat_dt.replace(tzinfo=timezone.utc)
 
                         staleness_threshold = heartbeat_dt + timedelta(seconds=(lock_expected_duration + self.STALE_LOCK_GRACE_PERIOD_SECONDS))
                         if staleness_threshold < datetime.now(timezone.utc):
                             holder_nickname = lock_data.get('holder_nickname', 'Unknown Device')
-                            print(f"KMLFileLockManager: Stale lock for '{kml_filename}' detected. Held by {holder_nickname}. Last heartbeat: {heartbeat_time_iso_str}")
+                            self._log(f"Stale lock for '{kml_filename}' detected. Held by {holder_nickname}. Last heartbeat: {heartbeat_time_iso_str}", "info")
                             return "STALE_LOCK_DETECTED"
                     except ValueError:
-                        print(f"KMLFileLockManager: WARNING (acquire) - Could not parse heartbeat timestamp '{heartbeat_time_iso_str}' for '{kml_filename}'. Assuming stale.")
+                        self._log(f"Could not parse heartbeat timestamp '{heartbeat_time_iso_str}' for '{kml_filename}'. Assuming stale.", "warning")
                         return "STALE_LOCK_DETECTED"
                 else:
-                    print(f"KMLFileLockManager: WARNING (acquire) - Lock file for '{kml_filename}' missing heartbeat. Assuming stale.")
+                    self._log(f"Lock file for '{kml_filename}' missing heartbeat. Assuming stale.", "warning")
                     return "STALE_LOCK_DETECTED"
 
                 holder_nickname = lock_data.get('holder_nickname', "Unknown Device")
-                print(f"KMLFileLockManager: Lock for '{kml_filename}' is busy. Held by {holder_nickname}.")
+                self._log(f"Lock for '{kml_filename}' is busy. Held by {holder_nickname}.", "info")
                 return False # Busy
 
             else: # Lock file does not exist, create it
@@ -362,14 +378,14 @@ class KMLFileLockManager:
                 }
                 with open(lock_file_path, 'w') as f:
                     json.dump(new_lock_data, f, indent=4)
-                print(f"KMLFileLockManager: Lock acquired for '{kml_filename}' by {current_device_nickname}.")
+                self._log(f"KML lock acquired for '{kml_filename}': {lock_file_path} by device {current_device_id}", "info")
                 return True
 
         except IOError as e:
-            print(f"KMLFileLockManager: IOError during acquire_kml_lock for '{kml_filename}': {e}")
+            self._log(f"IOError during acquire_kml_lock for '{kml_filename}': {e}", "error")
             return "ERROR"
         except Exception as e_unhandled:
-            print(f"KMLFileLockManager: Unexpected error in acquire_kml_lock for '{kml_filename}': {e_unhandled}")
+            self._log(f"Unexpected error in acquire_kml_lock for '{kml_filename}': {e_unhandled}", "error")
             return "ERROR"
 
     def force_acquire_kml_lock(self, kml_filename: str, operation_description: str = "KML file operation",
@@ -381,16 +397,16 @@ class KMLFileLockManager:
         current_device_nickname = self.credential_manager.get_device_nickname()
 
         if not current_device_id or not current_device_nickname:
-            print("KMLFileLockManager: ERROR (force_acquire) - Device ID or Nickname not available.")
+            self._log("Device ID or Nickname not available for force_acquire.", "error")
             return False
 
         try:
             if lock_file_path.exists():
                 try:
                     os.remove(lock_file_path)
-                    print(f"KMLFileLockManager: Removed existing lock file '{lock_file_path}' for force acquire by {current_device_nickname}.")
+                    self._log(f"Removed existing lock file '{lock_file_path}' for force acquire by {current_device_nickname}.", "info")
                 except OSError as e_remove:
-                    print(f"KMLFileLockManager: ERROR (force_acquire) - Failed to remove existing lock file '{lock_file_path}': {e_remove}")
+                    self._log(f"Failed to remove existing lock file '{lock_file_path}' for force_acquire: {e_remove}", "error")
                     return False
 
             new_lock_data = {
@@ -403,21 +419,22 @@ class KMLFileLockManager:
             }
             with open(lock_file_path, 'w') as f:
                 json.dump(new_lock_data, f, indent=4)
-            print(f"KMLFileLockManager: Lock forcibly acquired for '{kml_filename}' by {current_device_nickname}.")
+            self._log(f"KML lock forcibly acquired for '{kml_filename}': {lock_file_path} by device {current_device_id}", "warning")
             return True
         except IOError as e:
-            print(f"KMLFileLockManager: IOError during force_acquire_kml_lock for '{kml_filename}': {e}")
+            self._log(f"IOError during force_acquire_kml_lock for '{kml_filename}': {e}", "error")
             return False
         except Exception as e_unhandled:
-            print(f"KMLFileLockManager: Unexpected error in force_acquire_kml_lock for '{kml_filename}': {e_unhandled}")
+            self._log(f"Unexpected error in force_acquire_kml_lock for '{kml_filename}': {e_unhandled}", "error")
             return False
 
     def release_kml_lock(self, kml_filename: str) -> bool:
         lock_file_path = self._get_lock_file_path(kml_filename)
         current_device_id = self.credential_manager.get_device_id()
+        action_taken = False # To track if a loggable action (like deletion) occurred or was attempted by this device
 
         if not current_device_id:
-            print("KMLFileLockManager: ERROR (release) - Device ID not available. Cannot verify ownership.")
+            self._log("Device ID not available. Cannot verify ownership to release KML lock.", "error")
             return False
 
         try:
@@ -427,31 +444,40 @@ class KMLFileLockManager:
                     with open(lock_file_path, 'r') as f:
                         lock_data = json.load(f)
                 except (IOError, json.JSONDecodeError) as e:
-                    print(f"KMLFileLockManager: WARNING (release) - Could not read/parse lock file '{lock_file_path}': {e}. Cannot verify ownership to release.")
-                    return False
+                    self._log(f"Could not read/parse lock file '{lock_file_path}' during release: {e}. Cannot verify ownership.", "warning")
+                    # No explicit return False here, will fall through to "no action taken" log if file still exists
 
-                holder_device_id = lock_data.get('holder_device_id')
-                if holder_device_id == current_device_id:
+                if lock_data and lock_data.get('holder_device_id') == current_device_id:
                     try:
                         os.remove(lock_file_path)
-                        print(f"KMLFileLockManager: Lock released for '{kml_filename}' by {self.credential_manager.get_device_nickname()}.")
+                        self._log(f"KML lock released for '{kml_filename}': {lock_file_path} by device {current_device_id}", "info")
+                        action_taken = True
                         return True
                     except OSError as e_remove:
-                        print(f"KMLFileLockManager: ERROR (release) - Failed to remove lock file '{lock_file_path}': {e_remove}")
-                        return False
-                else:
+                        self._log(f"Failed to remove owned KML lock file '{lock_file_path}': {e_remove}", "error")
+                        return False # Explicit failure to remove
+                elif lock_data : # Lock exists but not owned by current device
                     holder_nickname = lock_data.get('holder_nickname', 'another device')
                     current_nickname = self.credential_manager.get_device_nickname()
-                    print(f"KMLFileLockManager: WARNING (release) - {current_nickname} attempted to release lock for '{kml_filename}' held by {holder_nickname} (ID: {holder_device_id}). Denied.")
+                    self._log(f"{current_nickname} attempted to release KML lock for '{kml_filename}' held by {holder_nickname} (ID: {lock_data.get('holder_device_id')}). Denied.", "warning")
+                    # This is a "no action taken" scenario from the perspective of this device's ownership.
+                    # Per strict interpretation of original prompt: return False
                     return False
-            else:
-                print(f"KMLFileLockManager: Lock for '{kml_filename}' not found on release (already released or never acquired).")
-                return True
-        except IOError as e:
-            print(f"KMLFileLockManager: IOError during release_kml_lock for '{kml_filename}': {e}")
+
+            # If action_taken is still False here, it means:
+            # 1. Lock file didn't exist initially.
+            # 2. Lock file existed but was unreadable (lock_data remained None).
+            # 3. Lock file existed, was readable, but not owned (already handled by returning False above).
+            # The specific log for "not found or not owned" should cover cases 1 and 2 primarily.
+            if not action_taken:
+                 self._log(f"KML lock release: No action taken for '{kml_filename}' (not found, unreadable, or not owned by {current_device_id}). Path: {lock_file_path}", "debug")
+            return True # True if lock didn't exist, or if it wasn't ours (so no action needed that would return False earlier)
+
+        except IOError as e: # Should be less likely now with specific error handling for open/remove
+            self._log(f"IOError during release_kml_lock for '{kml_filename}': {e}", "error")
             return False
         except Exception as e_unhandled:
-            print(f"KMLFileLockManager: Unexpected error in release_kml_lock for '{kml_filename}': {e_unhandled}")
+            self._log(f"Unexpected error in release_kml_lock for '{kml_filename}': {e_unhandled}", "error")
             return False
 
 
@@ -461,7 +487,7 @@ class KMLFileLockManager:
         current_device_id = self.credential_manager.get_device_id()
 
         if not current_device_id:
-            print("KMLFileLockManager: ERROR (heartbeat) - Device ID not available.")
+            self._log("Device ID not available for KML heartbeat.", "error")
             return False
 
         try:
@@ -471,7 +497,7 @@ class KMLFileLockManager:
                     with open(lock_file_path, 'r') as f:
                         lock_data = json.load(f)
                 except (IOError, json.JSONDecodeError) as e:
-                    print(f"KMLFileLockManager: ERROR (heartbeat) - Could not read/parse lock file '{lock_file_path}': {e}")
+                    self._log(f"Could not read/parse KML lock file '{lock_file_path}' for heartbeat: {e}", "error")
                     return False
 
                 if lock_data.get('holder_device_id') == current_device_id:
@@ -484,22 +510,23 @@ class KMLFileLockManager:
                     try:
                         with open(lock_file_path, 'w') as f:
                             json.dump(lock_data, f, indent=4)
+                        # self._log(f"KML Heartbeat updated for '{kml_filename}' by {self.credential_manager.get_device_nickname()}.", "debug") # Can be verbose
                         return True
                     except IOError as e_write:
-                        print(f"KMLFileLockManager: ERROR (heartbeat) - Failed to write updated lock file '{lock_file_path}': {e_write}")
+                        self._log(f"Failed to write updated KML lock file '{lock_file_path}' for heartbeat: {e_write}", "error")
                         return False
                 else:
                     holder_nickname = lock_data.get('holder_nickname', 'another device')
-                    print(f"KMLFileLockManager: WARNING (heartbeat) - Attempt to update heartbeat for lock on '{kml_filename}' held by {holder_nickname}. Denied for {self.credential_manager.get_device_nickname()}.")
+                    self._log(f"Attempt to update KML heartbeat for lock on '{kml_filename}' held by {holder_nickname}. Denied for {self.credential_manager.get_device_nickname()}.", "warning")
                     return False
             else:
-                print(f"KMLFileLockManager: WARNING (heartbeat) - Lock file '{lock_file_path}' not found for heartbeat update.")
+                self._log(f"KML lock file '{lock_file_path}' not found for heartbeat update.", "warning")
                 return False
         except IOError as e:
-            print(f"KMLFileLockManager: IOError during update_kml_heartbeat for '{kml_filename}': {e}")
+            self._log(f"IOError during update_kml_heartbeat for '{kml_filename}': {e}", "error")
             return False
         except Exception as e_unhandled:
-            print(f"KMLFileLockManager: Unexpected error in update_kml_heartbeat for '{kml_filename}': {e_unhandled}")
+            self._log(f"Unexpected error in update_kml_heartbeat for '{kml_filename}': {e_unhandled}", "error")
             return False
 
     def get_kml_lock_info(self, kml_filename: str) -> Optional[dict]:
@@ -510,10 +537,10 @@ class KMLFileLockManager:
                     return json.load(f)
             return None
         except (IOError, json.JSONDecodeError) as e:
-            print(f"KMLFileLockManager: Error reading lock info for '{kml_filename}' from '{lock_file_path}': {e}")
+            self._log(f"Error reading KML lock info for '{kml_filename}' from '{lock_file_path}': {e}", "error")
             return None
         except Exception as e_unhandled:
-            print(f"KMLFileLockManager: Unexpected error in get_kml_lock_info for '{kml_filename}': {e_unhandled}")
+            self._log(f"Unexpected error in get_kml_lock_info for '{kml_filename}': {e_unhandled}", "error")
             return None
 
 
@@ -531,7 +558,7 @@ class KMLFileLockManager:
         lock_expected_duration = lock_info.get('expected_duration_seconds', self.DEFAULT_KML_LOCK_DURATION_SECONDS)
 
         if not heartbeat_time_iso_str:
-            print(f"KMLFileLockManager: WARNING (is_locked) - Lock for '{kml_filename}' is malformed (missing heartbeat). Treating as not locked.")
+            self._log(f"KML lock for '{kml_filename}' is malformed (missing heartbeat). Treating as not locked.", "warning")
             return False
 
         try:
@@ -541,11 +568,13 @@ class KMLFileLockManager:
 
             staleness_threshold = heartbeat_dt + timedelta(seconds=(lock_expected_duration + self.STALE_LOCK_GRACE_PERIOD_SECONDS))
             if staleness_threshold < datetime.now(timezone.utc):
+                # self._log(f"KML lock for '{kml_filename}' is stale (held by {lock_info.get('holder_nickname', 'Unknown')}).", "debug")
                 return False
         except ValueError:
-            print(f"KMLFileLockManager: WARNING (is_locked) - Could not parse heartbeat for '{kml_filename}'. Treating as not locked.")
+            self._log(f"Could not parse KML lock heartbeat for '{kml_filename}'. Treating as not locked.", "warning")
             return False
 
+        # self._log(f"KML lock for '{kml_filename}' is actively held by {lock_info.get('holder_nickname', 'Unknown')}.", "debug")
         return True
 
 
@@ -566,8 +595,11 @@ if __name__ == '__main__':
     cm_user1 = MockCredentialManager("device_one_sync", "UserSyncOne")
     cm_user2 = MockCredentialManager("device_two_sync", "UserSyncTwo")
 
-    lock_manager_user1 = DatabaseLockManager(mock_db_file_path, cm_user1)
-    lock_manager_user2 = DatabaseLockManager(mock_db_file_path, cm_user2)
+    # Example of passing a simple print-based logger
+    test_logger = lambda msg, level: print(f"TEST_LOGGER: [{level.upper()}] {msg}")
+
+    lock_manager_user1 = DatabaseLockManager(mock_db_file_path, cm_user1, logger_callable=test_logger)
+    lock_manager_user2 = DatabaseLockManager(mock_db_file_path, cm_user2, logger_callable=test_logger)
 
     actual_lock_file = lock_manager_user1._get_lock_file_path()
     print(f"Actual lock file path for tests: {actual_lock_file}")

@@ -333,7 +333,7 @@ class MainWindow(QMainWindow):
         if self.db_manager and self.credential_manager:
             db_path = self.credential_manager.get_db_path()
             if db_path:
-                self.db_lock_manager = DatabaseLockManager(db_path, self.credential_manager)
+                self.db_lock_manager = DatabaseLockManager(db_path, self.credential_manager, logger_callable=self.log_message)
                 # self.log_message("DatabaseLockManager initialized.", "info") # Logging will be added later
             else:
                 # self.log_message("Failed to initialize DatabaseLockManager: DB path not found.", "error")
@@ -341,6 +341,18 @@ class MainWindow(QMainWindow):
         else:
             # self.log_message("Failed to initialize DatabaseLockManager: DB Manager or Credential Manager missing.", "error")
             QMessageBox.critical(self, "Locking Error", "Could not initialize database lock manager: core components missing.")
+
+        # KMLFileLockManager Initialization
+        self.kml_file_lock_manager = None
+        if self.credential_manager:
+            kml_folder_path = self.credential_manager.get_kml_folder_path()
+            if kml_folder_path:
+                self.kml_file_lock_manager = KMLFileLockManager(kml_folder_path, self.credential_manager, logger_callable=self.log_message)
+                # self.log_message("KMLFileLockManager initialized.", "info") # Log later
+            else:
+                QMessageBox.critical(self, "Locking Error", "Could not initialize KML lock manager: KML folder path missing.")
+        else:
+            QMessageBox.critical(self, "Locking Error", "Could not initialize KML lock manager: Credential Manager missing.")
 
         self.db_lock_retry_timer = QTimer(self)
         self.db_lock_retry_timer.setSingleShot(True)
@@ -367,6 +379,16 @@ class MainWindow(QMainWindow):
             self.db_lock_retry_timer.timeout.connect(self._handle_lock_retry_timeout) # Connect DB timer here too
             # self.log_message is not available yet in __init__, so use print for this unlikely case
             print("MainWindow WARN: db_lock_retry_timer was re-initialized during attribute patching in __init__.")
+
+        # KML Lock Retry Attributes (already present from previous steps, ensuring connection here)
+        self.kml_lock_retry_attempts = 0
+        self.current_kml_retry_operation_type = None
+        self.current_kml_retry_args = None
+        self.current_kml_retry_kwargs = None
+        if not hasattr(self, 'kml_lock_retry_timer'): # Should have been initialized
+            self.kml_lock_retry_timer = QTimer(self)
+            self.kml_lock_retry_timer.setSingleShot(True)
+            print("MainWindow WARN: kml_lock_retry_timer was re-initialized.")
 
         # Connect KML timer (should be outside the db_lock_retry_timer's if/else)
         if hasattr(self, 'kml_lock_retry_timer') and self.kml_lock_retry_timer: # Ensure kml_lock_retry_timer exists
