@@ -72,15 +72,57 @@ class DataHandler(QObject):
     def handle_import_csv(self):
         filepath, _ = QFileDialog.getOpenFileName(self.main_window_ref, "Select CSV File", os.path.expanduser("~/Documents"), "CSV files (*.csv);;All files (*.*)")
         if not filepath:
+            self.log_message_callback("CSV import cancelled by user (file dialog).", "info")
             return
-        self.log_message_callback(f"Loading CSV: {filepath}", "info")
+        
+        self.log_message_callback(f"Attempting to load CSV: {filepath}", "info")
         try:
             with open(filepath, mode='r', encoding='utf-8-sig') as csvfile:
                 reader = csv.DictReader(csvfile)
-                self._process_imported_data(list(reader), f"CSV '{os.path.basename(filepath)}'")
+                rows = list(reader)
+                if not rows:
+                    self.log_message_callback(f"CSV file '{filepath}' is empty or has no data rows.", "info")
+                    QMessageBox.information(self.main_window_ref, "CSV Import", "The selected CSV file is empty or contains no data.")
+                    return
+            
+            # Define a worker function for CSV processing to be wrapped by the DB lock
+            def do_csv_import_processing():
+                # Call _process_imported_data, ensuring it handles CSV specific logic
+                # The 'is_api_data=False' flag will guide _process_imported_data
+                return self._process_imported_data(rows, f"CSV '{os.path.basename(filepath)}'", is_api_data=False)
+
+            # Execute the CSV import processing within a database lock
+            operation_desc = f"Processing CSV import from '{os.path.basename(filepath)}'"
+            
+            # The _execute_db_operation_with_lock expects operation_callable to return True on success, False on failure or exception
+            # We'll need to ensure _process_imported_data (or the wrapper) adheres to this or adapt.
+            # For now, assume _process_imported_data will run to completion or raise an exception handled by the lock handler.
+            # A simple way is to have do_csv_import_processing return True if no major exceptions occur during its run.
+            # The actual success (how many rows imported) is logged internally by _process_imported_data.
+
+            success_status = self.lock_handler._execute_db_operation_with_lock(
+                operation_callable=do_csv_import_processing,
+                operation_desc=operation_desc,
+                # lock_duration can be dynamic based on number of rows, e.g., len(rows) * 0.5 seconds
+                lock_duration=max(30, len(rows) * 0.5), # At least 30s, 0.5s per row
+                # retry_callable_for_timer: For CSV, retry might be complex if partial data was processed.
+                # For now, not providing a direct retry mechanism for the whole CSV batch via timer.
+                # User can re-initiate the import.
+                retry_callable_for_timer=None 
+            )
+            
+            if success_status: # This means the lock was acquired and operation_callable completed without unhandled error
+                self.log_message_callback(f"CSV import operation for '{filepath}' completed (see logs for details on rows).", "info")
+            else: # This means lock acquisition failed or operation_callable itself indicated failure (e.g. returned False)
+                self.log_message_callback(f"CSV import operation for '{filepath}' failed or was aborted (e.g. lock issue).", "error")
+                # QMessageBox.warning(self.main_window_ref, "CSV Import Failed", f"Could not complete the CSV import from '{filepath}'. Check logs.")
+            
+            # Refresh data regardless of detailed outcome, as some rows might have been processed before a potential issue
+            self.data_changed_signal.emit()
+
         except Exception as e:
-            self.log_message_callback(f"Error reading CSV '{filepath}': {e}", "error")
-            QMessageBox.critical(self.main_window_ref, "CSV Error", f"Could not read CSV file:\n{e}")
+            self.log_message_callback(f"Error reading or preparing CSV '{filepath}' for processing: {e}", "error")
+            QMessageBox.critical(self.main_window_ref, "CSV Read Error", f"Could not read or prepare CSV file for processing:\n{e}")
 
     def handle_fetch_from_api(self, url=None, title=None, api_source_combo_toolbar=None): # api_source_combo_toolbar added for direct call
         selected_api_url = None
@@ -132,7 +174,7 @@ class DataHandler(QObject):
         if not self.credential_manager:
             self.log_message_callback("Credential Manager not available.", "error")
             QMessageBox.critical(self.main_window_ref, "Error", "Credential Manager not available.")
-            return
+            return False # Indicate failure for _execute_db_operation_with_lock if this path is hit
 
         kml_root_path = self.credential_manager.get_kml_folder_path()
         device_id = self.credential_manager.get_device_id()
@@ -141,147 +183,182 @@ class DataHandler(QObject):
         if not kml_root_path or not device_id:
             self.log_message_callback("KML root path or device ID not set.", "error")
             QMessageBox.warning(self.main_window_ref, "Configuration Error", "KML root path or device ID not set.")
-            return
+            return False # Indicate failure
 
         progress_dialog = APIImportProgressDialog(self.main_window_ref)
         progress_dialog.set_total_records(len(row_list))
         progress_dialog.show()
         
         processed_in_loop, skipped_in_loop, new_added_in_loop = 0, 0, 0
+        # overall_success will be True if the loop completes, False if user cancels early
+        overall_success = True 
 
         for i, original_row_dict in enumerate(row_list):
+            # DB Heartbeat for long operations
+            if not is_api_data and self.lock_handler.db_lock_manager: # Only for CSV import under DB lock
+                 self.lock_handler.db_lock_manager.update_heartbeat()
+
             processed_in_loop += 1
             current_errors = []
-            rc_from_row = ""
+            rc_from_row = "" # Response code from the current row
 
-            if is_api_data and api_map:
-                api_rc_key = next((k for k, v in api_map.items() if v == "response_code"), None)
+            # Determine response_code based on data type
+            if is_api_data and api_map: # API Data
+                # Find the API key that maps to the "response_code" database field
+                api_rc_key = next((key for key, db_field in api_map.items() if db_field == "response_code"), None)
                 if api_rc_key:
                     rc_from_row = original_row_dict.get(api_rc_key, "").strip()
-            else:
-                # Use the local constant for CSV response code header key
-                response_code_header_key = LOCAL_CSV_RESPONSE_CODE_HEADER
-                for k, v_csv in original_row_dict.items():
-                    if k.lstrip('\ufeff') == response_code_header_key:
-                        rc_from_row = v_csv.strip() if v_csv else ""
-                        break
-            
-            if not rc_from_row:
-                msg = f"Row {i+1} from {source_description} skipped: Missing Response Code."
-                self.log_message_callback(msg, "error"); current_errors.append("Missing Response Code.")
+            else: # CSV Data - use CSV_HEADERS to find the response code
+                  # CSV_HEADERS maps internal names to user-facing CSV column names.
+                  # We need the user-facing name for 'response_code'.
+                response_code_csv_header = CSV_HEADERS.get("response_code")
+                if response_code_csv_header:
+                    # BOM characters were stripped from keys of original_row_dict at the start of process_csv_row_data
+                    # but if _process_imported_data gets raw CSV rows, it needs to handle BOM for key lookup.
+                    # Assuming original_row_dict keys are clean here for CSV if process_csv_row_data handles it.
+                    # If not, we'd need: cleaned_original_row_dict = {k.lstrip('\ufeff'): v for k,v in original_row_dict.items()}
+                    # For now, assume original_row_dict is okay for CSV or process_csv_row_data handles it.
+                    rc_from_row = original_row_dict.get(response_code_csv_header, "").strip()
+
+
+            if not rc_from_row: # If response code is still empty after trying to find it
+                msg = f"Row {i+1} from {source_description} skipped: Response Code is missing or could not be identified."
+                self.log_message_callback(msg, "error"); current_errors.append("Missing or unidentified Response Code.")
                 skipped_in_loop += 1
                 progress_dialog.update_progress(processed_in_loop, skipped_in_loop, new_added_in_loop)
-                if progress_dialog.was_cancelled(): break
+                if progress_dialog.was_cancelled(): overall_success = False; break
                 continue
 
+            # Check for duplicate response_code in DB
             if self.db_manager.check_duplicate_response_code(rc_from_row):
                 self.log_message_callback(f"Skipped duplicate RC '{rc_from_row}'.", "info")
                 skipped_in_loop += 1
                 progress_dialog.update_progress(processed_in_loop, skipped_in_loop, new_added_in_loop)
-                if progress_dialog.was_cancelled(): break
+                if progress_dialog.was_cancelled(): overall_success = False; break
                 continue
-
-            processed_flat = process_api_row_data(original_row_dict, api_map) if is_api_data and api_map else process_csv_row_data(original_row_dict)
             
+            # Process data (API or CSV)
+            if is_api_data:
+                processed_flat = process_api_row_data(original_row_dict, api_map)
+            else: # CSV Data
+                processed_flat = process_csv_row_data(original_row_dict) # Uses updated V5 processor
+
+            # Ensure UUID exists or generate one
             if not processed_flat.get("uuid"):
                 generated_uuid = str(uuid.uuid4())
                 self.log_message_callback(f"UUID missing for RC '{rc_from_row}'. Generated: {generated_uuid}", "warning")
-                current_errors.append(f"UUID missing,generated:{generated_uuid}")
+                current_errors.append(f"UUID missing, generated: {generated_uuid}")
                 processed_flat["uuid"] = generated_uuid
             
+            # Accumulate processing errors
             if processed_flat.get('error_messages'):
+                # error_messages from processor might be a string or list
                 if isinstance(processed_flat['error_messages'], str):
-                    current_errors.append(f"Data processing issues:{processed_flat['error_messages']}")
-                elif isinstance(processed_flat['error_messages'], list):
+                    current_errors.append(f"Data processing issues: {processed_flat['error_messages']}")
+                elif isinstance(processed_flat['error_messages'], list): # Should be list of strings
                     current_errors.extend(processed_flat['error_messages'])
-
+            
+            # KML generation and saving logic
             kml_file_name = f"{processed_flat['uuid']}.kml"
+            full_kml_path = os.path.join(kml_root_path, kml_file_name)
             kml_content_ok = False
             kml_saved_successfully = False
             lock_acquired_for_kml = False
-            full_kml_path = os.path.join(kml_root_path, kml_file_name)
-            db_data = processed_flat.copy() # status is still in db_data here
+            kml_file_status_for_db = "Errored" # Default KML status
 
             if processed_flat.get('status') == 'valid_for_kml':
-                kml_op_description = f"Creating KML {kml_file_name} during import from {source_description}"
-                if self.lock_handler.kml_file_lock_manager: # Access via lock_handler
-                    kml_lock_status = self.lock_handler.kml_file_lock_manager.acquire_kml_lock(kml_file_name, operation_description=kml_op_description)
-                    if kml_lock_status is True: lock_acquired_for_kml = True
-                    elif kml_lock_status == "STALE_LOCK_DETECTED":
-                        # Simplified: treat stale as non-acquirable in batch
-                        lock_info = self.lock_handler.kml_file_lock_manager.get_kml_lock_info(kml_file_name)
-                        holder_nick = lock_info.get('holder_nickname', 'Unknown') if lock_info else 'Unknown'
-                        self.log_message_callback(f"Stale KML lock by '{holder_nick}' for '{kml_file_name}'. Skipping KML save.", "warning")
-                        current_errors.append(f"KML stale lock by {holder_nick} for {kml_file_name}, not overridden in batch.")
-                    elif kml_lock_status is False:
-                        self.log_message_callback(f"KML file '{kml_file_name}' is busy (locked). Skipping KML save.", "warning")
-                        current_errors.append(f"KML lock busy for {kml_file_name}.")
-                    elif kml_lock_status == "ERROR":
-                        self.log_message_callback(f"Error acquiring KML lock for '{kml_file_name}'. Skipping KML save.", "error")
-                        current_errors.append(f"KML lock acquisition error for {kml_file_name}.")
-                else:
-                    self.log_message_callback(f"KMLFileLockManager not available. Cannot ensure safe KML creation for {kml_file_name}.", "error")
-                    current_errors.append(f"KML lock manager unavailable for {kml_file_name}.")
-
-                if lock_acquired_for_kml:
-                    kml_doc = simplekml.Kml()
+                kml_op_description = f"Creating KML {kml_file_name} during import ({source_description})"
+                
+                if self.lock_handler.kml_file_lock_manager:
                     try:
-                        kml_content_ok = add_polygon_to_kml_object(kml_doc, processed_flat)
-                        if not kml_content_ok: current_errors.append("Failed KML content generation.")
-                    except Exception as e_kml_gen:
-                        kml_content_ok = False; current_errors.append(f"KML generation exception: {e_kml_gen}")
-                        self.log_message_callback(f"KML Gen Exception for {processed_flat['uuid']}: {e_kml_gen}", "error")
-                    
-                    if kml_content_ok:
-                        try:
-                            kml_doc.save(full_kml_path)
-                            kml_saved_successfully = True
-                            self.log_message_callback(f"KML saved: {full_kml_path}", "info")
-                        except Exception as e_kml_save:
-                            kml_saved_successfully = False; error_msg = f"Failed KML save for '{full_kml_path}': {e_kml_save}"
-                            current_errors.append(error_msg); self.log_message_callback(error_msg, "error")
-                    
-                    self.lock_handler.kml_file_lock_manager.release_kml_lock(kml_file_name)
-            else:
+                        kml_lock_status = self.lock_handler.kml_file_lock_manager.acquire_kml_lock(kml_file_name, operation_description=kml_op_description)
+                        if kml_lock_status is True:
+                            lock_acquired_for_kml = True
+                        elif kml_lock_status == "STALE_LOCK_DETECTED":
+                            self.log_message_callback(f"Overriding stale KML lock for '{kml_file_name}' for new import.", "warning")
+                            if self.lock_handler.kml_file_lock_manager.force_acquire_kml_lock(kml_file_name, operation_description=kml_op_description):
+                                lock_acquired_for_kml = True
+                            else:
+                                current_errors.append(f"Failed to force acquire stale KML lock for {kml_file_name}.")
+                                kml_file_status_for_db = "Error - KML Lock Failed"
+                        elif kml_lock_status is False: # Busy
+                            current_errors.append(f"KML lock busy for {kml_file_name}.")
+                            kml_file_status_for_db = "Error - KML Lock Failed"
+                        else: # ERROR
+                            current_errors.append(f"KML lock acquisition error for {kml_file_name}.")
+                            kml_file_status_for_db = "Error - KML Lock Failed"
+
+                        if lock_acquired_for_kml:
+                            kml_doc = simplekml.Kml()
+                            kml_content_ok = add_polygon_to_kml_object(kml_doc, processed_flat) # This calls create_kml_description
+                            if not kml_content_ok:
+                                current_errors.append("Failed KML content generation (geometry/description error).")
+                            else:
+                                try:
+                                    kml_doc.save(full_kml_path)
+                                    kml_saved_successfully = True
+                                    kml_file_status_for_db = "Created"
+                                    self.log_message_callback(f"KML saved: {full_kml_path}", "info")
+                                except Exception as e_kml_save:
+                                    current_errors.append(f"Failed KML save for '{full_kml_path}': {e_kml_save}")
+                                    self.log_message_callback(f"KML Save Exception for {processed_flat['uuid']}: {e_kml_save}", "error")
+                    finally: # Ensure KML lock is released if it was acquired
+                        if lock_acquired_for_kml:
+                            self.lock_handler.kml_file_lock_manager.release_kml_lock(kml_file_name)
+                else: # KMLFileLockManager not available
+                    current_errors.append(f"KML lock manager unavailable for {kml_file_name}.")
+                    kml_file_status_for_db = "Error - KML Lock Manager Unavailable"
+            else: # Not valid_for_kml
                 msg = f"Skipping KML generation for RC '{rc_from_row}' (UUID {processed_flat['uuid']}), status: '{processed_flat.get('status')}'"
                 current_errors.append(msg); self.log_message_callback(msg, "info")
+                # kml_file_status_for_db remains "Errored" or could be more specific like "Error - Invalid Data"
 
+            # Prepare data for DB insertion
+            db_data = processed_flat.copy()
             db_data['kml_file_name'] = kml_file_name
-            if kml_saved_successfully: db_data['kml_file_status'] = "Created"
-            elif processed_flat.get('status') == 'valid_for_kml' and not lock_acquired_for_kml:
-                db_data['kml_file_status'] = "Error - KML Lock Failed"
-            else: db_data['kml_file_status'] = "Errored"
+            db_data['kml_file_status'] = kml_file_status_for_db
             
-            api_device_code = processed_flat.get('device_code')
-            db_data['device_code'] = api_device_code if api_device_code else device_id
-            db_data['editor_device_id'] = device_id
+            if is_api_data: # API data might have device_code from source
+                db_data['device_code'] = processed_flat.get('device_code', device_id) # Use API's if present, else this app's
+            else: # CSV data always uses this app's device_id as creator
+                db_data['device_code'] = device_id
+            
+            db_data['editor_device_id'] = device_id # Current app instance is the editor/importer
             db_data['editor_device_nickname'] = device_nickname
-            # db_data.pop('status', None) # <<< THIS LINE IS REMOVED TO KEEP STATUS IN DB_DATA
+            
+            db_data.pop('status', None) # Remove temp processing status, not a direct DB field for polygon_data.status
+            
             final_error_messages = "\n".join(filter(None, current_errors))
             db_data['error_messages'] = final_error_messages if final_error_messages else None
-            db_data["last_modified"] = datetime.datetime.now().isoformat()
-            existing_date_added = processed_flat.get("date_added")
-            if existing_date_added and isinstance(existing_date_added, str) and existing_date_added.strip():
-                db_data["date_added"] = existing_date_added
-            else:
-                db_data["date_added"] = datetime.datetime.now().isoformat()
+            
+            current_time_iso = datetime.datetime.now().isoformat()
+            db_data["last_modified"] = current_time_iso
+            # For CSV imports, date_added is always now. For API, it might come from source.
+            if not is_api_data or not processed_flat.get("date_added"):
+                db_data["date_added"] = current_time_iso
+            # Else, if it's API data and date_added was in processed_flat, it's already in db_data
 
-            db_result_id = self.db_manager.add_or_update_polygon_data(db_data, overwrite=False)
+            # Add/Update record in DB
+            db_result_id = self.db_manager.add_or_update_polygon_data(db_data, overwrite=False) # Overwrite is False for imports
+            
             if db_result_id is not None:
                 new_added_in_loop += 1
-                self.log_message_callback(f"RC'{rc_from_row}'(UUID {db_data['uuid']})saved to DB ID {db_result_id}.KML:{db_data['kml_file_status']}.", "info")
-            else:
-                self.log_message_callback(f"Failed to save RC'{rc_from_row}'(UUID {db_data['uuid']})to DB.", "error")
+                self.log_message_callback(f"RC'{rc_from_row}'(UUID {db_data['uuid']}) saved to DB ID {db_result_id}. KML: {db_data['kml_file_status']}.", "info")
+            else: # DB save failed
+                self.log_message_callback(f"Failed to save RC'{rc_from_row}'(UUID {db_data['uuid']}) to DB.", "error")
                 skipped_in_loop += 1
             
+            # Update progress dialog
             progress_dialog.update_progress(processed_in_loop, skipped_in_loop, new_added_in_loop)
             if progress_dialog.was_cancelled():
                 self.log_message_callback("Import cancelled by user.", "info")
-                break
+                overall_success = False # Mark as not fully successful due to cancellation
+                break 
         
         progress_dialog.close()
-        self.data_changed_signal.emit() # Signal MainWindow to refresh table
-        self.log_message_callback(f"Import from {source_description}:Attempted:{processed_in_loop},New Added:{new_added_in_loop},Skipped:{skipped_in_loop}.", "info")
+        # self.data_changed_signal.emit() # Emit signal outside if this function is called by the lock wrapper
+        self.log_message_callback(f"Import from {source_description}: Attempted: {processed_in_loop}, New Added: {new_added_in_loop}, Skipped: {skipped_in_loop}.", "info")
+        return overall_success # Return status for the lock handler
 
     def handle_export_displayed_data_csv(self):
         # model_to_export is self.table_view.model() which is the proxy model
@@ -642,3 +719,44 @@ class DataHandler(QObject):
             lock_duration=estimated_duration,
             retry_callable_for_timer=lambda: self.handle_generate_kml(output_mode_dialog_class, kml_output_mode)
         )
+
+    def handle_export_csv_template(self):
+        """
+        Handles the export of a CSV template file.
+        The template contains headers based on core.data_processor.CSV_HEADERS.
+        """
+        self.log_message_callback("CSV template export initiated.", "info")
+        
+        # CSV_HEADERS is already imported at the top of the file
+        # from core.data_processor import CSV_HEADERS
+        
+        if not CSV_HEADERS:
+            self.log_message_callback("CSV_HEADERS not found or empty in core.data_processor.", "error")
+            QMessageBox.warning(self.main_window_ref, "Template Error", "Could not load CSV headers for the template.")
+            return
+
+        header_list = list(CSV_HEADERS.values())
+
+        default_filename = "v5_data_template.csv"
+        filepath, _ = QFileDialog.getSaveFileName(
+            self.main_window_ref,
+            "Save CSV Template As",
+            os.path.join(os.path.expanduser("~/Documents"), default_filename), # Suggest a path and filename
+            "CSV files (*.csv);;All files (*.*)"
+        )
+
+        if not filepath:
+            self.log_message_callback("CSV template export cancelled by user (file dialog).", "info")
+            return
+
+        try:
+            with open(filepath, mode='w', newline='', encoding='utf-8-sig') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(header_list)
+            
+            self.log_message_callback(f"CSV template successfully exported to: {filepath}", "success")
+            QMessageBox.information(self.main_window_ref, "Export Successful", f"CSV template saved to:\n{filepath}")
+
+        except Exception as e:
+            self.log_message_callback(f"Error exporting CSV template to '{filepath}': {e}", "error")
+            QMessageBox.warning(self.main_window_ref, "Export Error", f"Could not save CSV template:\n{e}")

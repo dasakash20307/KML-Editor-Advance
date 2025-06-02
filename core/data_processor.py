@@ -4,20 +4,28 @@
 import re
 
 # Expected CSV Headers - Centralized here for data_processor
-# The main UI part will also need to be aware of these if it directly interacts with CSVs
-# or if it needs to display data based on these specific field names.
+# These headers align with V5 database schema and include KML description fields.
 CSV_HEADERS = {
-    "uuid": "UUID (use as the file name)",
-    "response_code": "Response Code",
-    "farmer_name": "Name of the Farmer",
-    "village": "Village Name",
-    "block": "Block",
-    "district": "District",
-    "area": "Proposed Area (Acre)",
-    "p1_utm": "Point 1 (UTM)", "p1_alt": "Point 1 (altitude)",
-    "p2_utm": "Point 2 (UTM)", "p2_alt": "Point 2 (altitude)",
-    "p3_utm": "Point 3 (UTM)", "p3_alt": "Point 3 (altitude)",
-    "p4_utm": "Point 4 (UTM)", "p4_alt": "Point 4 (altitude)",
+    # V5 Mandatory DB Columns (aligning with polygon_data table)
+    "uuid": "uuid",  # Often auto-generated if missing in CSV, but good to have a header
+    "response_code": "response_code",  # Critical for duplicate checks
+    "farmer_name": "farmer_name",
+    "village_name": "village_name", # Changed from "village" to match DB
+    "block": "block",
+    "district": "district",
+    "proposed_area_acre": "proposed_area_acre", # Changed from "area"
+    "p1_utm_str": "p1_utm_str", "p1_altitude": "p1_altitude", # Explicitly named to match DB
+    "p2_utm_str": "p2_utm_str", "p2_altitude": "p2_altitude",
+    "p3_utm_str": "p3_utm_str", "p3_altitude": "p3_altitude",
+    "p4_utm_str": "p4_utm_str", "p4_altitude": "p4_altitude",
+    # New V5 fields (device_code, kml_file_name, kml_file_status, etc.) are typically set programmatically
+    # and are not expected directly from the base CSV for farmer plot data.
+    # If they could optionally come from CSV, they would be added here.
+
+    # Example columns for KML description
+    "kml_desc_survey_date": "kml_desc_survey_date", # User-friendly: "Survey Date for KML"
+    "kml_desc_crop_type": "kml_desc_crop_type",   # User-friendly: "Crop Type for KML"
+    "kml_desc_notes": "kml_desc_notes",         # User-friendly: "Additional Notes for KML"
 }
 
 def parse_utm_string(utm_str):
@@ -50,39 +58,70 @@ def parse_utm_string(utm_str):
 
 def process_csv_row_data(row_dict_from_reader):
     """
-    Processes a single row dictionary (from csv.DictReader).
-    Cleans BOM from keys if present, extracts data based on CSV_HEADERS,
+    Processes a single row dictionary (from csv.DictReader) according to V5 schema.
+    Cleans BOM from keys, extracts data based on updated CSV_HEADERS,
     validates points, attempts substitution for one missing point.
+    Includes specific KML description fields in the output.
     Returns a dictionary flattened and ready for database insertion,
     including 'status' and 'error_messages' (as a string).
     """
     # Clean BOM from all keys in the input dictionary.
-    # This ensures that lookups using CSV_HEADERS (which are clean) will work.
     row_dict = {k.lstrip('\ufeff'): v for k, v in row_dict_from_reader.items()}
 
-    processed_for_db = {
-        "uuid": row_dict.get(CSV_HEADERS["uuid"], "").strip(),
-        "response_code": row_dict.get(CSV_HEADERS["response_code"], "").strip(),
-        "farmer_name": row_dict.get(CSV_HEADERS["farmer_name"], "").strip(),
-        "village_name": row_dict.get(CSV_HEADERS["village"], "").strip(), # Corrected key from "Village Name"
-        "block": row_dict.get(CSV_HEADERS["block"], "").strip(),
-        "district": row_dict.get(CSV_HEADERS["district"], "").strip(),
-        "proposed_area_acre": row_dict.get(CSV_HEADERS["area"], "").strip(),
-        "status": "valid_for_kml", # Default status
-        # error_messages will be populated as a string later
-    }
-    
+    processed_for_db = {}
     error_accumulator = [] # Internal list to gather error messages
 
-    if not processed_for_db["uuid"]:
-        error_accumulator.append(f"UUID is empty or missing. Expected header: '{CSV_HEADERS['uuid']}'. Available headers in row: {list(row_dict.keys())}")
-    if not processed_for_db["response_code"]:
-        error_accumulator.append(f"Response Code is empty or missing. Expected header: '{CSV_HEADERS['response_code']}'. Available headers in row: {list(row_dict.keys())}")
+    # Populate with V5 mandatory fields from CSV
+    # Using .get with CSV_HEADERS values directly as keys for row_dict
+    processed_for_db["uuid"] = row_dict.get(CSV_HEADERS["uuid"], "").strip()
+    processed_for_db["response_code"] = row_dict.get(CSV_HEADERS["response_code"], "").strip()
+    processed_for_db["farmer_name"] = row_dict.get(CSV_HEADERS["farmer_name"], "").strip()
+    processed_for_db["village_name"] = row_dict.get(CSV_HEADERS["village_name"], "").strip()
+    processed_for_db["block"] = row_dict.get(CSV_HEADERS["block"], "").strip()
+    processed_for_db["district"] = row_dict.get(CSV_HEADERS["district"], "").strip()
+    processed_for_db["proposed_area_acre"] = row_dict.get(CSV_HEADERS["proposed_area_acre"], "").strip()
+    
+    processed_for_db["status"] = "valid_for_kml" # Default status
 
-    if not processed_for_db["uuid"] or not processed_for_db["response_code"]:
+    # KML description fields
+    processed_for_db["kml_desc_survey_date"] = row_dict.get(CSV_HEADERS["kml_desc_survey_date"], "").strip()
+    processed_for_db["kml_desc_crop_type"] = row_dict.get(CSV_HEADERS["kml_desc_crop_type"], "").strip()
+    processed_for_db["kml_desc_notes"] = row_dict.get(CSV_HEADERS["kml_desc_notes"], "").strip()
+
+    # Validate critical V5 mandatory fields that must come from CSV
+    if not processed_for_db["uuid"]:
+        # While UUID can be auto-generated later, if a CSV provides it, it should be valid.
+        # For this processor, we'll flag if the CSV intends to provide it but it's empty.
+        # The main import logic might decide to generate one if this field is empty.
+        # For now, let's assume if the column "uuid" is present and empty, it's an issue for this row.
+        # If the column "uuid" itself is missing, row_dict.get provides "", so this check works.
+        error_accumulator.append(f"'{CSV_HEADERS['uuid']}' is empty or missing. This field is used for KML filename generation.")
+
+    if not processed_for_db["response_code"]:
+        error_accumulator.append(f"'{CSV_HEADERS['response_code']}' is empty or missing. This field is critical for duplicate checking.")
+
+    # Add checks for other new V5 mandatory fields expected from CSV
+    if not processed_for_db["farmer_name"]:
+        error_accumulator.append(f"'{CSV_HEADERS['farmer_name']}' is empty or missing.")
+    if not processed_for_db["village_name"]:
+        error_accumulator.append(f"'{CSV_HEADERS['village_name']}' is empty or missing.")
+    # Block, District, proposed_area_acre might be optional or have defaults,
+    # but if they are considered mandatory from CSV, add checks:
+    # if not processed_for_db["block"]:
+    #     error_accumulator.append(f"'{CSV_HEADERS['block']}' is empty or missing.")
+    # if not processed_for_db["district"]:
+    #     error_accumulator.append(f"'{CSV_HEADERS['district']}' is empty or missing.")
+    # if not processed_for_db["proposed_area_acre"]:
+    #     error_accumulator.append(f"'{CSV_HEADERS['proposed_area_acre']}' is empty or missing.")
+
+
+    if not processed_for_db["uuid"] or not processed_for_db["response_code"]: # Still critical for processing flow
         processed_for_db["status"] = "error_missing_identifiers"
-        if not any("empty or missing" in msg for msg in error_accumulator): # Add general if specific not present
-             error_accumulator.append("Critical: Missing UUID or Response Code.")
+        # Ensure specific error messages for these are present if not already added
+        if not any(CSV_HEADERS['uuid'] in msg for msg in error_accumulator) and not processed_for_db["uuid"]:
+            error_accumulator.append(f"'{CSV_HEADERS['uuid']}' is critically missing.")
+        if not any(CSV_HEADERS['response_code'] in msg for msg in error_accumulator) and not processed_for_db["response_code"]:
+            error_accumulator.append(f"'{CSV_HEADERS['response_code']}' is critically missing.")
         # Populate point fields with defaults for DB consistency even on this critical error
         for i in range(1, 5):
             processed_for_db[f"p{i}_utm_str"] = ""
@@ -97,13 +136,20 @@ def process_csv_row_data(row_dict_from_reader):
 
     # This list stores detailed info for each point during processing
     # Each item: {"utm_str", "altitude", "easting", "northing", "zone_num", "zone_letter", "substituted", "is_valid_parse"}
-    intermediate_points_data = [] 
+    intermediate_points_data = []
     for i in range(1, 5):
-        utm_header = CSV_HEADERS[f"p{i}_utm"]
-        alt_header = CSV_HEADERS[f"p{i}_alt"]
-        
-        utm_str_val = row_dict.get(utm_header, "").strip()
-        alt_str_val = row_dict.get(alt_header, "0").strip() # Default to "0" if missing
+        # Use new V5 header keys for points
+        utm_header_key = f"p{i}_utm_str" # This is the key in CSV_HEADERS dict
+        alt_header_key = f"p{i}_altitude" # This is the key in CSV_HEADERS dict
+
+        # Attempt to get the header name from CSV_HEADERS. If the key itself (e.g. "p1_utm_str") 
+        # is not in CSV_HEADERS (which would be a setup error), default to using the key directly.
+        # This makes it slightly more robust to CSV_HEADERS definition errors, though ideally, they match.
+        utm_csv_header_name = CSV_HEADERS.get(utm_header_key, utm_header_key)
+        alt_csv_header_name = CSV_HEADERS.get(alt_header_key, alt_header_key)
+
+        utm_str_val = row_dict.get(utm_csv_header_name, "").strip()
+        alt_str_val = row_dict.get(alt_csv_header_name, "0").strip() # Default to "0" if missing
         
         altitude_val = 0.0
         try:
@@ -385,21 +431,126 @@ def process_api_row_data(api_row_dict, api_to_db_map):
 
 
 if __name__ == '__main__':
-    print("Testing CSV Processor (existing functionality - basic check)")
-    # Basic test for existing CSV processor (not exhaustive)
-    sample_csv_row = {
-        CSV_HEADERS["uuid"]: "CSV_UUID_001", CSV_HEADERS["response_code"]: "CSV_RC_001",
-        CSV_HEADERS["farmer_name"]: "CSV Farmer", CSV_HEADERS["village"]: "CSV Village",
-        CSV_HEADERS["p1_utm"]: "43Q 123456 789012", CSV_HEADERS["p1_alt"]: "100",
-        CSV_HEADERS["p2_utm"]: "43Q 123457 789013", CSV_HEADERS["p2_alt"]: "101",
-        CSV_HEADERS["p3_utm"]: "43Q 123458 789014", CSV_HEADERS["p3_alt"]: "102",
-        CSV_HEADERS["p4_utm"]: "43Q 123459 789015", CSV_HEADERS["p4_alt"]: "103",
-    }
-    processed_csv_data = process_csv_row_data(sample_csv_row)
-    print(f"CSV Processed: {processed_csv_data['uuid']}, Status: {processed_csv_data['status']}")
-    # print(f"CSV Errors: {processed_csv_data['error_messages']}") # Uncomment for detail
+    print("--- Testing CSV Processor with V5 Headers and Logic ---")
 
-    print("\n--- Testing API Data Processor ---")
+    # Test Case 1: Valid V5 CSV data
+    # Using the actual values from CSV_HEADERS as keys for the sample row,
+    # as DictReader would produce if these were the headers in the CSV file.
+    sample_csv_row_v5_valid = {
+        CSV_HEADERS["uuid"]: "CSV_UUID_V5_001",
+        CSV_HEADERS["response_code"]: "CSV_RC_V5_001",
+        CSV_HEADERS["farmer_name"]: "CSV Farmer V5",
+        CSV_HEADERS["village_name"]: "CSV Village V5",
+        CSV_HEADERS["block"]: "CSV Block V5",
+        CSV_HEADERS["district"]: "CSV District V5",
+        CSV_HEADERS["proposed_area_acre"]: "6.5",
+        CSV_HEADERS["p1_utm_str"]: "43Q 123456 7890123", CSV_HEADERS["p1_altitude"]: "110",
+        CSV_HEADERS["p2_utm_str"]: "43Q 123457 7890124", CSV_HEADERS["p2_altitude"]: "111",
+        CSV_HEADERS["p3_utm_str"]: "43Q 123458 7890125", CSV_HEADERS["p3_altitude"]: "112",
+        CSV_HEADERS["p4_utm_str"]: "43Q 123459 7890126", CSV_HEADERS["p4_altitude"]: "113",
+        CSV_HEADERS["kml_desc_survey_date"]: "2024-03-15",
+        CSV_HEADERS["kml_desc_crop_type"]: "Wheat",
+        CSV_HEADERS["kml_desc_notes"]: "Fertile land, good yield expected.",
+    }
+    print("\nTest Case 1: Valid V5 CSV Data")
+    processed_csv_data_v5_valid = process_csv_row_data(sample_csv_row_v5_valid)
+    print(f"CSV Processed: {processed_csv_data_v5_valid.get('uuid')}, Status: {processed_csv_data_v5_valid.get('status')}")
+    print(f"KML Survey Date: {processed_csv_data_v5_valid.get('kml_desc_survey_date')}")
+    if processed_csv_data_v5_valid.get('error_messages'):
+        print(f"Errors: {processed_csv_data_v5_valid['error_messages']}")
+
+    # Test Case 2: CSV data missing a mandatory V5 field (e.g., farmer_name by making it empty)
+    sample_csv_row_v5_missing_mandatory = sample_csv_row_v5_valid.copy()
+    sample_csv_row_v5_missing_mandatory[CSV_HEADERS["farmer_name"]] = "" # farmer_name is present but empty
+    
+    print("\nTest Case 2: V5 CSV Data with empty farmer_name (field is present but empty)")
+    processed_csv_data_v5_missing = process_csv_row_data(sample_csv_row_v5_missing_mandatory)
+    print(f"CSV Processed: {processed_csv_data_v5_missing.get('uuid')}, Status: {processed_csv_data_v5_missing.get('status')}")
+    if processed_csv_data_v5_missing.get('error_messages'):
+        print(f"Errors: {processed_csv_data_v5_missing['error_messages']}")
+    else:
+        print("No errors reported, which is expected if empty farmer_name is only a warning or handled.") # Adjusted expectation
+
+    # Test Case 3: CSV data with one missing point (P2 UTM empty), expecting substitution
+    sample_csv_row_v5_missing_point = sample_csv_row_v5_valid.copy()
+    sample_csv_row_v5_missing_point[CSV_HEADERS["p2_utm_str"]] = "" # P2 UTM is empty
+    
+    print("\nTest Case 3: V5 CSV Data with one missing point (P2 UTM empty), expects P3 substitution for P2")
+    processed_csv_data_v5_one_missing = process_csv_row_data(sample_csv_row_v5_missing_point)
+    print(f"CSV Processed: {processed_csv_data_v5_one_missing.get('uuid')}, Status: {processed_csv_data_v5_one_missing.get('status')}")
+    print(f"P2 UTM: '{processed_csv_data_v5_one_missing.get('p2_utm_str')}', Substituted: {processed_csv_data_v5_one_missing.get('p2_substituted')}")
+    if processed_csv_data_v5_one_missing.get('error_messages'):
+        print(f"Messages: {processed_csv_data_v5_one_missing['error_messages']}")
+
+    # Test Case 4: CSV data with KML description fields missing (should be handled gracefully, default to empty strings)
+    sample_csv_row_v5_no_kml_extras = {
+        CSV_HEADERS["uuid"]: "CSV_UUID_V5_002", 
+        CSV_HEADERS["response_code"]: "CSV_RC_V5_002",
+        CSV_HEADERS["farmer_name"]: "Farmer NoKML", 
+        CSV_HEADERS["village_name"]: "Village NoKML",
+        # block, district, proposed_area_acre are omitted. The processor will use CSV_HEADERS["block"] etc. as keys.
+        # row_dict.get(CSV_HEADERS["block"], "") will correctly return "" for these.
+        CSV_HEADERS["p1_utm_str"]: "43Q 123450 7890120", CSV_HEADERS["p1_altitude"]: "100",
+        CSV_HEADERS["p2_utm_str"]: "43Q 123451 7890121", CSV_HEADERS["p2_altitude"]: "101",
+        CSV_HEADERS["p3_utm_str"]: "43Q 123452 7890122", CSV_HEADERS["p3_altitude"]: "102",
+        CSV_HEADERS["p4_utm_str"]: "43Q 123453 7890123", CSV_HEADERS["p4_altitude"]: "103",
+        # kml_desc_survey_date, kml_desc_crop_type, kml_desc_notes are missing from this dict.
+        # process_csv_row_data will try to get them using CSV_HEADERS values, e.g.
+        # row_dict.get(CSV_HEADERS["kml_desc_survey_date"], "") which will correctly return ""
+    }
+    print("\nTest Case 4: V5 CSV Data without KML description fields (and some other optional fields like block)")
+    processed_csv_data_v5_no_kml = process_csv_row_data(sample_csv_row_v5_no_kml_extras)
+    print(f"CSV Processed: {processed_csv_data_v5_no_kml.get('uuid')}, Status: {processed_csv_data_v5_no_kml.get('status')}")
+    print(f"KML Survey Date (should be empty): '{processed_csv_data_v5_no_kml.get('kml_desc_survey_date')}'")
+    print(f"Block (should be empty as it's missing from row dict): '{processed_csv_data_v5_no_kml.get('block')}'")
+    if processed_csv_data_v5_no_kml.get('error_messages'):
+        print(f"Errors: {processed_csv_data_v5_no_kml['error_messages']}")
+    
+    # Test Case 5: Critical error - missing response_code (empty string)
+    sample_csv_row_v5_critical = sample_csv_row_v5_valid.copy()
+    sample_csv_row_v5_critical[CSV_HEADERS["response_code"]] = ""
+    print("\nTest Case 5: V5 CSV Data missing response_code (field present but empty - critical)")
+    processed_csv_data_v5_critical = process_csv_row_data(sample_csv_row_v5_critical)
+    print(f"CSV Processed: {processed_csv_data_v5_critical.get('uuid')}, Status: {processed_csv_data_v5_critical.get('status')}")
+    if processed_csv_data_v5_critical.get('error_messages'):
+        print(f"Errors: {processed_csv_data_v5_critical['error_messages']}")
+
+    # Test Case 6: All point data missing from CSV (headers might be there, but values are empty or headers absent)
+    # This simulates a CSV where point columns might be missing entirely or present but empty.
+    sample_csv_row_v5_no_points = {
+        CSV_HEADERS["uuid"]: "CSV_UUID_V5_003", 
+        CSV_HEADERS["response_code"]: "CSV_RC_V5_003",
+        CSV_HEADERS["farmer_name"]: "Farmer NoPoints", 
+        CSV_HEADERS["village_name"]: "Village NoPoints",
+        # All pX_utm_str and pX_altitude fields are considered missing from the row_dict.
+        # The processor will try row_dict.get(CSV_HEADERS["p1_utm_str"], "") which will yield "" for all.
+    }
+    print("\nTest Case 6: V5 CSV Data with all point data effectively missing (empty strings for coordinates)")
+    processed_csv_data_v5_no_points = process_csv_row_data(sample_csv_row_v5_no_points)
+    print(f"CSV Processed: {processed_csv_data_v5_no_points.get('uuid')}, Status: {processed_csv_data_v5_no_points.get('status')}")
+    if processed_csv_data_v5_no_points.get('error_messages'):
+        print(f"Errors (expected due to missing points):\n{processed_csv_data_v5_no_points['error_messages']}")
+
+
+    print("\n--- Original API Data Processor Tests (Unaffected by CSV changes) ---")
+    # Basic test for existing CSV processor (not exhaustive)
+    # This part of the test block refers to the old CSV_HEADERS structure if not removed or updated.
+    # For clarity, it's better to remove or adapt it if it's no longer relevant.
+    # For now, it will likely cause errors if CSV_HEADERS["village"] or CSV_HEADERS["p1_utm"] are used
+    # as those keys were changed.
+    #
+    # print("Testing CSV Processor (existing functionality - basic check)")
+    # sample_csv_row = {
+    #     CSV_HEADERS["uuid"]: "CSV_UUID_001", CSV_HEADERS["response_code"]: "CSV_RC_001",
+    #     CSV_HEADERS["farmer_name"]: "CSV Farmer", CSV_HEADERS["village"]: "CSV Village", # ERROR: "village" key
+    #     CSV_HEADERS["p1_utm"]: "43Q 123456 789012", CSV_HEADERS["p1_alt"]: "100", # ERROR: "p1_utm", "p1_alt" keys
+    #     CSV_HEADERS["p2_utm"]: "43Q 123457 789013", CSV_HEADERS["p2_alt"]: "101",
+    #     CSV_HEADERS["p3_utm"]: "43Q 123458 789014", CSV_HEADERS["p3_alt"]: "102",
+    #     CSV_HEADERS["p4_utm"]: "43Q 123459 789015", CSV_HEADERS["p4_alt"]: "103",
+    # }
+    # processed_csv_data = process_csv_row_data(sample_csv_row) # This would fail or behave unexpectedly
+    # print(f"CSV Processed: {processed_csv_data['uuid']}, Status: {processed_csv_data['status']}")
+
 
     sample_api_map_v1 = {
         "record_identifier": "uuid",
@@ -428,7 +579,7 @@ if __name__ == '__main__':
         "internal_notes": "All good."
     }
 
-    print("\nTest Case 1: Valid API Data")
+    print("\nTest Case 1 (API): Valid API Data") # Renamed for clarity
     processed_api_data_1 = process_api_row_data(sample_api_data_valid, sample_api_map_v1)
     print(f"API Processed: {processed_api_data_1.get('uuid')}, Status: {processed_api_data_1.get('status')}")
     if processed_api_data_1.get('error_messages'):
@@ -443,10 +594,7 @@ if __name__ == '__main__':
         "geo_points.point3.utm": "43Q 533050 2196040", "geo_points.point3.altitude": "202",
         "geo_points.point4.utm": "43Q 533040 2196030", "geo_points.point4.altitude": "203",
     }
-    print("\nTest Case 2: API Data with one missing point (P2 UTM empty, P3 will be substituted for P2)")
-    # Note: The substitution logic is p0->p1, p1->p2, p2->p3, p3->p0.
-    # So if p1 (index 1) is missing, p2 (index 2) is used.
-    # In this test, point 2 (index 1) is missing. It will try to use point 3 (index 2) data.
+    print("\nTest Case 2 (API): API Data with one missing point (P2 UTM empty, P3 will be substituted for P2)")
     processed_api_data_2 = process_api_row_data(sample_api_data_missing_point, sample_api_map_v1)
     print(f"API Processed: {processed_api_data_2.get('uuid')}, Status: {processed_api_data_2.get('status')}")
     print(f"P2 UTM: {processed_api_data_2.get('p2_utm_str')}, P2 Substituted: {processed_api_data_2.get('p2_substituted')}")
@@ -458,7 +606,7 @@ if __name__ == '__main__':
         "survey_code": "API_RC_003",
         "farmer_details.name": "API Farmer 3",
     }
-    print("\nTest Case 3: API Data with critical error (missing UUID)")
+    print("\nTest Case 3 (API): API Data with critical error (missing UUID)")
     processed_api_data_3 = process_api_row_data(sample_api_data_critical_error, sample_api_map_v1)
     print(f"API Processed: {processed_api_data_3.get('uuid')}, Status: {processed_api_data_3.get('status')}")
     if processed_api_data_3.get('error_messages'):
@@ -471,7 +619,7 @@ if __name__ == '__main__':
         "geo_points.point3.utm": "43Q 533050 2196040", "geo_points.point3.altitude": "202",
         "geo_points.point4.utm": "43Q 533040 2196030", "geo_points.point4.altitude": "203",
     }
-    print("\nTest Case 4: API Data with two missing points")
+    print("\nTest Case 4 (API): API Data with two missing points")
     processed_api_data_4 = process_api_row_data(sample_api_data_two_missing_points, sample_api_map_v1)
     print(f"API Processed: {processed_api_data_4.get('uuid')}, Status: {processed_api_data_4.get('status')}")
     if processed_api_data_4.get('error_messages'):
@@ -484,13 +632,12 @@ if __name__ == '__main__':
         "geo_points.point3.utm": "43Q 123458 789014", "geo_points.point3.altitude": "102",
         "geo_points.point4.utm": "43Q 123459 789015", "geo_points.point4.altitude": "103",
     }
-    print("\nTest Case 5: API Data with inconsistent UTM zones")
+    print("\nTest Case 5 (API): API Data with inconsistent UTM zones")
     processed_api_data_5 = process_api_row_data(sample_api_data_inconsistent_zones, sample_api_map_v1)
     print(f"API Processed: {processed_api_data_5.get('uuid')}, Status: {processed_api_data_5.get('status')}")
     if processed_api_data_5.get('error_messages'):
         print(f"Errors: {processed_api_data_5['error_messages']}")
 
-    # Test case: What if api_to_db_map doesn't contain mapping for some points?
     sample_api_map_v2_missing_p4 = {
         "record_identifier": "uuid", "survey_code": "response_code",
         "geo_points.point1.utm": "p1_utm_str", "geo_points.point1.altitude": "p1_altitude",
@@ -506,8 +653,7 @@ if __name__ == '__main__':
         # P4 data might be present in API payload but won't be mapped
         "geo_points.point4.utm": "43Q 123459 789015", "geo_points.point4.altitude": "103",
     }
-    print("\nTest Case 6: API Data with map missing P4 definition")
-    # This will result in P4 being "empty" during processing, triggering substitution or "too_many_missing"
+    print("\nTest Case 6 (API): API Data with map missing P4 definition")
     processed_api_data_6 = process_api_row_data(sample_api_data_for_map_v2, sample_api_map_v2_missing_p4)
     print(f"API Processed: {processed_api_data_6.get('uuid')}, Status: {processed_api_data_6.get('status')}")
     print(f"P4 UTM: '{processed_api_data_6.get('p4_utm_str')}', P4 Substituted: {processed_api_data_6.get('p4_substituted')}")

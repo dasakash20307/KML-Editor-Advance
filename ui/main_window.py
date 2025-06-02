@@ -179,6 +179,10 @@ class MainWindow(QMainWindow):
         data_menu.addAction(self.delete_checked_action)
         self.clear_all_data_action=QAction(QIcon.fromTheme("edit-clear-all"),"Clear All Polygon Data...",self)
         data_menu.addAction(self.clear_all_data_action)
+        data_menu.addSeparator() # Added separator
+        self.export_csv_template_action = QAction(QIcon.fromTheme("document-export"), "Export CSV Template...", self) # Or "text-csv"
+        data_menu.addAction(self.export_csv_template_action)
+
 
         kml_menu=menubar.addMenu("&KML")
         self.generate_kml_action=QAction(QIcon.fromTheme("document-export"),"&Generate KML for Checked Rows...",self)
@@ -214,6 +218,7 @@ class MainWindow(QMainWindow):
         self.export_data_action.triggered.connect(self.data_handler.handle_export_displayed_data_csv)
         self.delete_checked_action.triggered.connect(self.data_handler.handle_delete_checked_rows)
         self.clear_all_data_action.triggered.connect(self.data_handler.handle_clear_all_data)
+        self.export_csv_template_action.triggered.connect(self.handle_export_csv_template) # New connection
         self.generate_kml_action.triggered.connect(lambda: self.data_handler.handle_generate_kml(output_mode_dialog_class=OutputModeDialog))
 
         self.source_model.evaluation_status_changed.connect(self.data_handler.update_evaluation_status_in_db)
@@ -345,6 +350,14 @@ class MainWindow(QMainWindow):
 
     def handle_manage_api_sources(self):
         dialog=APISourcesDialog(self,self.db_manager);dialog.exec();self.refresh_api_source_dropdown()
+
+    def handle_export_csv_template(self):
+        """Calls the DataHandler method to export the CSV template."""
+        if hasattr(self, 'data_handler'):
+            self.data_handler.handle_export_csv_template()
+        else:
+            self.log_message("DataHandler not initialized. Cannot export CSV template.", "error")
+            QMessageBox.critical(self, "Error", "DataHandler not available.")
 
     def _handle_ge_view_toggle(self,checked):
         original_action_blocked,original_button_blocked=self.toggle_ge_view_action.signalsBlocked(),self.toggle_ge_view_button.signalsBlocked()
