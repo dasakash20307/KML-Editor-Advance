@@ -3,9 +3,9 @@
 import os
 import sys
 import csv
-import utm 
-import tempfile 
-import subprocess 
+import utm
+import tempfile
+import subprocess
 
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTableView,
                                QSplitter, QFrame, QStatusBar, QMenuBar, QMenu, QToolBar, QPushButton,
@@ -26,9 +26,9 @@ import uuid
 
 # Dialogs and Custom Widgets
 from .dialogs.api_sources_dialog import APISourcesDialog
-from .dialogs.output_mode_dialog import OutputModeDialog 
+from .dialogs.output_mode_dialog import OutputModeDialog
 from .dialogs.default_view_settings_dialog import DefaultViewSettingsDialog
-from .dialogs import APIImportProgressDialog 
+from .dialogs import APIImportProgressDialog
 from .widgets.map_view_widget import MapViewWidget
 from .widgets.google_earth_webview_widget import GoogleEarthWebViewWidget
 from .table_models import PolygonTableModel, PolygonFilterProxyModel
@@ -55,7 +55,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME_MW} - {APP_VERSION_MW}")
         self.app_icon_path = resource_path(APP_ICON_FILE_NAME_MW)
         if os.path.exists(self.app_icon_path): self.setWindowIcon(QIcon(self.app_icon_path))
-        
+
         self.db_manager = db_manager
         self.credential_manager = credential_manager
         if self.db_manager is None: QMessageBox.critical(self, "Initialization Error", "Database Manager not provided."); sys.exit(1)
@@ -81,9 +81,9 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.critical(self, "Locking Error", "Could not initialize KML lock manager: Credential Manager missing.")
 
-        self.MAX_LOCK_RETRIES = 5 
+        self.MAX_LOCK_RETRIES = 5
         self.LOCK_RETRY_TIMEOUT_MS = 7000
-        
+
         self.API_FIELD_TO_DB_FIELD_MAP = {
             "UUID (use as the file name)": "uuid", "Response Code": "response_code",
             "Name of the Farmer": "farmer_name", "Village Name": "village_name",
@@ -93,8 +93,12 @@ class MainWindow(QMainWindow):
             "Point 3 (UTM)": "p3_utm_str", "Point 3 (altitude)": "p3_altitude",
             "Point 4 (UTM)": "p4_utm_str", "Point 4 (altitude)": "p4_altitude",
         }
+
+
+        self._create_main_layout() # For status bar
+        self._create_status_bar() # For status bar message access
         
-        # Instantiate Handlers
+        # Instantiate Handlers (moved after status bar creation)
         self.lock_handler = LockHandler(
             main_window_ref=self,
             db_lock_manager=self.db_lock_manager,
@@ -106,9 +110,6 @@ class MainWindow(QMainWindow):
             lock_retry_timeout_ms=self.LOCK_RETRY_TIMEOUT_MS
         )
 
-        self._create_main_layout() # For status bar
-        self._create_status_bar() # For status bar message access
-        
         self._setup_main_content_area_models_views() # Create models and views before data_handler
 
         self.data_handler = DataHandler(
@@ -135,18 +136,18 @@ class MainWindow(QMainWindow):
             source_model=self.source_model,
             filter_proxy_model=self.filter_proxy_model
         )
-        
+
         self.resize(1200, 800); self._center_window()
         self._create_header()
         self._create_menus_and_toolbar() # Connect actions here
         self._setup_main_content_area_layout() # Layout widgets
-        
+
         self._connect_signals() # Central place for signal connections
-        
-        self.load_data_into_table() 
+
+        self.load_data_into_table()
         self.log_message(f"{APP_NAME_MW} {APP_VERSION_MW} started. DB at: {self.db_manager.db_path}", "info")
 
-    def _create_main_layout(self): 
+    def _create_main_layout(self):
         self.central_widget = QWidget(); self.setCentralWidget(self.central_widget)
         self.main_layout = QVBoxLayout(self.central_widget)
         self.main_layout.setContentsMargins(0,0,0,0); self.main_layout.setSpacing(0)
@@ -161,13 +162,13 @@ class MainWindow(QMainWindow):
         title_label=QLabel(APP_NAME_MW);title_label.setFont(QFont("Segoe UI",16,QFont.Weight.Bold));title_label.setAlignment(Qt.AlignmentFlag.AlignCenter);header_layout.addWidget(title_label,1)
         version_label=QLabel(APP_VERSION_MW);version_label.setFont(QFont("Segoe UI",8,QFont.Weight.Normal,True));version_label.setStyleSheet(f"color:{INFO_COLOR_MW};");header_layout.addWidget(version_label,0,Qt.AlignmentFlag.AlignVCenter|Qt.AlignmentFlag.AlignRight)
         self.main_layout.addWidget(header_widget)
-        
+
     def _create_menus_and_toolbar(self):
         menubar=self.menuBar();file_menu=menubar.addMenu("&File")
         self.export_data_action=QAction(QIcon.fromTheme("document-save-as",QIcon(self.app_icon_path)),"Export Displayed Data as &CSV...",self)
         file_menu.addAction(self.export_data_action)
         file_menu.addSeparator();exit_action=QAction(QIcon.fromTheme("application-exit"),"E&xit",self);exit_action.setShortcut("Ctrl+Q");exit_action.setStatusTip("Exit application");exit_action.triggered.connect(self.close);file_menu.addAction(exit_action)
-        
+
         data_menu=menubar.addMenu("&Data")
         self.import_csv_action=QAction(QIcon.fromTheme("document-open"),"Import &CSV...",self)
         data_menu.addAction(self.import_csv_action)
@@ -178,7 +179,7 @@ class MainWindow(QMainWindow):
         data_menu.addAction(self.delete_checked_action)
         self.clear_all_data_action=QAction(QIcon.fromTheme("edit-clear-all"),"Clear All Polygon Data...",self)
         data_menu.addAction(self.clear_all_data_action)
-        
+
         kml_menu=menubar.addMenu("&KML")
         self.generate_kml_action=QAction(QIcon.fromTheme("document-export"),"&Generate KML for Checked Rows...",self)
         kml_menu.addAction(self.generate_kml_action)
@@ -193,15 +194,15 @@ class MainWindow(QMainWindow):
         help_menu=menubar.addMenu("&Help");self.about_action=QAction(QIcon.fromTheme("help-about"),"&About",self);self.about_action.triggered.connect(self.handle_about);help_menu.addAction(self.about_action)
         self.ge_instructions_action=QAction("GE &Instructions",self) # Will connect to KMLHandler
         help_menu.addAction(self.ge_instructions_action)
-        
+
         self.toolbar=QToolBar("Main Toolbar");self.toolbar.setIconSize(QSize(20,20));self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon);self.toolbar.setMovable(True);self.addToolBar(Qt.ToolBarArea.TopToolBarArea,self.toolbar)
         self.toolbar.addAction(self.import_csv_action);self.toolbar.addSeparator()
         self.toggle_ge_view_button=QPushButton("GE View: OFF");self.toggle_ge_view_button.setCheckable(True);self.toggle_ge_view_button.toggled.connect(self._handle_ge_view_toggle);self.toolbar.addWidget(self.toggle_ge_view_button);self.toolbar.addSeparator()
         self.toolbar.addWidget(QLabel(" API Source: "));self.api_source_combo_toolbar=QComboBox();self.api_source_combo_toolbar.setMinimumWidth(150);self.refresh_api_source_dropdown();self.toolbar.addWidget(self.api_source_combo_toolbar)
-        
+
         self.fetch_api_toolbar_action=QAction(QIcon.fromTheme("network-transmit-receive"),"&Fetch from Selected API",self) # Renamed for clarity
         self.toolbar.addAction(self.fetch_api_toolbar_action)
-        
+
         manage_api_toolbar_action=QAction(QIcon.fromTheme("preferences-system"),"Manage API Sources",self);manage_api_toolbar_action.triggered.connect(self.handle_manage_api_sources);self.toolbar.addAction(manage_api_toolbar_action)
         self.toolbar.addSeparator();self.toolbar.addAction(self.generate_kml_action);self.toolbar.addAction(self.delete_checked_action)
 
@@ -214,7 +215,7 @@ class MainWindow(QMainWindow):
         self.delete_checked_action.triggered.connect(self.data_handler.handle_delete_checked_rows)
         self.clear_all_data_action.triggered.connect(self.data_handler.handle_clear_all_data)
         self.generate_kml_action.triggered.connect(lambda: self.data_handler.handle_generate_kml(output_mode_dialog_class=OutputModeDialog))
-        
+
         self.source_model.evaluation_status_changed.connect(self.data_handler.update_evaluation_status_in_db)
         self.data_handler.data_changed_signal.connect(self.load_data_into_table)
 
@@ -225,7 +226,7 @@ class MainWindow(QMainWindow):
              self.kml_handler.kml_data_updated_signal.connect(self.load_data_into_table)
 
 
-    def _create_status_bar(self): 
+    def _create_status_bar(self):
         self._main_status_bar=QStatusBar()
         self.setStatusBar(self._main_status_bar)
         self._main_status_bar.showMessage("Ready.",3000)
@@ -241,7 +242,7 @@ class MainWindow(QMainWindow):
         self.source_model = PolygonTableModel(parent=self, db_manager_instance=self.db_manager)
         self.filter_proxy_model = PolygonFilterProxyModel(self)
         self.filter_proxy_model.setSourceModel(self.source_model)
-        
+
         self.table_view = QTableView()
         self.table_view.setModel(self.filter_proxy_model)
 
@@ -249,7 +250,7 @@ class MainWindow(QMainWindow):
         # This part layouts the widgets after they (and handlers) are created
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.addWidget(self.map_stack)
-        
+
         right_pane_widget = QWidget(); right_pane_layout = QVBoxLayout(right_pane_widget); right_pane_layout.setContentsMargins(10,0,10,10)
 
         self.table_editors_strip = QWidget()
@@ -268,27 +269,27 @@ class MainWindow(QMainWindow):
         self.right_splitter = QSplitter(Qt.Orientation.Vertical)
         table_container = QWidget(); table_layout = QVBoxLayout(table_container); table_layout.setContentsMargins(0,0,0,0)
         checkbox_header_layout = QHBoxLayout(); self.select_all_checkbox = QCheckBox("Select/Deselect All"); self.select_all_checkbox.stateChanged.connect(self.toggle_all_checkboxes); checkbox_header_layout.addWidget(self.select_all_checkbox); checkbox_header_layout.addStretch(); table_layout.addLayout(checkbox_header_layout)
-        
+
         # self.table_view already created and model set in _setup_main_content_area_models_views
-        self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows); self.table_view.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked|QAbstractItemView.EditTrigger.SelectedClicked); self.table_view.horizontalHeader().setStretchLastSection(True); self.table_view.setAlternatingRowColors(False); self.table_view.setSortingEnabled(True); self.table_view.sortByColumn(PolygonTableModel.DATE_ADDED_COL,Qt.SortOrder.DescendingOrder) 
-        evaluation_delegate = EvaluationStatusDelegate(self.table_view); self.table_view.setItemDelegateForColumn(PolygonTableModel.EVALUATION_STATUS_COL, evaluation_delegate) 
+        self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows); self.table_view.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked|QAbstractItemView.EditTrigger.SelectedClicked); self.table_view.horizontalHeader().setStretchLastSection(True); self.table_view.setAlternatingRowColors(False); self.table_view.setSortingEnabled(True); self.table_view.sortByColumn(PolygonTableModel.DATE_ADDED_COL,Qt.SortOrder.DescendingOrder)
+        evaluation_delegate = EvaluationStatusDelegate(self.table_view); self.table_view.setItemDelegateForColumn(PolygonTableModel.EVALUATION_STATUS_COL, evaluation_delegate)
         self.table_view.setColumnWidth(PolygonTableModel.CHECKBOX_COL,30); self.table_view.setColumnWidth(PolygonTableModel.DB_ID_COL,50); # etc.
         # ... (set all other column widths as before) ...
         self.table_view.setColumnWidth(PolygonTableModel.UUID_COL,130); self.table_view.setColumnWidth(PolygonTableModel.RESPONSE_CODE_COL,120); self.table_view.setColumnWidth(PolygonTableModel.EVALUATION_STATUS_COL,150); self.table_view.setColumnWidth(PolygonTableModel.FARMER_NAME_COL,150); self.table_view.setColumnWidth(PolygonTableModel.VILLAGE_COL,120); self.table_view.setColumnWidth(PolygonTableModel.DATE_ADDED_COL,140); self.table_view.setColumnWidth(PolygonTableModel.KML_FILE_NAME_COL,150); self.table_view.setColumnWidth(PolygonTableModel.KML_FILE_STATUS_COL,110); self.table_view.setColumnWidth(PolygonTableModel.EDIT_COUNT_COL,90); self.table_view.setColumnWidth(PolygonTableModel.LAST_EDIT_DATE_COL,140); self.table_view.setColumnWidth(PolygonTableModel.EDITOR_DEVICE_ID_COL,130); self.table_view.setColumnWidth(PolygonTableModel.EDITOR_NICKNAME_COL,130); self.table_view.setColumnWidth(PolygonTableModel.DEVICE_CODE_COL,140); self.table_view.setColumnWidth(PolygonTableModel.EXPORT_COUNT_COL,100); self.table_view.setColumnWidth(PolygonTableModel.LAST_EXPORTED_COL,140); self.table_view.setColumnWidth(PolygonTableModel.LAST_MODIFIED_COL,140)
 
         table_layout.addWidget(self.table_view); self.right_splitter.addWidget(table_container)
         # self.table_view.selectionModel().selectionChanged.connect(self.on_table_selection_changed) # Moved to _connect_signals
-        
+
         log_container = QWidget(); log_layout = QVBoxLayout(log_container); log_layout.setContentsMargins(0,10,0,0); log_label = QLabel("Status and Logs:"); log_layout.addWidget(log_label); self.log_text_edit_qt_actual = QTextEdit(); self.log_text_edit_qt_actual.setReadOnly(True); self.log_text_edit_qt_actual.setFont(QFont("Segoe UI",9)); log_layout.addWidget(self.log_text_edit_qt_actual); self.right_splitter.addWidget(log_container)
         self.right_splitter.setStretchFactor(0,3); self.right_splitter.setStretchFactor(1,1); right_pane_layout.addWidget(self.right_splitter,1); self.main_splitter.addWidget(right_pane_widget)
         self.main_splitter.setStretchFactor(0,1); self.main_splitter.setStretchFactor(1,2); self.main_layout.addWidget(self.main_splitter,1)
 
     def toggle_all_checkboxes(self,state_int): self.source_model.set_all_checkboxes(Qt.CheckState(state_int))
-    
+
     def on_table_selection_changed(self,selected,deselected):
         # This method now primarily handles map updates. KML/GE logic is delegated.
         self.kml_handler.on_table_selection_changed(selected, deselected) # Delegate to KML Handler
-        
+
         # Keep map update logic here for now, or move to MapViewWidget listening to table selection
         selected_proxy_indexes=self.table_view.selectionModel().selectedRows()
         polygon_record=None
@@ -297,12 +298,12 @@ class MainWindow(QMainWindow):
             source_model_index=self.filter_proxy_model.mapToSource(selected_proxy_indexes[0])
             if source_model_index.isValid():
                 db_id_item=self.source_model.data(source_model_index.siblingAtColumn(PolygonTableModel.DB_ID_COL))
-                try: 
+                try:
                     db_id=int(db_id_item)
                     polygon_record=self.db_manager.get_polygon_data_by_id(db_id)
                 except (ValueError,TypeError): polygon_record=None
                 except Exception: polygon_record=None # General exception
-        
+
         # This part updates the MapViewWidget (non-GE, non-KML part of original method)
         if self.map_stack.currentIndex() == 0: # Map View is active
             if polygon_record and polygon_record.get('status') == 'valid_for_kml':
@@ -333,7 +334,7 @@ class MainWindow(QMainWindow):
                         self.map_view_widget.clear_map()
             elif hasattr(self.map_view_widget, 'clear_map'): # Default clear
                 self.map_view_widget.clear_map()
-    
+
     def refresh_api_source_dropdown(self):
         if hasattr(self,'api_source_combo_toolbar'):
             current_text=self.api_source_combo_toolbar.currentText();self.api_source_combo_toolbar.clear();sources=self.db_manager.get_mwater_sources()
@@ -344,7 +345,7 @@ class MainWindow(QMainWindow):
 
     def handle_manage_api_sources(self):
         dialog=APISourcesDialog(self,self.db_manager);dialog.exec();self.refresh_api_source_dropdown()
-    
+
     def _handle_ge_view_toggle(self,checked):
         original_action_blocked,original_button_blocked=self.toggle_ge_view_action.signalsBlocked(),self.toggle_ge_view_button.signalsBlocked()
         self.toggle_ge_view_action.blockSignals(True);self.toggle_ge_view_button.blockSignals(True)
@@ -357,8 +358,8 @@ class MainWindow(QMainWindow):
     def handle_about(self):QMessageBox.about(self,f"About {APP_NAME_MW}",f"<b>{APP_NAME_MW}</b><br>Version:{APP_VERSION_MW}<br><br>{ORGANIZATION_TAGLINE_MW}<br><br>Processes geographic data for KML generation.")
     def handle_show_ge_instructions(self): # This now calls KMLHandler's method
         if hasattr(self, 'kml_handler'): self.kml_handler._show_ge_instructions_popup()
-    
-    def log_message(self,message,level="info"): 
+
+    def log_message(self,message,level="info"):
         timestamp=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S");log_entry=f"[{timestamp}][{level.upper()}] {message}"
         if hasattr(self,'log_text_edit_qt_actual'):
             color_map={"INFO":"#0078D7","ERROR":"#D32F2F","SUCCESS":"#388E3C","WARNING":"#FFA500"}
@@ -374,12 +375,12 @@ class MainWindow(QMainWindow):
         else:
             self.log_message("Default KML view settings dialog cancelled.", "info")
 
-    def load_data_into_table(self): 
+    def load_data_into_table(self):
         try:
             polygon_records=self.db_manager.get_all_polygon_data_for_display();self.source_model.update_data(polygon_records)
             if hasattr(self,'filter_proxy_model'):self.filter_proxy_model.invalidate()
         except Exception as e:self.log_message(f"Error loading data into table:{e}","error");QMessageBox.warning(self,"Load Data Error",f"Could not load records:{e}")
-    
+
     def closeEvent(self,event):
         if hasattr(self,'map_view_widget') and self.map_view_widget: self.map_view_widget.cleanup()
         if hasattr(self,'google_earth_view_widget') and hasattr(self.google_earth_view_widget,'cleanup'): self.google_earth_view_widget.cleanup()
@@ -403,6 +404,45 @@ class MainWindow(QMainWindow):
     def update_status_bar(self, message, timeout=0):
         if hasattr(self, '_main_status_bar'):
             self._main_status_bar.showMessage(message, timeout)
+
+    def _center_window(self):
+        # Placeholder method to center the window
+        screen_geometry = QApplication.primaryScreen().geometry()
+        x = (screen_geometry.width() - self.width()) // 2
+        y = (screen_geometry.height() - self.height()) // 2
+        self.move(x, y)
+
+    def _setup_filter_panel(self):
+        # Placeholder method to set up the filter panel
+        filter_panel = QGroupBox("Filter Data")
+        filter_layout = QGridLayout(filter_panel)
+
+        # Example filter widgets (replace with actual filter logic)
+        filter_layout.addWidget(QLabel("Farmer Name:"), 0, 0)
+        filter_layout.addWidget(QLineEdit(), 0, 1)
+
+        filter_layout.addWidget(QLabel("Village:"), 1, 0)
+        filter_layout.addWidget(QLineEdit(), 1, 1)
+
+        filter_layout.addWidget(QLabel("Evaluation Status:"), 2, 0)
+        status_combo = QComboBox()
+        status_combo.addItem("All")
+        status_combo.addItem("Eligible")
+        status_combo.addItem("Not Eligible")
+        status_combo.addItem("Not Evaluated Yet")
+        filter_layout.addWidget(status_combo, 2, 1)
+
+        filter_panel.setVisible(False) # Initially hidden
+        return filter_panel
+
+    def _toggle_filter_panel_visibility(self):
+        # Placeholder method to toggle filter panel visibility
+        filter_panel = self.findChild(QGroupBox, "Filter Data") # Find the filter panel by object name or type
+        if filter_panel:
+            is_visible = filter_panel.isVisible()
+            filter_panel.setVisible(not is_visible)
+            self.toggle_filter_panel_button.setText(f"GE View: {'Hide Filters' if not is_visible else 'Show Filters'}") # Update button text
+
 
     # Placeholder for _setup_main_content_area to avoid breaking the call order
     # It's split into _setup_main_content_area_models_views and _setup_main_content_area_layout

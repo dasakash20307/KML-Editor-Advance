@@ -505,10 +505,6 @@ if __name__ == '__main__':
                     print(f"FAILURE: Could not retrieve record {poly_id1} after KML status update.")
             else:
                 print(f"FAILURE: update_kml_file_status returned False for ID {poly_id1}.")
-        else:
-            print(f"Record {poly_id1} not found after eval status update attempt.")
-        else:
-            print(f"FAILURE: update_kml_file_status returned False for ID {poly_id1}.")
 
 
     # Test duplicate handling (skip)

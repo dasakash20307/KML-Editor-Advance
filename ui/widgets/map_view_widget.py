@@ -61,67 +61,169 @@ class MapViewWidget(QWidget):
             def find_element_ns(parent_el, path_with_prefixes):
                 element = parent_el.find(path_with_prefixes, namespaces)
                 if element is None:
-                    path_no_prefixes = path_with_prefixes.replace('kml:', '')
+                    # Try without namespace prefix as a fallback
+                    path_no_prefixes = path_with_prefixes.replace('kml:', '').replace('gx:', '')
                     if path_no_prefixes != path_with_prefixes:
-                        element = parent_el.find(path_no_prefixes)
+                         element = parent_el.find(path_no_prefixes)
                 return element
 
             description_text = "No description available"
-            desc_el = find_element_ns(root, './/kml:Placemark/kml:description')
-            if desc_el is None or desc_el.text is None:
-                desc_el = find_element_ns(root, './/kml:Document/kml:description')
-
-            if desc_el is not None and desc_el.text:
-                description_text = desc_el.text.strip()
-
-            coords_list_lat_lon = []
+            coords_list_lat_lon = None
             is_point = False
-            coords_el = find_element_ns(root, './/kml:Polygon/kml:outerBoundaryIs/kml:LinearRing/kml:coordinates')
-            if coords_el is None:
-                point_tag_el = find_element_ns(root, './/kml:Point')
-                if point_tag_el is not None:
-                    is_point = True
-                    coords_el = find_element_ns(point_tag_el, 'kml:coordinates')
+            found_geometry = False
 
-            if coords_el is not None and coords_el.text:
-                coordinates_str = coords_el.text.strip()
-                raw_coords = coordinates_str.split()
-                for coord_pair_str in raw_coords:
-                    parts = coord_pair_str.split(',')
-                    if len(parts) >= 2:
-                        try:
-                            lon, lat = float(parts[0]), float(parts[1])
-                            coords_list_lat_lon.append((lat, lon))
-                        except ValueError:
-                            print(f"MapViewWidget._parse_kml_data: Warning: Could not parse coordinate part: {parts}")
-                            continue
+            # Find the first Placemark and its description
+            first_placemark = find_element_ns(root, './/kml:Placemark')
+            if first_placemark is not None:
+                desc_el = find_element_ns(first_placemark, 'kml:description')
+                if desc_el is not None and desc_el.text:
+                    description_text = desc_el.text.strip()
+                else:
+                     # Also check description directly under Document if no Placemark description
+                     doc_desc_el = find_element_ns(root, './/kml:Document/kml:description')
+                     if doc_desc_el is not None and doc_desc_el.text:
+                         description_text = doc_desc_el.text.strip()
+
+
+                # Find geometry within the first Placemark
+                geometry_elements = first_placemark.findall('.//kml:Polygon', namespaces) + \
+                                    first_placemark.findall('.//kml:LineString', namespaces) + \
+                                    first_placemark.findall('.//kml:Point', namespaces) + \
+                                    first_placemark.findall('.//kml:MultiGeometry', namespaces)
+
+                for geom_el in geometry_elements:
+                    if found_geometry: break # Only process the first geometry found
+
+                    if geom_el.tag.endswith('Polygon'):
+                        coords_el = find_element_ns(geom_el, 'kml:outerBoundaryIs/kml:LinearRing/kml:coordinates')
+                        if coords_el is not None and coords_el.text:
+                            coords_list_lat_lon = []
+                            raw_coords = coords_el.text.strip().split()
+                            for coord_pair_str in raw_coords:
+                                parts = coord_pair_str.split(',')
+                                if len(parts) >= 2:
+                                    try:
+                                        # KML coordinates are typically lon, lat, altitude
+                                        lon, lat = float(parts[0]), float(parts[1])
+                                        coords_list_lat_lon.append((lat, lon)) # Store as (lat, lon) for Folium
+                                    except ValueError:
+                                        print(f"MapViewWidget._parse_kml_data: Warning: Could not parse coordinate part: {parts}")
+                                        continue
+                            if coords_list_lat_lon: found_geometry = True
+
+                    elif geom_el.tag.endswith('Point'):
+                         coords_el = find_element_ns(geom_el, 'kml:coordinates')
+                         if coords_el is not None and coords_el.text:
+                             raw_coords = coords_el.text.strip().split()
+                             if raw_coords:
+                                 parts = raw_coords[0].split(',')
+                                 if len(parts) >= 2:
+                                     try:
+                                         lon, lat = float(parts[0]), float(parts[1])
+                                         coords_list_lat_lon = [(lat, lon)] # Store as (lat, lon)
+                                         is_point = True
+                                         found_geometry = True
+                                     except ValueError:
+                                         print(f"MapViewWidget._parse_kml_data: Warning: Could not parse point coordinate: {parts}")
+
+                    elif geom_el.tag.endswith('LineString'):
+                         # Currently not handling LineString for display, but could add later
+                         pass # Or parse coordinates if needed
+
+                    elif geom_el.tag.endswith('MultiGeometry'):
+                        # Iterate through children of MultiGeometry
+                        multi_geom_children = geom_el.findall('.//kml:Polygon', namespaces) + \
+                                              geom_el.findall('.//kml:LineString', namespaces) + \
+                                              geom_el.findall('.//kml:Point', namespaces)
+                        for child_geom in multi_geom_children:
+                             if found_geometry: break # Only process the first geometry found within MultiGeometry
+
+                             if child_geom.tag.endswith('Polygon'):
+                                 coords_el = find_element_ns(child_geom, 'kml:outerBoundaryIs/kml:LinearRing/kml:coordinates')
+                                 if coords_el is not None and coords_el.text:
+                                     coords_list_lat_lon = []
+                                     raw_coords = coords_el.text.strip().split()
+                                     for coord_pair_str in raw_coords:
+                                         parts = coord_pair_str.split(',')
+                                         if len(parts) >= 2:
+                                             try:
+                                                 lon, lat = float(parts[0]), float(parts[1])
+                                                 coords_list_lat_lon.append((lat, lon))
+                                             except ValueError:
+                                                 print(f"MapViewWidget._parse_kml_data: Warning: Could not parse coordinate part in MultiGeometry: {parts}")
+                                                 continue
+                                     if coords_list_lat_lon: found_geometry = True
+
+                             elif child_geom.tag.endswith('Point'):
+                                 coords_el = find_element_ns(child_geom, 'kml:coordinates')
+                                 if coords_el is not None and coords_el.text:
+                                     raw_coords = coords_el.text.strip().split()
+                                     if raw_coords:
+                                         parts = raw_coords[0].split(',')
+                                         if len(parts) >= 2:
+                                             try:
+                                                 lon, lat = float(parts[0]), float(parts[1])
+                                                 coords_list_lat_lon = [(lat, lon)]
+                                                 is_point = True
+                                                 found_geometry = True
+                                             except ValueError:
+                                                 print(f"MapViewWidget._parse_kml_data: Warning: Could not parse point coordinate in MultiGeometry: {parts}")
+
+                             # Add other geometry types within MultiGeometry if needed
+
             return coords_list_lat_lon if coords_list_lat_lon else None, description_text, is_point, None
+
         except ET.ParseError as e:
             return None, "Error parsing KML.", False, f"XML ParseError: {e}"
         except Exception as e:
             return None, "Unexpected error during KML parsing.", False, f"Unexpected error: {e}"
 
-    def _render_and_update_map(self):
-        """Creates a new Folium map with current state and updates the web view."""
+    def _render_and_update_map(self, bounds=None, center=None, zoom=None):
+        """
+        Creates a new Folium map, adds current features, adjusts view based on parameters,
+        and updates the web view.
+        """
+        zoom_offset = self.credential_manager.get_kml_default_view_settings().get("kml_zoom_offset", 0)
+
+        # Default map initialization parameters
+        map_location = self._current_center
+        map_zoom = self._current_zoom
+
+        # If specific center and zoom are provided (typically for points)
+        if center is not None and zoom is not None:
+            map_location = center
+            # Apply zoom offset for points (subtract to zoom out)
+            map_zoom = max(self.MIN_ZOOM_LEVEL, zoom - zoom_offset)
+
         self.current_folium_map = folium.Map(
-            location=self._current_center,
-            zoom_start=self._current_zoom,
+            location=map_location,
+            zoom_start=map_zoom,
             tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
             attr='Esri World Imagery',
             control_scale=True
         )
         folium.TileLayer('openstreetmap', name='OpenStreetMap').add_to(self.current_folium_map)
         folium.TileLayer('CartoDB positron', name='CartoDB Positron (Light)').add_to(self.current_folium_map)
-        # Esri Satellite is default, added again here to ensure it's present if logic changes
         folium.TileLayer(
             tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
             attr='Esri', name='Esri Satellite (Default)', overlay=False, control=True
         ).add_to(self.current_folium_map)
 
-        for feature in self._current_features: # Re-add current features
-            feature.add_to(self.current_folium_map)
-        
+        for feature_item in self._current_features: # Add current features
+            feature_item.add_to(self.current_folium_map)
+
         folium.LayerControl().add_to(self.current_folium_map)
+
+        # If bounds are provided (typically for polygons), fit the map to these bounds
+        if bounds is not None:
+            self.current_folium_map.fit_bounds(bounds)
+            # The fit_bounds() method adjusts the map's view (location and zoom) internally.
+            # The zoom_offset is handled for explicit center/zoom cases (e.g., points).
+            # Applying a similar offset after fit_bounds for polygons would require
+            # a more complex approach if Folium doesn't expose a direct way to modify
+            # zoom post-fit_bounds without re-initializing the map.
+            # For now, we rely on fit_bounds() to set the optimal view for polygons.
+
         self._update_webview_with_map(self.current_folium_map)
 
     def _update_webview_with_map(self, folium_map_object):
@@ -195,7 +297,8 @@ class MapViewWidget(QWidget):
                     )
                     self._current_features.append(point_feature)
                     new_center = coords_list_lat_lon[0]
-                    new_zoom = max(self.MIN_ZOOM_LEVEL, 15 + zoom_offset)
+                    base_zoom_for_point = 15 # Define a base zoom level for points
+                    new_zoom = max(self.MIN_ZOOM_LEVEL, base_zoom_for_point - zoom_offset) # Subtract offset
             elif len(coords_list_lat_lon) > 2: # Polygon
                 polygon_feature = folium.Polygon(
                     locations=coords_list_lat_lon, color=stroke_color, weight=stroke_width_val,
@@ -213,33 +316,22 @@ class MapViewWidget(QWidget):
         else:
             self.description_edit.append("\nNote: No valid coordinate data found to display on map.")
 
-        if new_center and new_zoom:
-            self._current_center = new_center
-            self._current_zoom = new_zoom
-        elif bounds_for_map:
-            # Create a temporary map to get zoom level from fit_bounds
-            temp_map_for_zoom_calc = folium.Map(tiles=None) # No tiles needed
-            temp_map_for_zoom_calc.fit_bounds(bounds_for_map)
-            self._current_center = temp_map_for_zoom_calc.location # Center from fit_bounds
-            # Ensure zoom_start is an attribute before accessing
-            base_zoom = getattr(temp_map_for_zoom_calc, 'zoom_start', self.DEFAULT_ZOOM) 
-            self._current_zoom = max(self.MIN_ZOOM_LEVEL, base_zoom + zoom_offset)
-        else: # No specific geometry to focus on, use defaults or keep current view
-            self._current_center = [self.DEFAULT_LAT, self.DEFAULT_LON]
-            self._current_zoom = self.DEFAULT_ZOOM
-            if not self._current_features: # If no features were added, map is effectively cleared
-                 self.description_edit.append("\nMap reset to default view.")
+        # After parsing and adding features, render the map and apply bounds or center/zoom
+        if bounds_for_map:
+            self._render_and_update_map(bounds=bounds_for_map)
+        elif new_center and new_zoom: # Handle point case explicitly
+             self._render_and_update_map(center=new_center, zoom=new_zoom)
+        else: # No specific geometry to focus on, use defaults
+            self._render_and_update_map()
 
-
-        self._render_and_update_map()
 
     def display_polygon(self, lat_lon_coords: list[tuple[float,float]], center_coord: tuple[float,float]):
         """Displays a single polygon, usually not from KML but from direct interaction."""
         self._current_features = [] # Clear other KML features
-        
+
         settings = self.credential_manager.get_kml_default_view_settings()
         fill_color = settings.get("kml_fill_color_hex", CredentialManager.DEFAULT_KML_VIEW_SETTINGS["kml_fill_color_hex"])
-        fill_opacity_percent = settings.get("kml_fill_opacity_percent", CredentialManager.DEFAULT_KML_VIEW_SETTINGS["kml_fill_opacity_percent"])
+        fill_opacity_percent = settings.get("kml_fill_opacity_percent", CredentialManager.DEFAULT_KML_VIEW_SETTINGS["kml_opacity_percent"]) # Corrected key
         fill_opacity_val = fill_opacity_percent / 100.0
         stroke_color = settings.get("kml_line_color_hex", CredentialManager.DEFAULT_KML_VIEW_SETTINGS["kml_line_color_hex"])
         stroke_width_val = settings.get("kml_line_width_px", CredentialManager.DEFAULT_KML_VIEW_SETTINGS["kml_line_width_px"])
@@ -262,28 +354,25 @@ class MapViewWidget(QWidget):
             )
             self._current_features.append(polygon)
 
-            # Determine bounds and set view
+            # Determine bounds
             min_lat = min(c[0] for c in lat_lon_coords)
             max_lat = max(c[0] for c in lat_lon_coords)
             min_lon = min(c[1] for c in lat_lon_coords)
             max_lon = max(c[1] for c in lat_lon_coords)
             bounds = [[min_lat, min_lon], [max_lat, max_lon]]
-            
-            temp_map_for_zoom_calc = folium.Map(tiles=None)
-            temp_map_for_zoom_calc.fit_bounds(bounds)
-            
-            self._current_center = center_coord if center_coord else temp_map_for_zoom_calc.location
-            base_zoom = getattr(temp_map_for_zoom_calc, 'zoom_start', self.DEFAULT_ZOOM)
-            self._current_zoom = max(self.MIN_ZOOM_LEVEL, base_zoom + zoom_offset)
-            
+
             self.description_edit.setText("Displaying selected polygon from table.")
+
+            # Render the map with features and adjust view using bounds
+            self._render_and_update_map(bounds=bounds)
+
+            # Note: Applying zoom_offset after fit_bounds might require JS injection or recalculation.
+            # For now, relying on fit_bounds to get the correct view.
+
         else:
             self.description_edit.setText("Cannot display polygon: insufficient coordinates.")
             self.clear_map() # Clear if polygon is invalid
             return
-
-        self._render_and_update_map()
-
 
     def clear_map(self):
         self._current_center = [self.DEFAULT_LAT, self.DEFAULT_LON]
