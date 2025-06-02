@@ -1222,35 +1222,107 @@ class MainWindow(QMainWindow):
             self.load_data_into_table()
 
     def handle_clear_all_data(self):
-        if not self.db_lock_manager:
+        if not self.credential_manager or self.credential_manager.get_app_mode() != "Central App":
+            self.log_message("Clear all data attempted in non-Central App mode or missing CredentialManager.", "error")
+            QMessageBox.warning(self, "Operation Not Allowed",
+                                "Clearing all data is only permitted in 'Central App' mode.")
+            return
+
+        if not self.db_lock_manager: # Should be covered by the Central App check if CM is missing
             self.log_message("Database Lock Manager not available. Cannot clear data.", "error")
             QMessageBox.critical(self, "Critical Error", "Database Lock Manager is not initialized. Please restart the application.")
             return
 
         def _do_clear():
-            if QMessageBox.question(self, "Confirm Clear All", "Delete ALL polygon data permanently?\nThis cannot be undone.",
+            # --- KML Deletion Part ---
+            all_records = self.db_manager.get_all_polygon_data_for_display()
+            kml_deletion_errors = 0
+
+            if all_records:
+                self.log_message(f"Preparing to delete up to {len(all_records)} KML files before clearing database...", "info")
+                kml_folder_path = self.credential_manager.get_kml_folder_path()
+
+                if not kml_folder_path:
+                    self.log_message("KML folder path not configured. Cannot delete KML files.", "error")
+                    QMessageBox.warning(self, "Configuration Error", "KML folder path not set. KML files cannot be deleted. Database will still be cleared if confirmed.")
+                    # Proceed to DB clear confirmation, but KMLs won't be touched.
+                elif not self.kml_file_lock_manager:
+                    self.log_message("KMLFileLockManager not available. KML files will not be deleted.", "error")
+                    QMessageBox.warning(self, "KML Lock Error", "KML Lock Manager not available. KML files will not be deleted. Database will still be cleared if confirmed.")
+                else: # KML folder and manager are available
+                    for record in all_records:
+                        # Assuming record is a tuple: (db_id, uuid, response_code, farmer_name, village_name, date_added, export_count, last_exported, evaluation_status, device_code, kml_file_name, kml_file_status, edit_count, last_edit_date, editor_device_id, editor_nickname, last_modified)
+                        kml_file_name = record[10]
+                        db_id_for_log = record[0]
+
+                        if kml_file_name and isinstance(kml_file_name, str) and kml_file_name.strip():
+                            full_kml_path = os.path.join(kml_folder_path, kml_file_name)
+
+                            if not os.path.exists(full_kml_path):
+                                self.log_message(f"KML file {kml_file_name} for record ID {db_id_for_log} not found on disk. Skipping.", "debug")
+                                continue
+
+                            self.log_message(f"Attempting to delete KML file: {kml_file_name}", "info")
+                            lock_op_desc = f"Clearing KML {kml_file_name} during all data wipe"
+                            acquired_for_cleanup = False
+
+                            kml_lock_status = self.kml_file_lock_manager.acquire_kml_lock(kml_file_name, lock_op_desc, expected_duration_seconds=30)
+
+                            if kml_lock_status is True:
+                                acquired_for_cleanup = True
+                            elif kml_lock_status == "STALE_LOCK_DETECTED":
+                                self.log_message(f"Stale lock on {kml_file_name} during clear all. Forcing acquire.", "warning")
+                                if self.kml_file_lock_manager.force_acquire_kml_lock(kml_file_name, lock_op_desc, expected_duration_seconds=30):
+                                    acquired_for_cleanup = True
+                                else:
+                                    self.log_message(f"Failed to force stale lock on {kml_file_name}. It may not be deleted.", "error")
+                                    kml_deletion_errors += 1
+                            else: # Busy or Error
+                                self.log_message(f"Cannot acquire lock for {kml_file_name} (Status: {kml_lock_status}) during clear all. It may not be deleted.", "warning")
+                                kml_deletion_errors += 1
+
+                            if acquired_for_cleanup:
+                                try:
+                                    os.remove(full_kml_path)
+                                    self.log_message(f"Deleted KML: {kml_file_name}", "info")
+                                except Exception as e_del_kml:
+                                    self.log_message(f"Error deleting KML {kml_file_name}: {e_del_kml}", "error")
+                                    kml_deletion_errors += 1
+                                finally:
+                                    self.kml_file_lock_manager.release_kml_lock(kml_file_name)
+                        # else: KML file name is missing or invalid for this record
+
+            if kml_deletion_errors > 0:
+                QMessageBox.warning(self, "KML Deletion Issues",
+                                    f"{kml_deletion_errors} KML file(s) encountered issues during deletion (e.g., locked, access error). "
+                                    "Check logs. The database will still be cleared if you proceed.")
+
+            # --- DB Clearing Part ---
+            if QMessageBox.question(self, "Confirm Clear All Database Data",
+                                    "Delete ALL polygon data from the database permanently?\nThis cannot be undone.",
                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                     QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
                 if self.db_manager.delete_all_polygon_data():
-                    self.log_message("All polygon data deleted.", "info")
-                    self.source_model._check_states.clear() # Clear local check states
-                    # self.load_data_into_table() # Will be called if _execute returns True
-                    return True # Indicate success
+                    self.log_message("All polygon data deleted from database.", "info")
+                    self.source_model._check_states.clear()
+                    return True
                 else:
                     self.log_message("Failed to clear all data from database.", "error")
                     QMessageBox.warning(self, "DB Error", "Could not clear all data from the database.")
-                    return False # Indicate failure
+                    return False
             else:
-                self.log_message("Clear all data operation cancelled by user.", "info")
-                return False # Indicate operation was not performed
+                self.log_message("Clear all data operation (DB part) cancelled by user.", "info")
+                return False # User cancelled the DB part
 
+        # Execute the combined KML and DB clearing operation
         if self._execute_db_operation_with_lock(
             operation_callable=_do_clear,
-            operation_desc="Clearing all polygon data",
-            lock_duration=60, # Slightly longer for a full clear
+            operation_desc="Clearing all KML files and database records",
+            lock_duration=max(60, len(all_records) * 1 if all_records else 0), # Estimate lock duration
             retry_callable_for_timer=self.handle_clear_all_data
         ):
             self.load_data_into_table()
+
 
     def handle_generate_kml(self):
         checked_ids = self.source_model.get_checked_item_db_ids()
@@ -1404,3 +1476,5 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 self.log_message(f"Error deleting temp KML {self.current_temp_kml_path}:{e}","error")
         super().closeEvent(event)
+
+[end of ui/main_window.py]
