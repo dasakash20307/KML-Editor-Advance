@@ -82,6 +82,13 @@ The ongoing update to Version 5 introduces significant architectural improvement
     *   This system prevents simultaneous write operations, manages lock ownership with device ID/nickname, and includes features for heartbeat updates during long operations and stale lock detection/override.
     *   All database write operations are now routed through this locking system to ensure data integrity in shared environments.
 
+*   **KML File Locking Mechanism (`KMLFileLockManager`):**
+    *   To further enhance data integrity in shared KML storage folders, an application-level locking mechanism for individual KML files (`[UUID].kml.lock`) has been implemented.
+    *   Before creating a new KML file (e.g., during API/CSV import) or when a KML file is accessed for deletion by the Central App, a lock specific to that KML file is managed.
+    *   This prevents other application instances from interfering with an active KML file operation (e.g., concurrent modification or deletion).
+    *   The lock file stores holder information, timestamps, and supports stale lock detection.
+    *   This system works in conjunction with the Database Locking Mechanism to protect both metadata and KML file content.
+
 ## Key Technologies
 
 *   **Language:** Python

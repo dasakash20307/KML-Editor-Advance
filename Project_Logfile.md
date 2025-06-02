@@ -466,7 +466,6 @@ The implementation of Task 6 and the subsequent UI enhancements involved an iter
     *   Basic styling and icons were applied.
 
 **Alignment with Requirements & Current Status:**
-
 *   Task 6's primary goal of displaying new v5 metadata in the main UI table is **achieved**. The table now shows a comprehensive set of columns including KML Filename, KML File Status, edit history, and device codes.
 *   The `PolygonTableModel` and `QTableView` setup correctly handle and display these new fields.
 *   Non-date related filters (UUID, Export Status, KML File Status/Record Status) are functional.
@@ -647,3 +646,76 @@ The implementation of Task 8 and its subsequent fixes involved a significant deb
 **Impact:**
 The successful implementation of Task 8 provides a critical mechanism for data integrity in a shared environment. The resolution of the subsequent runtime errors ensures the application is stable and usable with this new locking feature.
 ---
+---
+**Update Date:** 2025-06-02
+**Version:** Beta.v5.0.6.Dev-ADas
+**Author:** AI Assistant (Jules)
+**Task Reference:** Task 9: KML File Locking Mechanism (from CA4 Part 3)
+
+**Objective:**
+Implement an application-level lock for individual KML files to protect them from concurrent modification or deletion, especially when an application is actively working on them (editing, creation) in the shared KML folder. This involves creating and managing `.kml.lock` files.
+
+**Core Components Implemented/Modified:**
+
+1.  **`core/sync_manager.py`:**
+    *   **`KMLFileLockManager` Class (New):**
+        *   Manages lock files named `[UUID].kml.lock` in the shared KML folder (path from `CredentialManager`).
+        *   `__init__`: Accepts KML folder path, `CredentialManager`, and a `logger_callable`. Initializes constants for stale lock grace period and default lock duration.
+        *   `acquire_kml_lock()`: Attempts to acquire a lock. Checks for existing locks, handles locks held by the current device (updates heartbeat), detects stale locks (returns `"STALE_LOCK_DETECTED"`), and creates new lock files. Returns `True` (acquired), `False` (busy), or `"ERROR"`.
+        *   `force_acquire_kml_lock()`: Forcibly acquires a lock by removing any existing lock file and creating a new one.
+        *   `release_kml_lock()`: Releases a lock, only removing the `.kml.lock` file if held by the current device.
+        *   `update_kml_heartbeat()`: Updates heartbeat timestamp in an existing lock file if held by the current device.
+        *   `get_kml_lock_info()`: Retrieves data from a KML lock file.
+        *   `is_kml_locked()`: Checks if a KML file is actively locked by another (non-stale) user.
+        *   Lock file content: `holder_device_id`, `holder_nickname`, `start_time_iso`, `expected_duration_seconds`, `operation_description`, `heartbeat_time_iso` (all UTC).
+        *   Logging: Integrated `self._log` method using passed `logger_callable` for detailed logging of lock operations.
+
+2.  **`ui/main_window.py` (Integration):**
+    *   **Initialization:** `KMLFileLockManager` is instantiated in `__init__`, passing the KML folder path and `self.log_message`.
+    *   **KML Lock Retry Framework:**
+        *   Attributes for KML lock retries (`kml_lock_retry_attempts`, `current_kml_retry_operation`, `current_kml_retry_args`, `current_kml_retry_kwargs`, `MAX_KML_LOCK_RETRIES`, `KML_LOCK_RETRY_TIMEOUT_MS`) were added/refined.
+        *   `kml_lock_retry_timer` initialized and connected to `_handle_kml_lock_retry_timeout`.
+        *   `_reset_kml_retry_state()`: Defined to clear KML retry attributes.
+        *   `_handle_kml_lock_retry_timeout()`: Implemented to manage timed retries by re-calling the original public method that initiated the KML operation.
+        *   `_execute_kml_operation_with_lock()`: Implemented as a generic wrapper for single KML operations requiring a lock (e.g., for future editing). Handles stale lock prompts (QMessageBox) and timed retries.
+    *   **KML Creation (`_process_imported_data` - API/CSV):**
+        *   Before saving each KML, `kml_file_lock_manager.acquire_kml_lock()` is called.
+        *   If lock fails (busy, error, or stale not overridden in batch), KML save is skipped, and status is logged as "Error - KML Lock Failed".
+        *   Lock is released in a `finally` block if acquired.
+    *   **KML Deletion (`handle_delete_checked_rows`):**
+        *   **Central App Restriction:** Operation now restricted to "Central App" mode.
+        *   Before DB/file deletion, uses `kml_file_lock_manager.get_kml_lock_info()` and staleness checks. If actively locked by another user, that KML and its DB record are skipped.
+        *   During actual filesystem deletion of the `.kml` file, it attempts to `acquire_kml_lock` (force-acquiring if stale for Central App cleanup), then `os.remove()`, then `release_kml_lock()`.
+        *   User is notified of skipped files.
+    *   **Data Clearing (`handle_clear_all_data`):**
+        *   **Central App Restriction:** Operation now restricted to "Central App" mode.
+        *   Before clearing the DB, iterates all records, attempts to `force_acquire_kml_lock` for each KML, deletes the KML file, then releases the lock. Errors are logged, user warned, but DB clear can proceed.
+    *   **Future Edit Preparation:**
+        *   Added `attempt_acquire_kml_lock_for_editing()` method to `MainWindow` to encapsulate lock acquisition logic (including stale lock GUI prompts) for a single KML file.
+        *   Placeholder comments in `MapViewWidget` updated for using this method, heartbeats, and lock release for editing.
+
+**Debugging Journey & Key Fixes:**
+
+The implementation and integration of KML locking, along with subsequent related fixes, involved several debugging steps:
+1.  **Initial `IndentationError` (`ui/main_window.py`):** Caused by misaligned code during initial KML lock attribute/timer setup in `MainWindow.__init__`.
+2.  **`AttributeError: 'MainWindow' object has no attribute '_handle_kml_lock_retry_timeout'`:** The KML lock retry handler was missing. This led to renaming the DB handler to `_handle_db_lock_retry_timeout` and correctly defining `_handle_kml_lock_retry_timeout` and its connections. The associated KML retry framework (`_execute_kml_operation_with_lock`, etc.) was also refined.
+3.  **Stray End-of-File Markers (`ui/main_window.py`):** Occurred twice, causing `SyntaxError`. These were artifacts from tooling and were removed.
+4.  **`NameError: name 'timezone' is not defined` (`core/sync_manager.py`):** `KMLFileLockManager` used `timezone.utc` without `from datetime import timezone`. This import was added.
+5.  **Subtask Misinterpretations:** Some subtasks performed off-target actions, requiring re-attempts with more specific instructions.
+
+**Alignment with Task 9 Requirements:**
+*   **Functionality:** Implemented application-level lock for individual KML files (`[UUID].kml.lock`). Locks are acquired before KML creation and managed during KML deletion.
+*   **Folder and File Structure:** `KMLFileLockManager` in `core/sync_manager.py`; lock files in shared KML folder.
+*   **UI Structure (Deletion Aspect):** Central App skips locked KMLs during deletion and summarizes this to the user. UI for *editing* being blocked or stale lock overrides for *editing* are prepared for Task 11.
+*   **Libraries & Connections:** Standard libraries (`os`, `json`, `datetime`) used. `KMLFileLockManager` called from `MainWindow`.
+
+**Notes for Future Tasks & Development Process:**
+
+1.  **Verify AI File Modifications:** Explicitly re-read/list files after subtasks to confirm changes, especially for critical operations or when subtask reports seem slightly off.
+2.  **Atomic Subtasks:** Break down complex changes into smaller, verifiable steps to reduce error scope.
+3.  **Clear Naming:** Maintain clear and distinct naming for similar but separate components (e.g., `_handle_db_lock_retry_timeout` vs. `_handle_kml_lock_retry_timeout`).
+4.  **Incremental Testing:** Add temporary debug prints or simple assertions during development of complex logic to catch issues earlier.
+5.  **Robust Imports:** Ensure all necessary modules/objects are explicitly imported where first used.
+---
+
+[end of Project_Logfile.md]
