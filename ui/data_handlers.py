@@ -356,7 +356,7 @@ class DataHandler(QObject):
                 break 
         
         progress_dialog.close()
-        # self.data_changed_signal.emit() # Emit signal outside if this function is called by the lock wrapper
+        self.data_changed_signal.emit() # Emit signal outside if this function is called by the lock wrapper
         self.log_message_callback(f"Import from {source_description}: Attempted: {processed_in_loop}, New Added: {new_added_in_loop}, Skipped: {skipped_in_loop}.", "info")
         return overall_success # Return status for the lock handler
 
