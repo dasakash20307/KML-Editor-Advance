@@ -17,7 +17,7 @@ from PySide6.QtGui import QPixmap, QIcon, QAction, QStandardItemModel, QStandard
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QTimer, QSize, QSortFilterProxyModel, QDate
 
 from database.db_manager import DatabaseManager
-from core.sync_manager import DatabaseLockManager # Added for DB Lock
+from core.sync_manager import DatabaseLockManager, KMLFileLockManager # Added for DB Lock, Added KMLFileLockManager
 from core.utils import resource_path
 from core.data_processor import process_csv_row_data, CSV_HEADERS, process_api_row_data
 from core.api_handler import fetch_data_from_mwater_api
@@ -364,9 +364,20 @@ class MainWindow(QMainWindow):
             # Fallback: Initialize if it was somehow missed. This should not ideally happen.
             self.db_lock_retry_timer = QTimer(self)
             self.db_lock_retry_timer.setSingleShot(True)
-        self.kml_lock_retry_timer.timeout.connect(self._handle_kml_lock_retry_timeout) # Connect KML timer
+            self.db_lock_retry_timer.timeout.connect(self._handle_lock_retry_timeout) # Connect DB timer here too
             # self.log_message is not available yet in __init__, so use print for this unlikely case
             print("MainWindow WARN: db_lock_retry_timer was re-initialized during attribute patching in __init__.")
+
+        # Connect KML timer (should be outside the db_lock_retry_timer's if/else)
+        if hasattr(self, 'kml_lock_retry_timer') and self.kml_lock_retry_timer: # Ensure kml_lock_retry_timer exists
+            try:
+                self.kml_lock_retry_timer.timeout.disconnect(self._handle_kml_lock_retry_timeout)
+            except (TypeError, RuntimeError):
+                pass
+            self.kml_lock_retry_timer.timeout.connect(self._handle_kml_lock_retry_timeout)
+        else:
+            print("MainWindow WARN: kml_lock_retry_timer was not properly initialized before attempting to connect timeout.")
+
 
         self.resize(1200, 800); self._center_window()
         self._create_main_layout(); self._create_header(); self._create_menus_and_toolbar(); self._create_status_bar()
