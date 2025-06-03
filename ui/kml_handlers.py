@@ -218,7 +218,7 @@ class KMLHandler(QObject):
                     # If it adds multiple, logic needs to identify the correct one.
                     placemark_to_update = None
                     for feature in kml_doc.document.features:
-                        if isinstance(feature, simplekml.placemark.Placemark):
+                        if isinstance(feature, simplekml.Placemark):
                             placemark_to_update = feature
                             break
 
