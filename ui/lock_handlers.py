@@ -190,33 +190,43 @@ class LockHandler(QObject):
                                         retry_callable_for_timer=None, 
                                         args_for_retry_callable=None,
                                         kwargs_for_retry_callable=None):
+        result_from_callable = None
         if not self.db_lock_manager:
             self.log_message_callback(f"Cannot perform '{operation_desc}': DatabaseLockManager not initialized.", "critical")
             QMessageBox.critical(self.main_window_ref, "Critical Error", "Database Lock Manager not available. Please restart.")
-            return False 
+            return False, None
 
         if self.current_db_retry_operation != retry_callable_for_timer: 
             self.db_lock_retry_attempts = 0 
 
         lock_status = self.db_lock_manager.acquire_lock(lock_duration, operation_desc)
-        operation_performed_and_succeeded = False
+        callable_execution_succeeded = False # Default to False, will be updated by op_callable result or error
 
         if lock_status is True:
             self.log_message_callback(f"Lock acquired for '{operation_desc}'. Executing operation.", "info")
             self._reset_db_retry_state() 
             try:
                 if callable(operation_callable):
-                    operation_performed_and_succeeded = operation_callable()
+                    result_from_callable = operation_callable()
+                    callable_execution_succeeded = result_from_callable # Assuming direct result indicates success
                 else:
                     self.log_message_callback(f"Error: operation_callable for '{operation_desc}' is not callable.", "error")
-                    operation_performed_and_succeeded = False
+                    callable_execution_succeeded = False # Or None, as per new logic for non-execution
+                    result_from_callable = None # Explicitly set to None as callable was not valid
             except Exception as e:
                 self.log_message_callback(f"Exception during locked operation '{operation_desc}': {e}", "error")
                 QMessageBox.critical(self.main_window_ref, "Operation Error", f"An error occurred during '{operation_desc}':\n{e}")
-                operation_performed_and_succeeded = False
+                callable_execution_succeeded = False
+                result_from_callable = False # As per "If an exception occurs... return True, False"
             finally:
                 self.db_lock_manager.release_lock()
-            return operation_performed_and_succeeded
+            # If callable was not callable, result_from_callable is None.
+            # If callable raised exception, result_from_callable is False.
+            # Otherwise, result_from_callable holds the actual return value.
+            # The first element of the tuple is True because lock was acquired and attempt was made.
+            if not callable(operation_callable):
+                 return True, None # Attempted, but callable was invalid.
+            return True, result_from_callable
 
         elif lock_status == "STALE_LOCK_DETECTED":
             self._reset_db_retry_state() 
@@ -234,23 +244,26 @@ class LockHandler(QObject):
                     self.log_message_callback(f"Lock forcibly acquired for '{operation_desc}'. Executing operation.", "info")
                     try:
                         if callable(operation_callable):
-                            operation_performed_and_succeeded = operation_callable()
+                            result_from_callable = operation_callable()
+                            # callable_execution_succeeded = result_from_callable # Not needed, directly use result_from_callable
                         else:
-                             operation_performed_and_succeeded = False
+                             result_from_callable = None # Invalid callable
                     except Exception as e:
                         self.log_message_callback(f"Exception during locked operation (after force acquire) '{operation_desc}': {e}", "error")
                         QMessageBox.critical(self.main_window_ref, "Operation Error", f"An error occurred during '{operation_desc}' after overriding lock:\n{e}")
-                        operation_performed_and_succeeded = False
+                        result_from_callable = False # Exception means operation failed
                     finally:
                         self.db_lock_manager.release_lock()
-                    return operation_performed_and_succeeded
+                    if not callable(operation_callable):
+                        return True, None # Attempted, but callable was invalid.
+                    return True, result_from_callable
                 else:
                     self.log_message_callback(f"Failed to force acquire lock for '{operation_desc}'.", "error")
                     QMessageBox.critical(self.main_window_ref, "Lock Override Failed", "Could not override the stale lock. The original lock might still be active or there was a file system error.")
-                    return False
+                    return False, None
             else:
                 self.log_message_callback(f"User chose not to override stale lock for '{operation_desc}'. Operation aborted.", "info")
-                return False
+                return False, None
 
         elif lock_status is False: 
             if self.db_lock_retry_attempts < self.max_db_lock_retries:
@@ -269,14 +282,14 @@ class LockHandler(QObject):
                 self.log_message_callback(f"Max lock retry attempts ({self.max_db_lock_retries}) reached for '{operation_desc}'. Operation aborted.", "error")
                 QMessageBox.warning(self.main_window_ref, "Database Busy", f"The database is still locked by another process after {self.max_db_lock_retries} retries. Please try '{operation_desc}' again later.")
                 self._reset_db_retry_state()
-            return False 
+            return False, None
 
         elif lock_status == "ERROR":
             self._reset_db_retry_state()
             self.log_message_callback(f"Failed to acquire lock for '{operation_desc}' due to an internal error in DatabaseLockManager.", "critical")
             QMessageBox.critical(self.main_window_ref, "Lock Acquisition Error", "Could not acquire database lock due to an internal error. Please check the logs.")
-            return False
+            return False, None
 
         self.log_message_callback(f"Unhandled lock status '{lock_status}' for '{operation_desc}'. Operation aborted.", "error")
         self._reset_db_retry_state()
-        return False
+        return False, None

@@ -265,11 +265,11 @@ class KMLHandler(QObject):
                 self.log_message_callback(f"KML lock released for {original_kml_filename}", "info")
 
         # --- DB Lock for the entire save operation (including KML file lock and DB update) ---
-        save_successful, result_data = self.lock_handler._execute_db_operation_with_lock(
+        lock_and_attempt_succeeded, perform_save_result = self.lock_handler._execute_db_operation_with_lock(
             _perform_save_operations, "Save Edited KML"
         )
 
-        if save_successful and result_data: # result_data from _perform_save_operations is boolean
+        if lock_and_attempt_succeeded and perform_save_result: # perform_save_result from _perform_save_operations is boolean
             # Refresh the editor with the newly saved content
             # Need to re-fetch KML content as kml_doc.kml() might not be available here
             # Or, _perform_save_operations could return the new kml_content_str
