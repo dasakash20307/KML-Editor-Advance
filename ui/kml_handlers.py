@@ -61,16 +61,16 @@ class KMLHandler(QObject):
             name_el = root.find('.//kml:Placemark/kml:name', namespaces)
             if name_el is None: # Fallback if default namespace is not kml:
                 name_el = root.find('.//Placemark/name', namespaces)
-            
+
             name_text = name_el.text.strip() if name_el is not None and name_el.text is not None else None
 
             # Try to find Placemark -> description
             desc_el = root.find('.//kml:Placemark/kml:description', namespaces)
             if desc_el is None: # Fallback
                 desc_el = root.find('.//Placemark/description', namespaces)
-            
+
             description_text = desc_el.text.strip() if desc_el is not None and desc_el.text is not None else None
-            
+
             return name_text, description_text
         except ET.ParseError as e:
             # self.log_message_callback(f"KML Parsing Error for name/desc: {e}", "error") # Needs instance or passed logger
@@ -107,7 +107,7 @@ class KMLHandler(QObject):
             else:
                 # self.google_earth_view_widget.clear_view() # Assuming GE view has a clear method
                 self.log_message_callback("GE View: No valid polygon selected or record not valid for KML. GE view not updated.", "info")
-        
+
         else:  # KML Editor View is active
             if polygon_record:
                 kml_file_name = polygon_record.get('kml_file_name')
@@ -115,20 +115,20 @@ class KMLHandler(QObject):
 
                 if kml_file_name and isinstance(kml_file_name, str) and kml_file_name.strip() and main_kml_folder_path:
                     full_kml_path = os.path.join(main_kml_folder_path, kml_file_name.strip())
-                    
+
                     if os.path.exists(full_kml_path):
                         try:
                             with open(full_kml_path, 'r', encoding='utf-8') as f:
                                 kml_content = f.read()
-                            
+
                             parsed_name, parsed_desc = self._parse_kml_for_name_desc(kml_content)
-                            
+
                             display_name = parsed_name if parsed_name else polygon_record.get('uuid', "Unnamed Polygon")
                             display_desc = parsed_desc if parsed_desc is not None else "No description in KML."
-                                                        
+
                             self.kml_editor_widget.display_kml(kml_content, display_name, display_desc)
                             # Store original filename and db_id in the editor widget for save context
-                            self.kml_editor_widget.current_kml_filename = kml_file_name 
+                            self.kml_editor_widget.current_kml_filename = kml_file_name
                             self.kml_editor_widget.current_db_id = db_id
 
                         except Exception as e:
@@ -154,7 +154,7 @@ class KMLHandler(QObject):
                 self.kml_editor_widget.clear_map()
                 self.log_message_callback("No record selected or found. KML Editor cleared.", "info")
 
-    def save_edited_kml(self, db_id: int, original_kml_filename: str, 
+    def save_edited_kml(self, db_id: int, original_kml_filename: str,
                         edited_geometry_json: str, edited_name: str, edited_description: str) -> bool:
         self.log_message_callback(f"Attempting to save edited KML for DB ID: {db_id}, Filename: {original_kml_filename}", "info")
 
@@ -188,7 +188,7 @@ class KMLHandler(QObject):
                 self.log_message_callback("KML folder path not configured. Cannot save KML.", "error")
                 QMessageBox.critical(self.main_window_ref, "Configuration Error", "KML output folder is not configured.")
                 return False
-            
+
             full_kml_path = os.path.join(kml_folder_path, original_kml_filename)
 
             # --- KML File Lock ---
@@ -197,12 +197,12 @@ class KMLHandler(QObject):
                 self.log_message_callback(f"Failed to acquire KML lock for {original_kml_filename}: {status_msg}", "error")
                 QMessageBox.warning(self.main_window_ref, "File Lock Error", f"Could not lock KML file '{original_kml_filename}':\n{status_msg}")
                 return False
-            
+
             new_kml_content_str = None
             try:
                 # Generate new KML content
                 kml_doc = simplekml.Kml()
-                
+
                 # add_polygon_to_kml_object uses data_for_kml_regeneration for description fields and default placemark name (uuid)
                 # It now uses edited_coordinates_list for geometry
                 if not add_polygon_to_kml_object(kml_doc, data_for_kml_regeneration, edited_coordinates_list=edited_coordinates_lon_lat_alt):
@@ -221,7 +221,7 @@ class KMLHandler(QObject):
                         if isinstance(feature, simplekml.placemark.Placemark):
                             placemark_to_update = feature
                             break
-                    
+
                     if placemark_to_update:
                         placemark_to_update.name = edited_name
                         placemark_to_update.description = edited_description
@@ -244,7 +244,7 @@ class KMLHandler(QObject):
                     'edit_count': original_db_record.get('edit_count', 0) + 1,
                     'editor_device_id': device_id,
                     'editor_device_nickname': device_nickname,
-                    'kml_file_status': 'Edited' 
+                    'kml_file_status': 'Edited'
                     # Potentially update fields like 'kml_placemark_name', 'kml_placemark_description' if they exist in DB
                 }
                 if not self.db_manager.update_polygon_data_by_id(db_id, update_data): # Assuming this method exists
@@ -252,10 +252,10 @@ class KMLHandler(QObject):
                     QMessageBox.critical(self.main_window_ref, "DB Update Error", "Failed to update database record after saving KML.")
                     # Consider if KML file save should be rolled back or handled
                     return False # Release lock will happen in finally
-                
+
                 self.log_message_callback(f"Successfully updated DB for ID: {db_id}", "info")
                 return True # Success
-            
+
             except Exception as e:
                 self.log_message_callback(f"Error during KML save or DB update for {original_kml_filename}: {e}", "error")
                 QMessageBox.critical(self.main_window_ref, "Save Error", f"An error occurred while saving KML: {e}")
@@ -263,7 +263,7 @@ class KMLHandler(QObject):
             finally:
                 self.lock_handler.kml_file_lock_manager.release_kml_lock(original_kml_filename)
                 self.log_message_callback(f"KML lock released for {original_kml_filename}", "info")
-        
+
         # --- DB Lock for the entire save operation (including KML file lock and DB update) ---
         save_successful, result_data = self.lock_handler._execute_db_operation_with_lock(
             _perform_save_operations, "Save Edited KML"
