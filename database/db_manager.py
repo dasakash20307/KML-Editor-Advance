@@ -409,6 +409,73 @@ class DatabaseManager:
             print(f"DB: Error updating kml_file_status for ID '{db_id}' to '{new_status}': {e}")
             return False
 
+    def update_polygon_data_by_id(self, record_id: int, data_to_update: dict) -> bool:
+        """
+        Updates specific fields for an existing polygon record identified by its ID.
+        Automatically updates the 'last_modified' timestamp.
+
+        Args:
+            record_id: The ID of the record to update.
+            data_to_update: A dictionary where keys are column names and values are the new values.
+
+        Returns:
+            True if the update was successful, False otherwise.
+        """
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.update_polygon_data_by_id: Connection or cursor not available.")
+            # self._log("DB Error: Connection or cursor not available for update_polygon_data_by_id.", "error") # If using self._log
+            return False
+        if not data_to_update:
+            print(f"DB Info: No data provided to update for record ID {record_id}.")
+            # self._log(f"DB Info: No data provided to update for record ID {record_id}.", "info")
+            return True # No changes to make, so technically not a failure
+
+        # Ensure 'last_modified' is always updated
+        data_to_update['last_modified'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        set_clauses = []
+        values = []
+
+        # Get valid column names to prevent SQL injection and errors
+        # This pragma query might be slightly inefficient if called very frequently in a loop,
+        # but for a single update operation, it's robust.
+        # Consider caching valid_columns if performance becomes an issue here.
+        self.cursor.execute("PRAGMA table_info(polygon_data)")
+        valid_columns = {row[1] for row in self.cursor.fetchall()}
+
+        for key, value in data_to_update.items():
+            if key in valid_columns and key != 'id': # Cannot update 'id' (primary key)
+                set_clauses.append(f"{key} = ?")
+                values.append(value)
+        
+        if not set_clauses:
+            print(f"DB Warning: No valid fields to update for record ID {record_id} after filtering.")
+            # self._log(f"DB Warning: No valid fields to update for record ID {record_id} after filtering.", "warning")
+            return True
+
+        sql = f"UPDATE polygon_data SET {', '.join(set_clauses)} WHERE id = ?"
+        values.append(record_id)
+
+        try:
+            self.cursor.execute(sql, values)
+            self.conn.commit()
+            if self.cursor.rowcount > 0:
+                # self._log(f"DB: Successfully updated record ID {record_id}.", "info")
+                print(f"DB: Successfully updated record ID {record_id}.")
+                return True
+            else:
+                # self._log(f"DB Warning: Update for record ID {record_id} affected 0 rows.", "warning")
+                print(f"DB Warning: Update for record ID {record_id} affected 0 rows (record might not exist or values were the same).")
+                # If you want to be stricter and return False if the record didn't exist:
+                # self.cursor.execute("SELECT EXISTS(SELECT 1 FROM polygon_data WHERE id=?)", (record_id,))
+                # if not self.cursor.fetchone()[0]:
+                #     return False # Record does not exist
+                return True # For now, 0 rows affected (e.g. same values) is not an error
+        except sqlite3.Error as e:
+            # self._log(f"DB Error updating polygon data for ID {record_id}: {e}", "error")
+            print(f"DB Error updating polygon data for ID {record_id}: {e}")
+            return False
+
     def close(self):
         """Closes the database connection."""
         if self.conn:
