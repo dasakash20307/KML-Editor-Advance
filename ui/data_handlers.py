@@ -318,6 +318,15 @@ class DataHandler(QObject):
             db_data['kml_file_name'] = kml_file_name
             db_data['kml_file_status'] = kml_file_status_for_db
             
+            # <<<< ADD INITIAL PLACEMARK NAME >>>>
+            # add_polygon_to_kml_object sets polygon.name using processed_flat.get("uuid", "Unnamed Polygon")
+            # or the name from the original data record if it existed and was mapped.
+            # For consistency, let's assume the initial name is based on UUID or a default.
+            # If processed_flat contains a 'name' or 'placemark_name' field mapped from API/CSV for the KML, use that.
+            # Otherwise, default to UUID.
+            initial_placemark_name = processed_flat.get("name_for_kml_placemark", processed_flat.get("uuid", "Unnamed Polygon"))
+            db_data['kml_placemark_name'] = initial_placemark_name
+
             if is_api_data: # API data might have device_code from source
                 db_data['device_code'] = processed_flat.get('device_code', device_id) # Use API's if present, else this app's
             else: # CSV data always uses this app's device_id as creator
@@ -339,8 +348,8 @@ class DataHandler(QObject):
             # Else, if it's API data and date_added was in processed_flat, it's already in db_data
 
             # Add/Update record in DB
-            db_result_id = self.db_manager.add_or_update_polygon_data(db_data, overwrite=False) # Overwrite is False for imports
-            
+            db_result_id = self.db_manager.add_or_update_polygon_data(db_data, overwrite=False)
+                
             if db_result_id is not None:
                 new_added_in_loop += 1
                 self.log_message_callback(f"RC'{rc_from_row}'(UUID {db_data['uuid']}) saved to DB ID {db_result_id}. KML: {db_data['kml_file_status']}.", "info")
@@ -353,7 +362,7 @@ class DataHandler(QObject):
             if progress_dialog.was_cancelled():
                 self.log_message_callback("Import cancelled by user.", "info")
                 overall_success = False # Mark as not fully successful due to cancellation
-                break 
+                break
         
         progress_dialog.close()
         # self.data_changed_signal.emit() # Emit signal outside if this function is called by the lock wrapper

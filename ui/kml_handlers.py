@@ -244,10 +244,10 @@ class KMLHandler(QObject):
                     'edit_count': original_db_record.get('edit_count', 0) + 1,
                     'editor_device_id': device_id,
                     'editor_device_nickname': device_nickname,
-                    'kml_file_status': 'Edited'
-                    # Potentially update fields like 'kml_placemark_name', 'kml_placemark_description' if they exist in DB
+                    'kml_file_status': 'Edited',
+                    'kml_placemark_name': edited_name  # <<<< ADD THIS LINE
                 }
-                if not self.db_manager.update_polygon_data_by_id(db_id, update_data): # Assuming this method exists
+                if not self.db_manager.update_polygon_data_by_id(db_id, update_data):
                     self.log_message_callback(f"Failed to update database for DB ID: {db_id}", "error")
                     QMessageBox.critical(self.main_window_ref, "DB Update Error", "Failed to update database record after saving KML.")
                     # Consider if KML file save should be rolled back or handled

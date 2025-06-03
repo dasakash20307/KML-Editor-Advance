@@ -73,6 +73,13 @@ class DatabaseManager:
                 self.cursor.execute("ALTER TABLE polygon_data ADD COLUMN evaluation_status TEXT DEFAULT 'Not Evaluated Yet'")
                 self.conn.commit()
                 print("'evaluation_status' column added successfully.")
+
+            # Add migration for the new kml_placemark_name column
+            if 'kml_placemark_name' not in columns: # Ensure 'columns' is defined from PRAGMA table_info
+                print("Schema migration: Adding 'kml_placemark_name' column to 'polygon_data' table.")
+                self.cursor.execute("ALTER TABLE polygon_data ADD COLUMN kml_placemark_name TEXT") # Default NULL
+                self.conn.commit()
+                print("'kml_placemark_name' column added successfully.")
         except sqlite3.Error as e:
             print(f"Schema migration error: {e}")
 
@@ -125,7 +132,8 @@ class DatabaseManager:
                     evaluation_status TEXT DEFAULT 'Not Evaluated Yet',
                     device_code TEXT,
                     kml_file_name TEXT NOT NULL,
-                    kml_file_status TEXT, -- E.g., "Created", "Errored", "Edited", "File Deleted", "Pending Deletion"
+                    kml_placemark_name TEXT, -- <<<< NEW COLUMN ADDED
+                    kml_file_status TEXT,
                     edit_count INTEGER DEFAULT 0,
                     last_edit_date TIMESTAMP,
                     editor_device_id TEXT,
@@ -292,7 +300,7 @@ class DatabaseManager:
             self.cursor.execute("""
                 SELECT id, uuid, response_code, farmer_name, village_name, date_added,
                        kml_export_count, last_kml_export_date, evaluation_status,
-                       device_code, kml_file_name, kml_file_status,
+                       device_code, kml_file_name, kml_placemark_name, kml_file_status, -- <<<< kml_placemark_name ADDED HERE
                        edit_count, last_edit_date, editor_device_id, editor_device_nickname,
                        last_modified
                 FROM polygon_data 

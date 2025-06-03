@@ -22,15 +22,16 @@ class PolygonTableModel(QAbstractTableModel): # QAbstractTableModel inherits QOb
     VILLAGE_COL = 6
     DATE_ADDED_COL = 7
     KML_FILE_NAME_COL = 8
-    KML_FILE_STATUS_COL = 9
-    EDIT_COUNT_COL = 10
-    LAST_EDIT_DATE_COL = 11
-    EDITOR_DEVICE_ID_COL = 12
-    EDITOR_NICKNAME_COL = 13
-    DEVICE_CODE_COL = 14
-    EXPORT_COUNT_COL = 15
-    LAST_EXPORTED_COL = 16
-    LAST_MODIFIED_COL = 17
+    PLACEMARK_NAME_COL = 9 # <<<< NEW CONSTANT (adjust index based on actual position)
+    KML_FILE_STATUS_COL = 10 # <<<< Indices of subsequent columns will shift
+    EDIT_COUNT_COL = 11
+    LAST_EDIT_DATE_COL = 12
+    EDITOR_DEVICE_ID_COL = 13
+    EDITOR_NICKNAME_COL = 14
+    DEVICE_CODE_COL = 15
+    EXPORT_COUNT_COL = 16
+    LAST_EXPORTED_COL = 17
+    LAST_MODIFIED_COL = 18
 
     def __init__(self, data_list=None, parent=None, db_manager_instance=None):
         super().__init__(parent)
@@ -38,7 +39,7 @@ class PolygonTableModel(QAbstractTableModel): # QAbstractTableModel inherits QOb
         self.main_window_ref = parent # To access log_message, db_lock_manager from MainWindow for now
         self._data = []
         self._check_states = {}
-        self._headers = ["", "DB ID", "UUID", "Response Code", "Evaluation Status", "Farmer Name", "Village", "Date Added", "KML File Name", "KML File Status", "Times Edited", "Last Edit Date", "Editor Device ID", "Editor Nickname", "Device Code (Creator)", "Export Count", "Last Exported", "Last Modified"]
+        self._headers = ["", "DB ID", "UUID", "Response Code", "Evaluation Status", "Farmer Name", "Village", "Date Added", "KML File Name", "Placemark Name", "KML File Status", "Times Edited", "Last Edit Date", "Editor Device ID", "Editor Nickname", "Device Code (Creator)", "Export Count", "Last Exported", "Last Modified"]
         if data_list: self.update_data(data_list)
 
     def rowCount(self, parent=QModelIndex()): return len(self._data)
@@ -65,15 +66,16 @@ class PolygonTableModel(QAbstractTableModel): # QAbstractTableModel inherits QOb
             elif col == self.VILLAGE_COL: value = record[4]
             elif col == self.DATE_ADDED_COL: value = record[5]
             elif col == self.KML_FILE_NAME_COL: value = record[10]
-            elif col == self.KML_FILE_STATUS_COL: value = record[11]
-            elif col == self.EDIT_COUNT_COL: value = record[12]
-            elif col == self.LAST_EDIT_DATE_COL: value = record[13]
-            elif col == self.EDITOR_DEVICE_ID_COL: value = record[14]
-            elif col == self.EDITOR_NICKNAME_COL: value = record[15]
+            elif col == self.PLACEMARK_NAME_COL: value = record[11] # NEW INDEX
+            elif col == self.KML_FILE_STATUS_COL: value = record[12] # Shifted from 11
+            elif col == self.EDIT_COUNT_COL: value = record[13] # Shifted from 12
+            elif col == self.LAST_EDIT_DATE_COL: value = record[14] # Shifted from 13
+            elif col == self.EDITOR_DEVICE_ID_COL: value = record[15] # Shifted from 14
+            elif col == self.EDITOR_NICKNAME_COL: value = record[16] # Shifted from 15
             elif col == self.DEVICE_CODE_COL: value = record[9]
             elif col == self.EXPORT_COUNT_COL: value = record[6]
             elif col == self.LAST_EXPORTED_COL: value = record[7]
-            elif col == self.LAST_MODIFIED_COL: value = record[16]
+            elif col == self.LAST_MODIFIED_COL: value = record[18] # Shifted from 16
             else: return None
 
             if col == self.EXPORT_COUNT_COL and value is None: return "0"
