@@ -312,11 +312,11 @@ class KMLFileLockManager:
         return self.kml_folder_path / f"{kml_filename}.lock"
 
     def acquire_kml_lock(self, kml_filename: str, operation_description: str = "KML file operation",
-                         expected_duration_seconds: Optional[int] = None) -> Union[bool, str]:
+                         expected_duration_seconds: Optional[int] = None) -> tuple[bool, str, Optional[dict]]:
         lock_file_path = self._get_lock_file_path(kml_filename)
         if not lock_file_path: # Check if path construction failed
             self._log("KML folder path not configured for lock file.", "error")
-            return "ERROR"
+            return False, "KML folder path not configured for lock file.", None
         effective_duration_seconds = expected_duration_seconds if expected_duration_seconds is not None else self.DEFAULT_KML_LOCK_DURATION_SECONDS
 
         current_device_id = self.credential_manager.get_device_id()
@@ -324,7 +324,7 @@ class KMLFileLockManager:
 
         if not current_device_id or not current_device_nickname:
             self._log("Device ID or Nickname not available.", "error")
-            return "ERROR"
+            return False, "Device ID or Nickname not available.", None
 
         try:
             if lock_file_path.exists():
@@ -333,24 +333,27 @@ class KMLFileLockManager:
                     with open(lock_file_path, 'r') as f:
                         lock_data = json.load(f)
                 except (IOError, json.JSONDecodeError) as e:
-                    self._log(f"Could not read/parse lock file '{lock_file_path}': {e}. Assuming stale.", "warning")
-                    return "STALE_LOCK_DETECTED"
+                    msg = f"Could not read/parse lock file '{lock_file_path}': {e}. Assuming stale."
+                    self._log(msg, "warning")
+                    return False, msg, None
 
                 holder_device_id = lock_data.get('holder_device_id')
                 heartbeat_time_iso_str = lock_data.get('heartbeat_time_iso')
                 lock_expected_duration = lock_data.get('expected_duration_seconds', self.DEFAULT_KML_LOCK_DURATION_SECONDS)
+                holder_nickname = lock_data.get('holder_nickname', 'Unknown Device')
+
 
                 if holder_device_id == current_device_id:
                     self._log(f"Lock for '{kml_filename}' already held by this device ('{current_device_nickname}'). Updating.", "info")
                     if self.update_kml_heartbeat(kml_filename,
                                                  new_operation_description=operation_description,
                                                  new_expected_duration=effective_duration_seconds):
-                        # Log specific re-confirmation message
                         self._log(f"KML lock re-confirmed (heartbeat updated) for '{kml_filename}': {lock_file_path} by device {current_device_id}", "info")
-                        return True
+                        updated_lock_info = self.get_kml_lock_info(kml_filename) # Re-read to get fresh data
+                        return True, f"KML lock re-confirmed (heartbeat updated) for '{kml_filename}'", updated_lock_info
                     else:
                         # update_kml_heartbeat would have logged the error
-                        return "ERROR" # Failed to update existing lock
+                        return False, f"Failed to update heartbeat for already held lock on '{kml_filename}'", lock_data
 
                 if heartbeat_time_iso_str:
                     try:
@@ -360,19 +363,22 @@ class KMLFileLockManager:
 
                         staleness_threshold = heartbeat_dt + timedelta(seconds=(lock_expected_duration + self.STALE_LOCK_GRACE_PERIOD_SECONDS))
                         if staleness_threshold < datetime.now(timezone.utc):
-                            holder_nickname = lock_data.get('holder_nickname', 'Unknown Device')
-                            self._log(f"Stale lock for '{kml_filename}' detected. Held by {holder_nickname}. Last heartbeat: {heartbeat_time_iso_str}", "info")
-                            return "STALE_LOCK_DETECTED"
-                    except ValueError:
-                        self._log(f"Could not parse heartbeat timestamp '{heartbeat_time_iso_str}' for '{kml_filename}'. Assuming stale.", "warning")
-                        return "STALE_LOCK_DETECTED"
-                else:
-                    self._log(f"Lock file for '{kml_filename}' missing heartbeat. Assuming stale.", "warning")
-                    return "STALE_LOCK_DETECTED"
+                            msg = f"Stale lock for '{kml_filename}' detected. Held by {holder_nickname}."
+                            self._log(f"{msg} Last heartbeat: {heartbeat_time_iso_str}", "info")
+                            return False, msg, lock_data
+                    except ValueError as ve: # Specific exception for parsing
+                        msg = f"Lock file for '{kml_filename}' malformed (heartbeat issue: {ve}). Assuming stale."
+                        self._log(msg, "warning")
+                        return False, msg, lock_data
+                else: # heartbeat_time_iso_str is missing
+                    msg = f"Lock file for '{kml_filename}' malformed (heartbeat issue). Assuming stale." # Updated message
+                    self._log(msg, "warning")
+                    return False, msg, lock_data # Pass current lock_data
 
-                holder_nickname = lock_data.get('holder_nickname', "Unknown Device")
-                self._log(f"Lock for '{kml_filename}' is busy. Held by {holder_nickname}.", "info")
-                return False # Busy
+                # If not stale and not held by current device, it's busy
+                msg = f"Lock for '{kml_filename}' is busy. Held by {holder_nickname}."
+                self._log(msg, "info")
+                return False, msg, lock_data
 
             else: # Lock file does not exist, create it
                 new_lock_data = {
@@ -386,14 +392,16 @@ class KMLFileLockManager:
                 with open(lock_file_path, 'w') as f:
                     json.dump(new_lock_data, f, indent=4)
                 self._log(f"KML lock acquired for '{kml_filename}': {lock_file_path} by device {current_device_id}", "info")
-                return True
+                return True, f"KML lock acquired for '{kml_filename}'", new_lock_data
 
         except IOError as e:
-            self._log(f"IOError during acquire_kml_lock for '{kml_filename}': {e}", "error")
-            return "ERROR"
+            msg = f"IOError during acquire_kml_lock for '{kml_filename}': {e}"
+            self._log(msg, "error")
+            return False, msg, None
         except Exception as e_unhandled:
-            self._log(f"Unexpected error in acquire_kml_lock for '{kml_filename}': {e_unhandled}", "error")
-            return "ERROR"
+            msg = f"Unexpected error in acquire_kml_lock for '{kml_filename}': {e_unhandled}"
+            self._log(msg, "error")
+            return False, msg, None
 
     def force_acquire_kml_lock(self, kml_filename: str, operation_description: str = "KML file operation",
                                expected_duration_seconds: Optional[int] = None) -> bool:
