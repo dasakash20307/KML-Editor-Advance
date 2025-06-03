@@ -13,13 +13,15 @@ class GoogleEarthWebViewWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.web_view = QWebEngineView()
+        self.temp_dir = tempfile.mkdtemp(prefix="kml_editor_ge_")
+        self.current_temp_file = None
 
-        # Configure WebEngineSettings if necessary (e.g., enabling JavaScript, plugins)
+        # Configure WebEngineSettings if necessary
         settings = self.web_view.settings()
         settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
-        settings.setAttribute(QWebEngineSettings.WebAttribute.PluginsEnabled, True) # Useful for some web content
+        settings.setAttribute(QWebEngineSettings.WebAttribute.PluginsEnabled, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
-        settings.setAttribute(QWebEngineSettings.WebAttribute.ScrollAnimatorEnabled, True) # For smoother scrolling
+        settings.setAttribute(QWebEngineSettings.WebAttribute.ScrollAnimatorEnabled, True)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -29,78 +31,59 @@ class GoogleEarthWebViewWidget(QWidget):
         # Load Google Earth Web
         self.web_view.setUrl(QUrl("https://earth.google.com/web/"))
 
-        # Example: Run JavaScript after the page loads (for testing)
-        # Get user agent to infer WebEngine version
-        # self.web_view.page().runJavaScript("navigator.userAgent", self.js_callback) # Commented out for now
+    def display_kml_and_show_instructions(self, kml_file_path: str, kml_file_name: str):
+        """
+        Copies the KML file to a temporary location and copies its path to clipboard.
+        Returns True if successful, False otherwise.
+        """
+        if not kml_file_path or not kml_file_name:
+            QMessageBox.warning(self, "KML Error", "Cannot process KML: File path or name is missing.")
+            return False
 
-    def js_callback(self, result):
-        print(f"JavaScript Result: {result}")
+        try:
+            # Create temp file path
+            temp_kml_path = os.path.join(self.temp_dir, kml_file_name)
+            
+            # Clean up previous temp file if it exists
+            if self.current_temp_file and os.path.exists(self.current_temp_file):
+                try:
+                    os.remove(self.current_temp_file)
+                except Exception:
+                    pass  # Ignore cleanup errors
+            
+            # Copy the file to temp location
+            shutil.copy2(kml_file_path, temp_kml_path)
+            self.current_temp_file = temp_kml_path
+            
+            # Convert to Windows path format
+            windows_path = temp_kml_path.replace('/', '\\')
+            
+            # Copy to clipboard
+            QGuiApplication.clipboard().setText(windows_path)
+            return True
 
-    def run_javascript(self, script, callback=None):
-        '''
-        Runs JavaScript code in the web view.
-        Optionally takes a callback function to handle the result.
-        '''
-        if callback:
-            self.web_view.page().runJavaScript(script, callback)
-        else:
-            self.web_view.page().runJavaScript(script)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not copy KML to temporary location: {e}")
+            return False
 
-    @Slot()
     def set_focus_on_webview(self):
-        '''
-        Attempts to set focus to the web view component.
-        '''
         self.web_view.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def get_web_view(self):
-        '''
-        Returns the QWebEngineView instance.
-        '''
         return self.web_view
 
-    def display_kml_and_show_instructions(self, kml_file_path: str, kml_file_name: str):
-        """
-        Copies the KML file path to the clipboard and shows instructions to open in Google Earth Pro.
-        It does NOT load the KML into the embedded web view.
-        """
-        if not kml_file_path or not kml_file_name:
-            # print("GoogleEarthWebViewWidget: KML file path or name is missing.") # Or log via a passed callback
-            QMessageBox.warning(self, "KML Error", "Cannot process KML: File path or name is missing.")
-            return
-
-        try:
-            QGuiApplication.clipboard().setText(kml_file_path)
-            instruction_message = (
-                f"Path for KML file '{kml_file_name}' copied to clipboard.\n\n"
-                f"To view in Google Earth Pro (Desktop):\n"
-                f"1. Open Google Earth Pro application.\n"
-                f"2. Go to File > Open...\n"
-                f"3. Paste the copied path (Ctrl+V or Cmd+V) into the filename field and press Enter/Open."
-            )
-            QMessageBox.information(self, "Open in Google Earth Pro", instruction_message)
-            # print(f"GoogleEarthWebViewWidget: Copied path to clipboard: {kml_file_path}") # Or log
-        except Exception as e:
-            # print(f"GoogleEarthWebViewWidget: Error copying to clipboard or showing message: {e}") # Or log
-            QMessageBox.critical(self, "Error", f"Could not copy path to clipboard or show instructions: {e}")
-
     def clear_view(self):
-        """
-        Resets the web view to the initial Google Earth URL.
-        """
-        # self.web_view.setUrl(QUrl("about:blank")) # Option 1: Blank page
-        self.web_view.setUrl(QUrl("https://earth.google.com/web/")) # Option 2: Reload GE
-        # print("GoogleEarthWebViewWidget: View cleared/reloaded.") # Or log
+        self.web_view.setUrl(QUrl("https://earth.google.com/web/"))
 
     def cleanup(self):
-        """
-        Placeholder for any cleanup logic needed for the web view.
-        For example, stopping media, clearing cache, or other resource releases.
-        """
-        # self.web_view.stop() # Example: stop loading
-        # self.web_view.setUrl(QUrl("about:blank")) # Example: clear page
-        # No specific cleanup needed for QWebEngineView itself unless page-specific actions.
-        pass
+        """Clean up temporary files and directory"""
+        try:
+            if self.current_temp_file and os.path.exists(self.current_temp_file):
+                os.remove(self.current_temp_file)
+            if os.path.exists(self.temp_dir):
+                os.rmdir(self.temp_dir)
+        except Exception as e:
+            print(f"Error cleaning up temp files: {e}")
 
 class GoogleEarthViewWidget(QWidget):
     def __init__(self, parent=None, log_message_callback=None):

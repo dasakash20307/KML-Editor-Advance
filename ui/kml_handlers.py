@@ -20,28 +20,28 @@ class KMLHandler(QObject):
     kml_data_updated_signal = Signal()
 
     def __init__(self, main_window_ref, db_manager, credential_manager,
-                 log_message_callback, lock_handler, # Added lock_handler
-                 map_stack, kml_editor_view_widget, google_earth_view_widget, # Renamed map_view_widget
+                 log_message_callback, lock_handler,
+                 map_stack, kml_editor_view_widget, google_earth_view_widget,
                  table_view, source_model, filter_proxy_model, parent=None):
         super().__init__(parent)
         self.main_window_ref = main_window_ref
         self.db_manager = db_manager
         self.credential_manager = credential_manager
         self.log_message_callback = log_message_callback
-        self.lock_handler = lock_handler # Store lock_handler
+        self.lock_handler = lock_handler
         
         self.map_stack = map_stack
-        self.kml_editor_widget = kml_editor_view_widget # Updated attribute name
+        self.kml_editor_widget = kml_editor_view_widget
         self.google_earth_view_widget = google_earth_view_widget
         
-        if self.kml_editor_widget and hasattr(self.kml_editor_widget, 'set_credential_manager'): # Added
-            self.kml_editor_widget.set_credential_manager(self.credential_manager) # Added
+        if self.kml_editor_widget and hasattr(self.kml_editor_widget, 'set_credential_manager'):
+            self.kml_editor_widget.set_credential_manager(self.credential_manager)
 
         self.table_view = table_view
         self.source_model = source_model
         self.filter_proxy_model = filter_proxy_model
 
-        # Attributes for Google Earth KML generation (kept for now)
+        # Attributes for Google Earth KML generation
         self.current_temp_kml_path = None
         self.show_ge_instructions_popup_again = True
 
@@ -86,27 +86,32 @@ class KMLHandler(QObject):
 
     def on_table_selection_changed(self, selected, deselected):
         selected_proxy_indexes = self.table_view.selectionModel().selectedRows()
+        
+        # Get the first selected row's data
         polygon_record = None
         db_id = None
-
+        
         if selected_proxy_indexes:
-            source_model_index = self.filter_proxy_model.mapToSource(selected_proxy_indexes[0])
-            if source_model_index.isValid():
-                db_id_item = self.source_model.data(source_model_index.siblingAtColumn(PolygonTableModel.DB_ID_COL))
+            proxy_index = selected_proxy_indexes[0]  # Get first selected row
+            source_index = self.filter_proxy_model.mapToSource(proxy_index)
+            db_id = self.source_model.data(
+                self.source_model.index(source_index.row(), PolygonTableModel.DB_ID_COL),
+                Qt.ItemDataRole.DisplayRole
+            )
+            
+            if db_id is not None:
                 try:
-                    db_id = int(db_id_item)
+                    db_id = int(db_id)
                     polygon_record = self.db_manager.get_polygon_data_by_id(db_id)
                 except (ValueError, TypeError) as e:
-                    self.log_message_callback(f"TableSelection: Invalid DB ID '{db_id_item}': {e}", "error")
-                    polygon_record = None
-                    db_id = None # Ensure db_id is None if record fetch fails
+                    self.log_message_callback(f"Error parsing DB ID {db_id}: {e}", "error")
+                    db_id = None
                 except Exception as e:
-                    self.log_message_callback(f"TableSelection: Error fetching record by ID {db_id_item}: {e}", "error")
-                    polygon_record = None
-                    db_id = None # Ensure db_id is None
+                    self.log_message_callback(f"Error fetching record for DB ID {db_id}: {e}", "error")
+                    db_id = None
         
         if self.map_stack.currentIndex() == 1:  # GE View is active
-            if polygon_record: # A record is selected and successfully fetched
+            if polygon_record:
                 kml_file_name = polygon_record.get('kml_file_name')
                 main_kml_folder_path = self.credential_manager.get_kml_folder_path()
 
@@ -114,23 +119,23 @@ class KMLHandler(QObject):
                     full_kml_path = os.path.join(main_kml_folder_path, kml_file_name.strip())
                     if os.path.exists(full_kml_path):
                         self.google_earth_view_widget.display_kml_and_show_instructions(full_kml_path, kml_file_name)
-                        # self.log_message_callback(f"GE View: Displaying instructions for KML: {full_kml_path}", "info")
+                        if self.show_ge_instructions_popup_again:
+                            self._show_ge_instructions_popup()
                     else:
                         self.log_message_callback(f"GE View: KML file '{kml_file_name}' not found at '{full_kml_path}'. Updating status.", "warning")
                         self.google_earth_view_widget.clear_view()
-                        if db_id is not None: # db_id was successfully parsed earlier
+                        if db_id is not None:
                             self.db_manager.update_kml_file_status(db_id, "File Deleted")
                             self.kml_data_updated_signal.emit()
-                        # else: db_id might be None if initial parsing failed, already logged
-                else: # No KML filename in DB record, or KML folder path not set
+                else:
                     log_msg = "Cannot process for Google Earth. "
                     if not main_kml_folder_path:
                         log_msg += "KML folder path not configured. "
-                    else: # kml_file_name is the issue
+                    else:
                         log_msg += f"KML file name missing or invalid in DB for DB ID {db_id if db_id is not None else 'Unknown'}. "
                     self.log_message_callback(f"GE View: {log_msg}", "info")
                     self.google_earth_view_widget.clear_view()
-            else: # No valid polygon_record (no selection or record fetch failed earlier)
+            else:
                 self.log_message_callback("GE View: No valid record selected or record fetch failed. GE view cleared.", "info")
                 self.google_earth_view_widget.clear_view()
 
@@ -410,20 +415,25 @@ class KMLHandler(QObject):
     def _show_ge_instructions_popup(self):
         msg_box = QMessageBox(self.main_window_ref)
         msg_box.setWindowTitle("Google Earth Instructions")
-        msg_box.setTextFormat(Qt.TextFormat.PlainText)
-        msg_box.setText("Instructions:\n1. Click inside the Google Earth window to give it focus.\n2. Press Ctrl+O (Windows) or Cmd+O (Mac) to open file.\n3. Paste the KML file path (Ctrl+V or Cmd+V) into the file name box.\n4. Press Enter or click Open to load the polygon.\n(Tip: You might use Ctrl+H to access GE's history/temporary places).")
+        msg_box.setTextFormat(Qt.TextFormat.RichText)
+        msg_box.setText(
+            "Instructions:<br>"
+            "1. Click inside the Google Earth window to give it focus.<br>"
+            "2. Press Ctrl+O (Windows) or Cmd+O (Mac) to open file.<br>"
+            "3. Paste the KML file path (Ctrl+V or Cmd+V) into the file name box.<br>"
+            "4. Press Enter or click Open to load the polygon.<br><br>"
+            "<i>(Tip: You might use Ctrl+H to access GE's history/temporary places)</i>."
+        )
+        
         checkbox = QCheckBox("Do not show this message again for this session.")
         msg_box.setCheckBox(checkbox)
+        
         msg_box.exec()
+        
         if checkbox.isChecked():
             self.show_ge_instructions_popup_again = False
             self.log_message_callback("Google Earth instructions popup disabled for this session.", "info")
 
     def cleanup_temp_kml(self):
-        if self.current_temp_kml_path and os.path.exists(self.current_temp_kml_path):
-            try:
-                os.remove(self.current_temp_kml_path)
-                self.log_message_callback(f"Temp KML deleted: {self.current_temp_kml_path}", "info")
-                self.current_temp_kml_path = None
-            except Exception as e:
-                self.log_message_callback(f"Error deleting temp KML {self.current_temp_kml_path}: {e}", "error")
+        if hasattr(self.google_earth_view_widget, 'cleanup'):
+            self.google_earth_view_widget.cleanup()
