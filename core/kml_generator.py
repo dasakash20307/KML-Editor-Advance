@@ -64,7 +64,7 @@ def add_polygon_to_kml_object(kml_document, polygon_db_record, edited_coordinate
                 elif len(kml_coordinates_with_altitude[i]) != 3: # Invalid tuple
                     print(f"KML GEN Error: Invalid coordinate tuple format for {placemark_name}: {kml_coordinates_with_altitude[i]}")
                     return False
-            
+
             if len(kml_coordinates_with_altitude) < 3: # A polygon needs at least 3 points
                 print(f"KML GEN Error: Not enough points in edited_coordinates_list for {placemark_name}. Need at least 3.")
                 return False
@@ -91,7 +91,7 @@ def add_polygon_to_kml_object(kml_document, polygon_db_record, edited_coordinate
             if len(kml_coordinates_with_altitude) != 4: # Should be exactly 4 before closing
                 print(f"KML GEN Error: Could not form 4 valid coordinates from P1-P4 for UUID {placemark_name}")
                 return False
-            
+
             # Close the 4-point polygon
             kml_coordinates_with_altitude.append(kml_coordinates_with_altitude[0])
 
@@ -153,7 +153,7 @@ if __name__ == '__main__':
         "evaluation_status": "Re-evaluated", "crop_name": "Cotton",
         # P1-P4 data can be absent or present, should be ignored if edited_coordinates_list is used
     }
-    
+
     # Case 1: Valid edited_coordinates_list (already closed)
     edited_coords_closed = [
         (78.476, 17.385, 50),  # Lon, Lat, Alt
@@ -209,7 +209,7 @@ if __name__ == '__main__':
         print(f"Polygon for {sample_record_edited['uuid']} with (lon,lat) tuples added successfully (altitude should be 0.0).")
     else:
         print(f"Failed to add polygon for {sample_record_edited['uuid']} with (lon,lat) tuples.")
-        
+
     # Case 5: Empty edited_coordinates_list (should fall back to UTM)
     sample_record_fallback = {
         "uuid": "TEST_UUID_FALLBACK_006",

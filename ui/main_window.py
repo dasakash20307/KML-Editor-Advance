@@ -231,7 +231,7 @@ class MainWindow(QMainWindow):
         self.ge_instructions_action.triggered.connect(self.kml_handler._show_ge_instructions_popup)
         if hasattr(self.kml_handler, 'kml_data_updated_signal'):
              self.kml_handler.kml_data_updated_signal.connect(self.load_data_into_table)
-        
+
         # Connection for saving KML from KMLEditorViewWidget
         if hasattr(self.kml_editor_widget, 'save_triggered_signal'):
             self.kml_editor_widget.save_triggered_signal.connect(self._handle_save_kml_changes_triggered)
@@ -291,7 +291,7 @@ class MainWindow(QMainWindow):
         self.table_view.setColumnWidth(PolygonTableModel.UUID_COL,130); self.table_view.setColumnWidth(PolygonTableModel.RESPONSE_CODE_COL,120); self.table_view.setColumnWidth(PolygonTableModel.EVALUATION_STATUS_COL,150); self.table_view.setColumnWidth(PolygonTableModel.FARMER_NAME_COL,150); self.table_view.setColumnWidth(PolygonTableModel.VILLAGE_COL,120); self.table_view.setColumnWidth(PolygonTableModel.DATE_ADDED_COL,140); self.table_view.setColumnWidth(PolygonTableModel.KML_FILE_NAME_COL,150); self.table_view.setColumnWidth(PolygonTableModel.KML_FILE_STATUS_COL,110); self.table_view.setColumnWidth(PolygonTableModel.EDIT_COUNT_COL,90); self.table_view.setColumnWidth(PolygonTableModel.LAST_EDIT_DATE_COL,140); self.table_view.setColumnWidth(PolygonTableModel.EDITOR_DEVICE_ID_COL,130); self.table_view.setColumnWidth(PolygonTableModel.EDITOR_NICKNAME_COL,130); self.table_view.setColumnWidth(PolygonTableModel.DEVICE_CODE_COL,140); self.table_view.setColumnWidth(PolygonTableModel.EXPORT_COUNT_COL,100); self.table_view.setColumnWidth(PolygonTableModel.LAST_EXPORTED_COL,140); self.table_view.setColumnWidth(PolygonTableModel.LAST_MODIFIED_COL,140)
 
         table_layout.addWidget(self.table_view); self.right_splitter.addWidget(table_container)
-        
+
         log_container = QWidget(); log_layout = QVBoxLayout(log_container); log_layout.setContentsMargins(0,10,0,0); log_label = QLabel("Status and Logs:"); log_layout.addWidget(log_label); self.log_text_edit_qt_actual = QTextEdit(); self.log_text_edit_qt_actual.setReadOnly(True); self.log_text_edit_qt_actual.setFont(QFont("Segoe UI",9)); log_layout.addWidget(self.log_text_edit_qt_actual); self.right_splitter.addWidget(log_container)
         self.right_splitter.setStretchFactor(0,3); self.right_splitter.setStretchFactor(1,1); right_pane_layout.addWidget(self.right_splitter,1); self.main_splitter.addWidget(right_pane_widget)
         self.main_splitter.setStretchFactor(0,1); self.main_splitter.setStretchFactor(1,2); self.main_layout.addWidget(self.main_splitter,1)
@@ -310,12 +310,12 @@ class MainWindow(QMainWindow):
 
     def _handle_save_kml_changes_triggered(self):
         self.log_message("MainWindow: Save KML changes triggered.", "info")
-        
+
         # Retrieve necessary data from KMLEditorViewWidget
         # These attributes (current_db_id, current_kml_filename) were set in KMLHandler.on_table_selection_changed
         db_id = getattr(self.kml_editor_widget, 'current_db_id', None)
         original_kml_filename = getattr(self.kml_editor_widget, 'current_kml_filename', None)
-        
+
         edited_name = self.kml_editor_widget.placemark_name_edit.text()
         edited_description = self.kml_editor_widget.placemark_description_edit.toPlainText()
 
@@ -336,10 +336,10 @@ class MainWindow(QMainWindow):
 
             # Call KMLHandler to perform the save operation
             save_success = self.kml_handler.save_edited_kml(
-                db_id, original_kml_filename, geometry_json_str, 
+                db_id, original_kml_filename, geometry_json_str,
                 edited_name, edited_description
             )
-            
+
             # KMLHandler.save_edited_kml now handles reloading the KML into the editor or clearing it.
             # It also handles user messages for success/failure.
             # So, MainWindow just needs to ensure the editor exits edit mode if it's still in it,
@@ -382,12 +382,12 @@ class MainWindow(QMainWindow):
         self.toggle_ge_view_action.blockSignals(True);self.toggle_ge_view_button.blockSignals(True)
         self.toggle_ge_view_action.setChecked(checked);self.toggle_ge_view_button.setChecked(checked);self.toggle_ge_view_button.setText(f"GE View:{'ON'if checked else'OFF'}")
         self.toggle_ge_view_action.blockSignals(original_action_blocked);self.toggle_ge_view_button.blockSignals(original_button_blocked)
-        
+
         current_map_index = 0 # Default to KML Editor view
         if checked:
             current_map_index = 1 # Google Earth View
             self.google_earth_view_widget.set_focus_on_webview()
-        
+
         self.map_stack.setCurrentIndex(current_map_index)
         # Manually trigger selection change to update the newly visible map view
         self.kml_handler.on_table_selection_changed(None, None) # Pass dummy selection to re-trigger logic
@@ -409,7 +409,7 @@ class MainWindow(QMainWindow):
 
     def open_default_kml_view_settings_dialog(self):
         dialog = DefaultViewSettingsDialog(self.credential_manager, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted: 
+        if dialog.exec() == QDialog.DialogCode.Accepted:
             self.log_message("Default KML view settings saved.", "info")
         else:
             self.log_message("Default KML view settings dialog cancelled.", "info")

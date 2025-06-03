@@ -3,7 +3,7 @@
 import os
 import json
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QLineEdit, QPushButton, 
+    QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QLineEdit, QPushButton,
     QFormLayout, QLabel
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -15,7 +15,7 @@ from PySide6.QtWebChannel import QWebChannel
 class KMLJSBridge(QObject):
     # Define signals that can be emitted from Python and listened to in JS if needed
     # For now, direct JS calls are made, so signals might not be immediately necessary.
-    # Example: kmlDataLoaded = Signal(str) 
+    # Example: kmlDataLoaded = Signal(str)
 
     def __init__(self, parent_widget): # parent_widget is KMLEditorViewWidget
         super().__init__(parent_widget) # Pass parent_widget to QObject constructor
@@ -34,9 +34,9 @@ class KMLEditorViewWidget(QWidget):
 
     def __init__(self, parent=None, log_message_callback=None):
         super().__init__(parent)
-        
+
         self.log_message_callback = log_message_callback if log_message_callback else self._default_log
-        
+
         self.web_view = QWebEngineView()
         settings = self.web_view.settings()
         settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
@@ -95,7 +95,7 @@ class KMLEditorViewWidget(QWidget):
         base_path = os.path.dirname(os.path.abspath(__file__))
         # Path relative to this file: ../web_content/kml_editor/kml_editor.html
         html_file_path = os.path.join(base_path, "..", "web_content", "kml_editor", "kml_editor.html")
-        
+
         if not os.path.exists(html_file_path):
             self.log_message_callback(f"CRITICAL: HTML file for KML Editor not found at: {html_file_path}", "error")
             self.web_view.setHtml("<html><body><h1>Error: KML Editor HTML not found.</h1><p>Please check installation.</p></body></html>")
@@ -106,7 +106,7 @@ class KMLEditorViewWidget(QWidget):
         self.original_kml_content = None
         self.current_placemark_name_original = ""
         self.current_placemark_description_original = ""
-        
+
         # Connect button signals
         self.edit_kml_button.clicked.connect(self.enter_edit_mode)
         self.save_changes_button.clicked.connect(self._handle_save_changes)
@@ -211,7 +211,7 @@ class KMLEditorViewWidget(QWidget):
 
         self.placemark_name_edit.setText(placemark_name)
         self.placemark_description_edit.setText(placemark_description)
-        
+
         self.load_kml_to_map_via_js(kml_file_content)
         self.exit_edit_mode() # Ensure it starts/resets to non-edit mode
         self.log_message_callback(f"Displayed KML for placemark: {placemark_name}", "info")
@@ -228,10 +228,10 @@ class KMLEditorViewWidget(QWidget):
         self.placemark_name_edit.setText("N/A")
         self.placemark_description_edit.clear()
         self.placemark_description_edit.setText("Map cleared. No KML loaded.")
-        
+
         # Call JS function to clear map features
         self.web_view.page().runJavaScript("if (typeof clearMap === 'function') { clearMap(); } else { console.warn('JS function clearMap not defined.'); }")
-        
+
         self.exit_edit_mode() # Ensure UI is in non-edit state
         self.edit_kml_button.setEnabled(False) # Disable edit until KML is loaded
         self.log_message_callback("Map and KML data cleared.", "info")
@@ -254,7 +254,7 @@ if __name__ == '__main__':
     from PySide6.QtWidgets import QApplication
 
     app = QApplication(sys.argv)
-    
+
     # Dummy log function for standalone testing
     def test_logger(message, level="info"):
         print(f"TEST_APP_LOG [{level.upper()}]: {message}")
@@ -271,7 +271,7 @@ if __name__ == '__main__':
     # 2. Load some dummy KML data after a delay (to simulate async loading or user action)
     #    (Requires a running web server or correctly pathed local file for OpenLayers to fully init)
     #    For now, we assume kml_editor.html itself initializes the map structure.
-    
+
     dummy_kml_content = """<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Placemark>
@@ -288,7 +288,7 @@ if __name__ == '__main__':
     </Polygon>
   </Placemark>
 </kml>"""
-    
+
     placemark_name_test = "Test Placemark from Python"
     placemark_desc_test = "This is a test description loaded from Python code. It might contain special characters like < & > and \"quotes\"."
 
@@ -298,7 +298,7 @@ if __name__ == '__main__':
         if success:
             test_logger("Web view page loaded successfully.", "info")
             editor_widget.display_kml(dummy_kml_content, placemark_name_test, placemark_desc_test)
-            
+
             # Test entering edit mode
             # editor_widget.enter_edit_mode() # This would typically be user-triggered
         else:

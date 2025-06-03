@@ -50,25 +50,23 @@ function initMap() {
         })
     });
 
-    const osmSource = new ol.source.OSM();
-
-    osmSource.on('tileloadstart', function(event) {
-        // console.log('JS: Tile load start:', event.tile.src_); // Too verbose for normal operation
+    const stamenTerrainSource = new ol.source.Stamen({
+        layer: 'terrain', // Specify the Stamen layer type
+        // Stamen tiles are served over HTTPS, so no crossOrigin:'anonymous' typically needed unless issues persist
     });
 
-    osmSource.on('tileloadend', function(event) {
-        // console.log('JS: Tile load end:', event.tile.src_); // Too verbose for normal operation
+    stamenTerrainSource.on('tileloadstart', function(event) {
+        // console.log('JS: Stamen Tile load start:', event.tile.src_); // Too verbose for normal operation
     });
 
-    osmSource.on('tileloaderror', function(event) {
-        console.error('JS: Tile load error:', event.tile.src_);
-        if (webChannel) {
-            // Ensure the bridge and method exist before calling
-            if (webChannel.jsLogMessage) {
-                 webChannel.jsLogMessage("Error: Failed to load map tile: " + event.tile.src_);
-            } else {
-                console.error("JS: webChannel.jsLogMessage is not defined on the QWebChannel bridge.");
-            }
+    stamenTerrainSource.on('tileloadend', function(event) {
+        // console.log('JS: Stamen Tile load end:', event.tile.src_); // Too verbose for normal operation
+    });
+
+    stamenTerrainSource.on('tileloaderror', function(event) {
+        console.error('JS: Stamen Tile load error:', event.tile.src_);
+        if (webChannel && webChannel.jsLogMessage) { // Check if jsLogMessage exists
+            webChannel.jsLogMessage("Error: Failed to load Stamen map tile: " + event.tile.src_);
         }
     });
 
@@ -76,7 +74,7 @@ function initMap() {
         target: 'map', // ID of the div in kml_editor.html
         layers: [
             new ol.layer.Tile({
-                source: osmSource // Use the variable here
+                source: stamenTerrainSource // Use the new Stamen source
             }),
             vectorLayer // Add the KML vector layer
         ],
@@ -164,7 +162,7 @@ function enableMapEditing() {
         // source: vectorSource, // Alternative: modify any feature in the source
     });
     map.addInteraction(modifyInteraction);
-    
+
     console.log("Map editing enabled (Select & Modify).");
 }
 
@@ -207,10 +205,10 @@ function getEditedGeometry() {
         // Clone and transform the geometry to EPSG:4326 (Lon/Lat)
         const transformedGeom = geometry.clone().transform(map.getView().getProjection(), 'EPSG:4326');
         const coordinates = transformedGeom.getCoordinates();
-        
+
         // Determine geometry type for correct GeoJSON structure
         let geojsonType = transformedGeom.getType(); // e.g., "Polygon", "Point", "LineString"
-        
+
         // Simplify structure for single Polygon/LineString for now
         // OpenLayers coordinates for Polygon: [[ [lon,lat,alt?], ... ]]
         // OpenLayers coordinates for LineString: [ [lon,lat,alt?], ... ]
