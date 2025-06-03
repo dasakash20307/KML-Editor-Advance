@@ -29,65 +29,80 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 
 function initMap() {
-    console.log("Initializing OpenLayers map...");
-    vectorSource = new ol.source.Vector();
-    vectorLayer = new ol.layer.Vector({
-        source: vectorSource,
-        style: new ol.style.Style({ // Basic style for KML features
-            fill: new ol.style.Fill({
-                color: 'rgba(255, 255, 255, 0.2)' // Semi-transparent white fill
-            }),
-            stroke: new ol.style.Stroke({
-                color: '#ffcc33', // Yellow stroke
-                width: 3
-            }),
-            image: new ol.style.Circle({ // Style for points
-                radius: 7,
+    try {
+        console.log("JS: Attempting to initialize OpenLayers map...");
+
+        // Revert to OSM source
+        const osmSource = new ol.source.OSM();
+
+        osmSource.on('tileloadstart', function(event) {
+            // console.log('JS: OSM Tile load start:', event.tile.src_); // Verbose
+        });
+
+        osmSource.on('tileloadend', function(event) {
+            // console.log('JS: OSM Tile load end:', event.tile.src_); // Verbose
+        });
+
+        osmSource.on('tileloaderror', function(event) {
+            console.error('JS: OSM Tile load error for URL:', event.tile.src_);
+            if (webChannel && webChannel.jsLogMessage) {
+                webChannel.jsLogMessage("Error: Failed to load OSM map tile: " + event.tile.src_);
+            }
+        });
+
+        vectorSource = new ol.source.Vector(); // Ensure vectorSource is initialized
+        vectorLayer = new ol.layer.Vector({
+            source: vectorSource,
+            style: new ol.style.Style({ // Basic default style for KML features
+                stroke: new ol.style.Stroke({
+                    color: 'yellow',
+                    width: 3 // Increased width for better visibility
+                }),
                 fill: new ol.style.Fill({
-                    color: '#ffcc33'
+                    color: 'rgba(255, 255, 0, 0.2)' // Lighter yellow fill
+                }),
+                image: new ol.style.Circle({ // Style for points
+                    radius: 7,
+                    fill: new ol.style.Fill({
+                        color: '#ffcc33' // Default yellow for points too
+                    }),
+                    stroke: new ol.style.Stroke({ // Add stroke to points
+                        color: 'black',
+                        width: 1
+                    })
                 })
             })
-        })
-    });
+        });
 
-    const stamenTerrainSource = new ol.source.Stamen({
-        layer: 'terrain', // Specify the Stamen layer type
-        // Stamen tiles are served over HTTPS, so no crossOrigin:'anonymous' typically needed unless issues persist
-    });
+        map = new ol.Map({
+            target: 'map',
+            layers: [
+                new ol.layer.Tile({
+                    source: osmSource
+                }),
+                vectorLayer
+            ],
+            view: new ol.View({
+                center: ol.proj.fromLonLat([0, 0]),
+                zoom: 2
+            })
+        });
 
-    stamenTerrainSource.on('tileloadstart', function(event) {
-        // console.log('JS: Stamen Tile load start:', event.tile.src_); // Too verbose for normal operation
-    });
-
-    stamenTerrainSource.on('tileloadend', function(event) {
-        // console.log('JS: Stamen Tile load end:', event.tile.src_); // Too verbose for normal operation
-    });
-
-    stamenTerrainSource.on('tileloaderror', function(event) {
-        console.error('JS: Stamen Tile load error:', event.tile.src_);
-        if (webChannel && webChannel.jsLogMessage) { // Check if jsLogMessage exists
-            webChannel.jsLogMessage("Error: Failed to load Stamen map tile: " + event.tile.src_);
+        console.log("JS: OpenLayers map object should be initialized.");
+        if (webChannel && webChannel.jsEditorReady) { // Check if jsEditorReady exists
+             // webChannel.jsEditorReady(); // If you have a corresponding slot in Python
         }
-    });
 
-    map = new ol.Map({
-        target: 'map', // ID of the div in kml_editor.html
-        layers: [
-            new ol.layer.Tile({
-                source: stamenTerrainSource // Use the new Stamen source
-            }),
-            vectorLayer // Add the KML vector layer
-        ],
-        view: new ol.View({
-            center: ol.proj.fromLonLat([0, 0]), // Default center (lon, lat)
-            zoom: 2 // Default zoom
-        })
-    });
-
-    console.log("OpenLayers map initialized.");
-    if (webChannel) {
-        // Example: Call a Python method if it exists on the bridge
-        // webChannel.jsFunctionFromPython("Map JS Initialized and Ready");
+    } catch (e) {
+        console.error("JS: CRITICAL ERROR during map initialization:", e.message, e.stack);
+        if (webChannel && webChannel.jsLogMessage) {
+            webChannel.jsLogMessage("CRITICAL JS ERROR during map initialization: " + e.message);
+        }
+        // Optionally, display an error message in the map div
+        const mapDiv = document.getElementById('map');
+        if (mapDiv) {
+            mapDiv.innerHTML = '<p style="color:red;text-align:center;padding:20px;">Critical Error: Map could not be initialized. Check console.</p>';
+        }
     }
 }
 
