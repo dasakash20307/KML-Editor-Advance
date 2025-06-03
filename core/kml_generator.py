@@ -51,28 +51,35 @@ def add_polygon_to_kml_object(kml_document, polygon_db_record, edited_coordinate
     """
     kml_coordinates_with_altitude = []
     placemark_name = polygon_db_record.get("uuid", "Unnamed Polygon")
+    used_edited_coords = False # Flag to log which path was taken
 
     try:
         if edited_coordinates_list and isinstance(edited_coordinates_list, list) and len(edited_coordinates_list) > 0:
+            print(f"KML GEN Info: Using edited_coordinates_list for {placemark_name}. Length: {len(edited_coordinates_list)}")
+            used_edited_coords = True
             # Use provided coordinates
-            kml_coordinates_with_altitude = list(edited_coordinates_list) # Make a copy
-
-            # Ensure altitude is present, default to 0.0 if not (though it should be)
-            for i in range(len(kml_coordinates_with_altitude)):
-                if len(kml_coordinates_with_altitude[i]) == 2: # (lon, lat)
-                    kml_coordinates_with_altitude[i] = (kml_coordinates_with_altitude[i][0], kml_coordinates_with_altitude[i][1], 0.0)
-                elif len(kml_coordinates_with_altitude[i]) != 3: # Invalid tuple
-                    print(f"KML GEN Error: Invalid coordinate tuple format for {placemark_name}: {kml_coordinates_with_altitude[i]}")
+            kml_coordinates_with_altitude = [] # Initialize to ensure it's fresh
+            for i, coord_tuple in enumerate(edited_coordinates_list):
+                if not isinstance(coord_tuple, (list, tuple)) or not (2 <= len(coord_tuple) <= 3):
+                    print(f"KML GEN Error: Invalid coordinate tuple format for {placemark_name} at index {i}: {coord_tuple}")
                     return False
 
+                lon = coord_tuple[0]
+                lat = coord_tuple[1]
+                alt = coord_tuple[2] if len(coord_tuple) == 3 and coord_tuple[2] is not None else 0.0
+                kml_coordinates_with_altitude.append((lon, lat, alt))
+
             if len(kml_coordinates_with_altitude) < 3: # A polygon needs at least 3 points
-                print(f"KML GEN Error: Not enough points in edited_coordinates_list for {placemark_name}. Need at least 3.")
+                print(f"KML GEN Error: Not enough valid points processed from edited_coordinates_list for {placemark_name}. Need at least 3.")
                 return False
 
             # Close the polygon if it's not already closed
-            if kml_coordinates_with_altitude[0] != kml_coordinates_with_altitude[-1]:
+            # Important: Check if list is not empty before accessing elements
+            if kml_coordinates_with_altitude and (kml_coordinates_with_altitude[0] != kml_coordinates_with_altitude[-1]):
                 kml_coordinates_with_altitude.append(kml_coordinates_with_altitude[0])
+                print(f"KML GEN Info: Polygon for {placemark_name} (from edited) was auto-closed.")
         else:
+            print(f"KML GEN Info: Falling back to P1-P4 UTM conversion for {placemark_name}.")
             # Fallback to P1-P4 UTM conversion
             for i in range(1, 5): # Points P1 to P4
                 easting = polygon_db_record.get(f'p{i}_easting')
@@ -112,13 +119,17 @@ def add_polygon_to_kml_object(kml_document, polygon_db_record, edited_coordinate
         polygon.style.polystyle.outline = 1  # True (draw outline)
         polygon.style.polystyle.fill = 0     # False (do not fill)
 
+        if used_edited_coords:
+            print(f"KML GEN Success: Polygon for {placemark_name} added using edited_coordinates_list. Points used: {len(kml_coordinates_with_altitude)}")
+        else:
+            print(f"KML GEN Success: Polygon for {placemark_name} added using P1-P4 UTM data. Points used: {len(kml_coordinates_with_altitude)}")
         return True # Polygon added successfully
 
     except utm.error.OutOfRangeError as e_utm: # type: ignore
-        print(f"KML GEN Error (UTM Conversion): {e_utm} for UUID {placemark_name}")
+        print(f"KML GEN Error (UTM Conversion): {e_utm} for UUID {placemark_name}. Used edited: {used_edited_coords}")
         return False
     except Exception as e:
-        print(f"KML GEN Error (General): Adding polygon {placemark_name} to KML failed: {e}")
+        print(f"KML GEN Error (General): Adding polygon {placemark_name} to KML failed: {e}. Used edited: {used_edited_coords}")
         return False
 
 # Example usage (if testing kml_generator.py directly)

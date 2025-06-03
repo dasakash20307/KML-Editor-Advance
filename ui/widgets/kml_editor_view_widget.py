@@ -7,7 +7,8 @@ from PySide6.QtWidgets import (
     QFormLayout, QLabel
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWebEngineCore import QWebEngineSettings, QWebEnginePage
+# At the top of the file
+from PySide6.QtWebEngineCore import QWebEngineSettings, QWebEnginePage, QWebEngineProfile
 from PySide6.QtCore import QUrl, Slot, QObject, Signal # Added QObject, Signal
 from PySide6.QtWebChannel import QWebChannel
 
@@ -23,10 +24,12 @@ class KMLJSBridge(QObject):
 
     @Slot(str) # Add this decorator
     def jsLogMessage(self, message: str): # Add this method
+        print(f"JS Log (via Bridge): {message}") # Add a direct print for ensured visibility in sandbox
         if hasattr(self._parent_widget, 'log_message_callback') and callable(self._parent_widget.log_message_callback):
             self._parent_widget.log_message_callback(f"JS Log: {message}", "info_js") # Use a distinct level if desired
-        else:
-            print(f"JS Log (via Bridge): {message}")
+        # else:
+            # The print above handles the case where the callback might not be set or callable.
+            # print(f"JS Log (via Bridge fallback): {message}")
 
 
 class KMLEditorViewWidget(QWidget):
@@ -38,10 +41,22 @@ class KMLEditorViewWidget(QWidget):
         self.log_message_callback = log_message_callback if log_message_callback else self._default_log
 
         self.web_view = QWebEngineView()
+
+        # Set a custom User-Agent
+        # Get the default profile of the page
+        profile = self.web_view.page().profile()
+        # If no specific profile is set on the page, QWebEngineProfile.defaultProfile() could also be used
+        # but page().profile() is more direct if a page already exists.
+        # If there's a concern about shared profiles, a new QWebEngineProfile could be created and set.
+
+        custom_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36"
+        profile.setHttpUserAgent(custom_user_agent)
+        self.log_message_callback(f"Set custom User-Agent to: {custom_user_agent}", "debug")
+
         settings = self.web_view.settings()
         settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
         # For development, enabling remote debugging can be helpful:
-        # os.environ["QTWEBENGINE_REMOTE_DEBUGGING"] = "9223" # Choose an unused port
+        os.environ["QTWEBENGINE_REMOTE_DEBUGGING"] = "9223" # Choose an unused port
         # settings.setAttribute(QWebEngineSettings.WebAttribute.DevToolsEnabled, True) # Not a standard attribute
 
         # UI Elements for KML Editing
@@ -118,6 +133,7 @@ class KMLEditorViewWidget(QWidget):
 
 
     def _default_log(self, message, level="info"):
+        # This ensures messages are printed to stdout, which is crucial for sandbox environments
         print(f"KMLEditorViewWidget_LOG [{level.upper()}]: {message}")
 
     # --- Methods to Interact with JavaScript ---

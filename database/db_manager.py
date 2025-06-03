@@ -303,21 +303,58 @@ class DatabaseManager:
             print(f"DB: Error fetching polygon data for display: {e}")
             return []
 
-    def get_polygon_data_by_id(self, record_id):
-        """Fetches a full polygon record by its database ID."""
+    def get_polygon_data_by_id(self, polygon_id):
+        # Original logic (mock data for polygon_id == 10001 removed):
         if not self.cursor or not self.conn:
-            print(f"DB Error in DatabaseManager.get_polygon_data_by_id: Connection or cursor not available.")
+            print(f"DB_MANAGER_ERROR: Connection or cursor not available for get_polygon_data_by_id (id: {polygon_id}).")
             return None
+        query = "SELECT * FROM polygon_data WHERE id = ?"
         try:
-            self.cursor.execute("SELECT * FROM polygon_data WHERE id = ?", (record_id,))
-            row = self.cursor.fetchone()
-            if row:
-                col_names = [desc[0] for desc in self.cursor.description]
-                return dict(zip(col_names, row))
+            self.cursor.execute(query, (polygon_id,))
+            record = self.cursor.fetchone()
+            if record:
+                # Ensure conversion to dict using column names
+                # self.cursor.description is available after a select
+                return {key[0]: record[idx] for idx, key in enumerate(self.cursor.description)}
             return None
-        except sqlite3.Error as e:
-            print(f"DB: Error fetching polygon data by ID '{record_id}': {e}")
+        except Exception as e:
+            print(f"DB_MANAGER_ERROR: Error fetching polygon data for id {polygon_id}: {e}")
             return None
+
+    def update_polygon_data_by_id(self, polygon_id, update_data: dict):
+        if not update_data or not polygon_id:
+            print("DB_MANAGER_ERROR: No data provided for update or no polygon_id.")
+            return False
+
+        # Ensure cursor and connection are available
+        if not self.cursor or not self.conn:
+            print(f"DB_MANAGER_ERROR: Connection or cursor not available for update_polygon_data_by_id (id: {polygon_id}).")
+            return False
+
+        fields = []
+        values = []
+        for key, value in update_data.items():
+            fields.append(f"{key} = ?")
+            values.append(value)
+
+        if not fields:
+            print("DB_MANAGER_ERROR: No fields to update.")
+            return False
+
+        query = f"UPDATE polygons SET {', '.join(fields)} WHERE id = ?" # Table name is 'polygon_data', not 'polygons'
+        # Corrected query:
+        query = f"UPDATE polygon_data SET {', '.join(fields)} WHERE id = ?"
+        values.append(polygon_id)
+
+        try:
+            print(f"DB_MANAGER_DEBUG: Executing update for polygon_id {polygon_id}: Query: {query}, Values: {tuple(values)}")
+            self.cursor.execute(query, tuple(values))
+            self.conn.commit()
+            return self.cursor.rowcount > 0 # Check if any row was actually updated
+        except Exception as e:
+            print(f"DB_MANAGER_ERROR: Error updating polygon data for id {polygon_id}: {e}")
+            self.conn.rollback() # Rollback on error
+            return False
 
     def update_kml_export_status(self, record_id):
         """Updates the KML export count and date for a given record ID."""
