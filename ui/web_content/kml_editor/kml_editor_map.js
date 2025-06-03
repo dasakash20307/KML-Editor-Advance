@@ -16,7 +16,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 console.log("QWebChannel bridge 'kml_editor_bridge' connected.");
                 initMap(); // Initialize map after channel is ready
                 // Notify Python that the JS editor is ready (optional)
-                // webChannel.jsEditorReady("KML Editor JavaScript is ready.");
+                // if (webChannel.jsEditorReady) webChannel.jsEditorReady("KML Editor JavaScript is ready.");
             } else {
                 console.error("KML Editor Bridge object (kml_editor_bridge) not found in QWebChannel.");
                 alert("Error: Could not connect to Python backend (QWebChannel bridge not found). Map functionality will be limited.");
@@ -32,34 +32,23 @@ function initMap() {
     try {
         console.log("JS: Attempting to initialize OpenLayers map...");
 
-        // Switch to Stamen tile source for reliability during this test
-        const osmSource = new ol.source.Stamen({ layer: 'toner-lite' });
-        // const osmSource = new ol.source.OSM(); // Keep OSM commented out for now
-
-        osmSource.on('tileloadstart', function(event) {
-            if (webChannel && webChannel.jsLogMessage) {
-                webChannel.jsLogMessage('JS: Tile load start: ' + event.tile.src_);
-            } else {
-                console.log('JS: Tile load start: ' + event.tile.src_);
-            }
-        });
-
-        osmSource.on('tileloadend', function(event) {
-            if (webChannel && webChannel.jsLogMessage) {
-                webChannel.jsLogMessage('JS: Tile load success: ' + event.tile.src_);
-            } else {
-                console.log('JS: Tile load success: ' + event.tile.src_);
-            }
-        });
-
-        osmSource.on('tileloaderror', function(event) {
-            // Attempt to get more details from the event or tile, though OpenLayers error events are sometimes minimal
-            var errorDetails = 'State: ' + event.tile.getState();
-            // Note: `event.error` or similar specific error message property isn't standard in OL tileloaderror
-            // We rely on the browser console for more detailed network errors (e.g., CORS, SSL)
-            console.error('JS: Tile load error. Tile URL: ' + event.tile.src_ + ', ' + errorDetails);
-            if (webChannel && webChannel.jsLogMessage) {
-                webChannel.jsLogMessage('JS: Tile load error: ' + event.tile.src_ + ', ' + errorDetails);
+        // Configure Esri World Imagery Source
+        const esriSource = new ol.source.XYZ({
+            url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            attributions: 'Tiles &copy; <a href="https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer">ArcGIS</a>',
+            maxZoom: 19, // Esri World Imagery typically supports up to zoom level 19
+            tileLoadFunction: function(tile, src) { // Optional: Add error logging for Esri tiles
+                const image = tile.getImage();
+                image.onload = function() {
+                    // console.log('JS: Esri Tile load end:', src);
+                };
+                image.onerror = function() {
+                    console.error('JS: Esri Tile load error for URL:', src);
+                    if (webChannel && webChannel.jsLogMessage) {
+                        webChannel.jsLogMessage("Error: Failed to load Esri map tile: " + src);
+                    }
+                };
+                image.src = src;
             }
         });
 
@@ -91,20 +80,20 @@ function initMap() {
             target: 'map',
             layers: [
                 new ol.layer.Tile({
-                    source: osmSource
+                    source: esriSource // Use the new Esri source here
                 }),
                 vectorLayer
             ],
             view: new ol.View({
-                center: ol.proj.fromLonLat([0, 0]),
-                zoom: 2
+                center: ol.proj.fromLonLat([0, 0]), // Default center
+                zoom: 2 // Default zoom
             })
         });
 
-        console.log("JS: OpenLayers map object should be initialized.");
-        if (webChannel && webChannel.jsEditorReady) { // Check if jsEditorReady exists
+        console.log("JS: OpenLayers map object should be initialized with Esri Tiles.");
+        // if (webChannel && webChannel.jsEditorReady) { // Check if jsEditorReady exists
              // webChannel.jsEditorReady(); // If you have a corresponding slot in Python
-        }
+        // }
 
     } catch (e) {
         console.error("JS: CRITICAL ERROR during map initialization:", e.message, e.stack);
@@ -121,60 +110,57 @@ function initMap() {
 
 function loadKmlToMap(kmlString) {
     console.log("JS: loadKmlToMap called.");
-    if (webChannel && webChannel.jsLogMessage) {
-        webChannel.jsLogMessage("JS: loadKmlToMap invoked.");
-    }
-
     if (!map || !vectorSource) {
-        console.error("JS Error: Map or vectorSource not initialized before loadKmlToMap.");
+        console.error("Map or vectorSource not initialized yet.");
         if (webChannel && webChannel.jsLogMessage) {
-            webChannel.jsLogMessage("JS KML Load Error: Map or vectorSource not initialized.");
+            webChannel.jsLogMessage("JS Error: loadKmlToMap called before map/vectorSource initialized.");
         }
         return;
     }
     if (!kmlString || kmlString.trim() === "") {
-        console.warn("JS Warning: KML string is empty or null. Clearing map.");
+        console.warn("JS: KML string is empty or null. Clearing map.");
         if (webChannel && webChannel.jsLogMessage) {
-            webChannel.jsLogMessage("JS KML Load Warning: KML string is empty. Clearing map.");
+            webChannel.jsLogMessage("JS Warning: KML string empty, clearing map.");
         }
         clearMap();
         return;
     }
 
     try {
-        vectorSource.clear();
+        vectorSource.clear(); // Clear existing features
         const kmlFormat = new ol.format.KML({
-            extractStyles: false
+            extractStyles: false // We use a default layer style for now
         });
 
+        // Features are read in EPSG:4326 and transformed to the map's view projection (likely EPSG:3857)
         const features = kmlFormat.readFeatures(kmlString, {
-            dataProjection: 'EPSG:4326',
+            dataProjection: 'EPSG:4326', // KML coordinates are Lon/Lat
             featureProjection: map.getView().getProjection()
         });
 
         if (features && features.length > 0) {
             vectorSource.addFeatures(features);
             map.getView().fit(vectorSource.getExtent(), {
-                padding: [70, 70, 70, 70],
+                padding: [70, 70, 70, 70], // Increased padding
                 duration: 1000,
-                maxZoom: 18
+                maxZoom: 18 // Prevent zooming too close on small features (can be adjusted based on Esri maxZoom)
             });
-            console.log(`JS: Loaded ${features.length} features from KML.`);
+            console.log(`Loaded ${features.length} features from KML.`);
             if (webChannel && webChannel.jsLogMessage) {
-                webChannel.jsLogMessage(`JS: KML Loaded successfully with ${features.length} features.`);
+                webChannel.jsLogMessage(`JS Info: Loaded ${features.length} features from KML.`);
             }
         } else {
-            console.warn("JS Warning: No features found in KML string or KML was invalid.");
+            console.warn("No features found in KML string or KML was invalid.");
             if (webChannel && webChannel.jsLogMessage) {
-                webChannel.jsLogMessage("JS KML Load Warning: No features found in provided KML string.");
+                webChannel.jsLogMessage("JS Warning: No features found in KML string or KML was invalid.");
             }
         }
     } catch (e) {
-        console.error("JS Error loading KML to map:", e.message, e.stack);
+        console.error("Error loading KML to map:", e);
         if (webChannel && webChannel.jsLogMessage) {
-            webChannel.jsLogMessage("JS KML Parse Error: " + e.message);
+            webChannel.jsLogMessage("JS Error loading KML: " + e.message);
         }
-        // alert("Error parsing KML data. Please check the KML file format and console."); // Alert can be intrusive
+        alert("Error parsing KML data. Please check the KML file format.");
     }
 }
 
@@ -182,90 +168,63 @@ function enableMapEditing() {
     console.log("JS: enableMapEditing called.");
     if (!map || !vectorSource || vectorSource.getFeatures().length === 0) {
         console.warn("Cannot enable editing: Map not ready or no features to edit.");
-        // Optionally, send a message back to Python or show an alert
-        // if (webChannel) webChannel.editingError("No features to edit.");
+        if (webChannel && webChannel.jsLogMessage) {
+            webChannel.jsLogMessage("JS Warning: Cannot enable editing - map not ready or no features.");
+        }
         return;
     }
 
     disableMapEditing(); // Remove any existing instances first
-    console.log("JS: Called disableMapEditing() before enabling new interactions.");
 
     selectInteraction = new ol.interaction.Select({
-        wrapX: false, // Important for geometries that cross the dateline
-        // style: ... // Optional: style for selected features
+        wrapX: false,
     });
     map.addInteraction(selectInteraction);
-    console.log("JS: ol.interaction.Select added.");
 
     modifyInteraction = new ol.interaction.Modify({
-        features: selectInteraction.getFeatures(), // Modify only selected features
-        deleteCondition: function(event) { // Added deleteCondition
-            return ol.events.condition.altKeyOnly(event) && ol.events.condition.singleClick(event);
-        }
+        features: selectInteraction.getFeatures(),
     });
     map.addInteraction(modifyInteraction);
-    console.log("JS: ol.interaction.Modify added with deleteCondition.");
 
     console.log("Map editing enabled (Select & Modify).");
-    if(webChannel && webChannel.jsLogMessage) {
-        webChannel.jsLogMessage("JS: Map editing enabled (Select & Modify interactions added with deleteCondition).");
+    if (webChannel && webChannel.jsLogMessage) {
+        webChannel.jsLogMessage("JS Info: Map editing enabled.");
     }
 }
 
 function disableMapEditing() {
     console.log("JS: disableMapEditing called.");
-    if (!map) {
-        console.warn("JS: Map object not found, cannot disable editing.");
-        if(webChannel && webChannel.jsLogMessage) {
-            webChannel.jsLogMessage("JS Warning: Map object not found in disableMapEditing.");
-        }
-        return;
-    }
+    if (!map) return;
 
-    var selectRemovedLog = "Select interaction not present or already removed.";
     if (selectInteraction) {
         map.removeInteraction(selectInteraction);
-        selectInteraction = null; // Important to dereference
-        console.log("JS: ol.interaction.Select removed.");
-        selectRemovedLog = "Select interaction removed.";
-    } else {
-        console.log("JS: ol.interaction.Select was already null or not found.");
+        selectInteraction = null;
     }
-
-    var modifyRemovedLog = "Modify interaction not present or already removed.";
     if (modifyInteraction) {
         map.removeInteraction(modifyInteraction);
-        modifyInteraction = null; // Important to dereference
-        console.log("JS: ol.interaction.Modify removed.");
-        modifyRemovedLog = "Modify interaction removed.";
-    } else {
-        console.log("JS: ol.interaction.Modify was already null or not found.");
+        modifyInteraction = null;
     }
     console.log("Map editing disabled.");
-    if(webChannel && webChannel.jsLogMessage) {
-        webChannel.jsLogMessage(`JS: Map editing disabled. ${selectRemovedLog} ${modifyRemovedLog}`);
+     if (webChannel && webChannel.jsLogMessage) {
+        webChannel.jsLogMessage("JS Info: Map editing disabled.");
     }
 }
 
 function getEditedGeometry() {
     console.log("JS: getEditedGeometry called.");
-    if (webChannel && webChannel.jsLogMessage) {
-        webChannel.jsLogMessage("JS: getEditedGeometry invoked.");
-    }
-
     if (!vectorSource || vectorSource.getFeatures().length === 0) {
-        console.warn("JS GetGeom Error: No features available.");
+        console.warn("No features available to get geometry from.");
         if (webChannel && webChannel.jsLogMessage) {
-            webChannel.jsLogMessage("JS GetGeom Error: No features available in vectorSource.");
+            webChannel.jsLogMessage("JS Warning: getEditedGeometry - no features available.");
         }
         return JSON.stringify(null);
     }
 
     const feature = vectorSource.getFeatures()[0];
     if (!feature) {
-        console.warn("JS GetGeom Error: First feature is undefined.");
-        if (webChannel && webChannel.jsLogMessage) {
-            webChannel.jsLogMessage("JS GetGeom Error: First feature is undefined.");
+        console.warn("First feature is undefined.");
+         if (webChannel && webChannel.jsLogMessage) {
+            webChannel.jsLogMessage("JS Warning: getEditedGeometry - first feature undefined.");
         }
         return JSON.stringify(null);
     }
@@ -273,50 +232,39 @@ function getEditedGeometry() {
     try {
         const geometry = feature.getGeometry();
         if (!geometry) {
-            console.warn("JS GetGeom Error: Geometry is undefined for the feature.");
+            console.warn("Geometry is undefined for the feature.");
             if (webChannel && webChannel.jsLogMessage) {
-                webChannel.jsLogMessage("JS GetGeom Error: Geometry is undefined for the feature.");
+                webChannel.jsLogMessage("JS Warning: getEditedGeometry - geometry undefined for feature.");
             }
             return JSON.stringify(null);
         }
 
-        // Clone and transform the geometry to EPSG:4326 (Lon/Lat)
         const transformedGeom = geometry.clone().transform(map.getView().getProjection(), 'EPSG:4326');
         const coordinates = transformedGeom.getCoordinates();
-
-        // Determine geometry type for correct GeoJSON structure
-        let geojsonType = transformedGeom.getType(); // e.g., "Polygon", "Point", "LineString"
-
-        // Simplify structure for single Polygon/LineString for now
-        // OpenLayers coordinates for Polygon: [[ [lon,lat,alt?], ... ]]
-        // OpenLayers coordinates for LineString: [ [lon,lat,alt?], ... ]
-        // The Python side expects list of (lon, lat, alt) tuples for add_polygon_to_kml_object's edited_coordinates_list
-        // For Polygon, coordinates[0] is the outer ring.
+        let geojsonType = transformedGeom.getType();
         let finalCoordinates;
+
         if (geojsonType === 'Polygon' && Array.isArray(coordinates) && Array.isArray(coordinates[0])) {
-            finalCoordinates = coordinates[0].map(coord => [coord[0], coord[1], coord[2] || 0.0]); // Ensure 3D for KML
+            finalCoordinates = coordinates[0].map(coord => [coord[0], coord[1], coord[2] || 0.0]);
         } else if (geojsonType === 'LineString' && Array.isArray(coordinates)) {
              finalCoordinates = coordinates.map(coord => [coord[0], coord[1], coord[2] || 0.0]);
         } else if (geojsonType === 'Point' && Array.isArray(coordinates)) {
-            finalCoordinates = [[coordinates[0], coordinates[1], coordinates[2] || 0.0]]; // Wrap point to look like a path
-        }
-        else {
+            finalCoordinates = [[coordinates[0], coordinates[1], coordinates[2] || 0.0]];
+        } else {
             console.warn("Unhandled geometry type for coordinate extraction:", geojsonType);
+            if (webChannel && webChannel.jsLogMessage) {
+                webChannel.jsLogMessage("JS Warning: getEditedGeometry - unhandled geometry type: " + geojsonType);
+            }
             return JSON.stringify(null);
         }
 
-        // Return a simplified list of [lon, lat, alt] tuples, as expected by the Python side for `edited_coordinates_list`
-        console.log("JS: getEditedGeometry - Extracted and transformed coordinates (before stringify):", finalCoordinates);
-        if (webChannel && webChannel.jsLogMessage) {
-            // Log the raw coordinates array as a string for Python to see
-            webChannel.jsLogMessage("JS: Extracted coordinates (raw): " + JSON.stringify(finalCoordinates));
-        }
+        console.log("Extracted and transformed coordinates:", finalCoordinates);
         return JSON.stringify(finalCoordinates);
 
     } catch (e) {
         console.error("Error getting/transforming edited geometry:", e);
         if (webChannel && webChannel.jsLogMessage) {
-            webChannel.jsLogMessage("JS ERROR in getEditedGeometry: " + e.message);
+            webChannel.jsLogMessage("JS Error: getEditedGeometry - " + e.message);
         }
         return JSON.stringify(null);
     }
@@ -328,39 +276,14 @@ function clearMap() {
         vectorSource.clear();
     }
     if (map) {
-        map.getView().setCenter(ol.proj.fromLonLat([0, 0])); // Reset to default view
+        map.getView().setCenter(ol.proj.fromLonLat([0, 0]));
         map.getView().setZoom(2);
     }
-    disableMapEditing(); // Also disable any active editing interactions
+    disableMapEditing();
     console.log("Map cleared and view reset.");
-}
-
-// Example function that could be called from Python via webChannel
-// (Requires corresponding Slot in KMLJSBridge if webChannel.pythonFunction is called)
-/*
-function jsFunctionCalledByPython(message) {
-    console.log("JS: jsFunctionCalledByPython received message: " + message);
-    alert("Message from Python: " + message);
-    if (webChannel) {
-        // Example of JS calling a Python slot (if KMLJSBridge has a 'handleJSMessage' slot)
-        // webChannel.handleJSMessage("Hello from JavaScript!");
+    if (webChannel && webChannel.jsLogMessage) {
+        webChannel.jsLogMessage("JS Info: Map cleared and view reset.");
     }
 }
-*/
 
-// Global error handler
-window.onerror = function(message, source, lineno, colno, error) {
-  if (webChannel && webChannel.jsLogMessage) {
-    var errorMessage = "JS Global Error: " + message;
-    if (source) errorMessage += " at " + source;
-    if (lineno) errorMessage += ":" + lineno;
-    if (colno) errorMessage += ":" + colno;
-    if (error && error.stack) errorMessage += "\nStack: " + error.stack;
-    webChannel.jsLogMessage(errorMessage);
-  } else {
-    console.error("JS Global Error (webChannel not available):", message, source, lineno, colno, error);
-  }
-  return false; // Let the default handler run too
-};
-
-console.log("kml_editor_map.js loaded with enhanced logging.");
+console.log("kml_editor_map.js loaded (modified for Esri Tiles).");
