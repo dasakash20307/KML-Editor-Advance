@@ -34,6 +34,9 @@ class KMLHandler(QObject):
         self.kml_editor_widget = kml_editor_view_widget # Updated attribute name
         self.google_earth_view_widget = google_earth_view_widget
         
+        if self.kml_editor_widget and hasattr(self.kml_editor_widget, 'set_credential_manager'): # Added
+            self.kml_editor_widget.set_credential_manager(self.credential_manager) # Added
+
         self.table_view = table_view
         self.source_model = source_model
         self.filter_proxy_model = filter_proxy_model
@@ -96,17 +99,40 @@ class KMLHandler(QObject):
                 except (ValueError, TypeError) as e:
                     self.log_message_callback(f"TableSelection: Invalid DB ID '{db_id_item}': {e}", "error")
                     polygon_record = None
+                    db_id = None # Ensure db_id is None if record fetch fails
                 except Exception as e:
                     self.log_message_callback(f"TableSelection: Error fetching record by ID {db_id_item}: {e}", "error")
                     polygon_record = None
+                    db_id = None # Ensure db_id is None
         
         if self.map_stack.currentIndex() == 1:  # GE View is active
-            if polygon_record and polygon_record.get('status') == 'valid_for_kml':
-                # This part remains for GE, which uses P1-P4 from DB record directly for a temp KML
-                self._trigger_ge_polygon_upload(polygon_record)
-            else:
-                # self.google_earth_view_widget.clear_view() # Assuming GE view has a clear method
-                self.log_message_callback("GE View: No valid polygon selected or record not valid for KML. GE view not updated.", "info")
+            if polygon_record: # A record is selected and successfully fetched
+                kml_file_name = polygon_record.get('kml_file_name')
+                main_kml_folder_path = self.credential_manager.get_kml_folder_path()
+
+                if kml_file_name and isinstance(kml_file_name, str) and kml_file_name.strip() and main_kml_folder_path:
+                    full_kml_path = os.path.join(main_kml_folder_path, kml_file_name.strip())
+                    if os.path.exists(full_kml_path):
+                        self.google_earth_view_widget.display_kml_and_show_instructions(full_kml_path, kml_file_name)
+                        # self.log_message_callback(f"GE View: Displaying instructions for KML: {full_kml_path}", "info")
+                    else:
+                        self.log_message_callback(f"GE View: KML file '{kml_file_name}' not found at '{full_kml_path}'. Updating status.", "warning")
+                        self.google_earth_view_widget.clear_view()
+                        if db_id is not None: # db_id was successfully parsed earlier
+                            self.db_manager.update_kml_file_status(db_id, "File Deleted")
+                            self.kml_data_updated_signal.emit()
+                        # else: db_id might be None if initial parsing failed, already logged
+                else: # No KML filename in DB record, or KML folder path not set
+                    log_msg = "Cannot process for Google Earth. "
+                    if not main_kml_folder_path:
+                        log_msg += "KML folder path not configured. "
+                    else: # kml_file_name is the issue
+                        log_msg += f"KML file name missing or invalid in DB for DB ID {db_id if db_id is not None else 'Unknown'}. "
+                    self.log_message_callback(f"GE View: {log_msg}", "info")
+                    self.google_earth_view_widget.clear_view()
+            else: # No valid polygon_record (no selection or record fetch failed earlier)
+                self.log_message_callback("GE View: No valid record selected or record fetch failed. GE view cleared.", "info")
+                self.google_earth_view_widget.clear_view()
 
         else:  # KML Editor View is active
             if polygon_record:
@@ -311,6 +337,43 @@ class KMLHandler(QObject):
             return False
 
     def _trigger_ge_polygon_upload(self, polygon_record):
+        # This method generates a KML file from DB P1-P4 coordinates (and other basic metadata)
+        # for temporary viewing in Google Earth.
+        # IMPORTANT: As of recent changes (around KML-first paradigm and GE path copying),
+        # this method is NO LONGER CALLED by on_table_selection_changed for the primary
+        # Google Earth mode interaction when a user selects a row in the table.
+        # That interaction now focuses on providing the path to the *persistent* KML file.
+        #
+        # This method MIGHT STILL BE USEFUL for:
+        #  - Other specific features that require a quick, on-the-fly KML from basic DB coordinates.
+        #  - Debugging purposes.
+        #  - A fallback if a persistent KML is missing but P1-P4 data exists (though current logic doesn't use it this way).
+        # If no such uses remain, it could be considered for deprecation in the future.
+        self.log_message_callback(f"KMLHandler: _trigger_ge_polygon_upload called for RC: {polygon_record.get('response_code')}. Note its changed role.", "debug")
+        kml = simplekml.Kml()
+        
+        # data_for_kml_gen should contain only what's needed for add_polygon_to_kml_object
+        # when creating a temporary KML from DB coordinates (P1-P4, etc.)
+        data_for_kml_gen = {
+            'uuid': polygon_record.get('uuid'),
+            'coordinates': [], # This will be populated by P1-P4 if add_polygon_to_kml_object handles it
+            'response_code': polygon_record.get('response_code'),
+            # Potentially add P1_utm_str to P4_utm_str if add_polygon_to_kml_object uses them directly
+            'p1_utm_str': polygon_record.get('p1_utm_str'),
+            'p2_utm_str': polygon_record.get('p2_utm_str'),
+            'p3_utm_str': polygon_record.get('p3_utm_str'),
+            'p4_utm_str': polygon_record.get('p4_utm_str'),
+            # Add other fields if simplekml description generation needs them from this dict
+            'farmer_name': polygon_record.get('farmer_name', 'N/A'),
+            'village_name': polygon_record.get('village_name', 'N/A')
+        } # This closing brace was the source of the previous SyntaxError. Ensure it's correct.
+
+        # Assuming add_polygon_to_kml_object can derive coordinates from pX_utm_str if 'coordinates' is empty
+        # and can generate a description from the provided dict.
+        if not add_polygon_to_kml_object(kml, data_for_kml_gen): # Pass the concise dict
+            self.log_message_callback("Failed to add polygon object to KML for GE (temporary).", "error")
+            return
+
         # This method is for Google Earth and remains largely unchanged,
         # as it generates KML from DB P1-P4 for temporary viewing.
         self.log_message_callback(f"GE View: Processing polygon UUID {polygon_record.get('uuid')} for GE upload.", "info")

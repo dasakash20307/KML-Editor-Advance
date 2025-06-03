@@ -79,6 +79,66 @@ class InitializationThread(QThread):
             # If successful, init_result contains db_manager and credential_manager
             self.log_message.emit("Non-GUI initialization successful.", "SUCCESS")
             self.progress_updated.emit(70, "Ready to create main window...")
+
+            # --- Network Path Checks for Connected App Mode ---
+            credential_manager_instance = init_result.get("credential_manager")
+            if credential_manager_instance:
+                app_mode = credential_manager_instance.get_app_mode()
+                if app_mode == "Connected App":
+                    self.log_message.emit("App Mode: Connected App. Verifying central resource paths...", "INFO")
+                    self.progress_updated.emit(75, "Verifying network paths...")
+                    time.sleep(0.1) # Simulate some activity
+
+                    central_db_path = credential_manager_instance.get_db_path()
+                    central_kml_folder = credential_manager_instance.get_kml_folder_path()
+                    paths_ok = True
+                    error_messages = []
+
+                    if central_db_path:
+                        self.log_message.emit(f"Checking Central DB path: {central_db_path}", "INFO")
+                        db_parent_dir = os.path.dirname(central_db_path)
+                        if not os.path.exists(db_parent_dir):
+                            paths_ok = False
+                            err_msg = f"Central DB parent directory not accessible: {db_parent_dir}"
+                            self.log_message.emit(err_msg, "ERROR")
+                            error_messages.append(err_msg)
+                        else:
+                            self.log_message.emit(f"Central DB parent directory OK: {db_parent_dir}", "INFO")
+                    else:
+                        paths_ok = False
+                        err_msg = "Central DB path is not configured in Connected App mode."
+                        self.log_message.emit(err_msg, "ERROR")
+                        error_messages.append(err_msg)
+
+                    if central_kml_folder:
+                        self.log_message.emit(f"Checking Central KML folder: {central_kml_folder}", "INFO")
+                        if not os.path.isdir(central_kml_folder):
+                            paths_ok = False
+                            err_msg = f"Central KML folder not accessible or not a directory: {central_kml_folder}"
+                            self.log_message.emit(err_msg, "ERROR")
+                            error_messages.append(err_msg)
+                        else:
+                            self.log_message.emit(f"Central KML folder OK: {central_kml_folder}", "INFO")
+                    else:
+                        paths_ok = False
+                        err_msg = "Central KML folder path is not configured in Connected App mode."
+                        self.log_message.emit(err_msg, "ERROR")
+                        error_messages.append(err_msg)
+
+                    if not paths_ok:
+                        final_error_summary = "Connected App Network Check Failed: " + "; ".join(error_messages)
+                        self.log_message.emit("One or more central resource paths are inaccessible. Application cannot continue in Connected App mode.", "ERROR")
+                        # Update init_result to reflect this specific failure type
+                        init_result["success"] = False
+                        init_result["status"] = "NETWORK_PATH_ERROR"
+                        init_result["error"] = final_error_summary
+                        # No need to raise RuntimeError here, handle_initialization_finished will see success=False
+                        self.initialization_complete.emit(True, init_result) # True because thread completed, but init_data says success=False
+                        return # Stop further initialization in this thread
+                    else:
+                        self.log_message.emit("All central resource paths verified successfully.", "SUCCESS")
+            # --- End Network Path Checks ---
+
             time.sleep(0.2)
 
             self.progress_updated.emit(100, "Initialization tasks complete!") # Thread tasks are done
@@ -130,33 +190,51 @@ def launch():
     # --- Early settings (before QApplication instantiation) ---
     if platform.system() == "Windows":
         try:
-            # ctypes.windll.uxtheme.SetPreferredAppMode(2) # 2 = Dark # Commented out for Phase 1 Theming
-            pass # Keep the try-except structure in case it's re-enabled later
+            # Initialize Windows theme mode based on saved preference
+            credential_manager = CredentialManager()
+            theme = credential_manager.load_app_theme()
+            if theme == "dark":
+                ctypes.windll.uxtheme.SetPreferredAppMode(2)  # Dark
+            else:
+                ctypes.windll.uxtheme.SetPreferredAppMode(1)  # Light
         except Exception as e:
-            print(f"Warning (launcher_app): Could not set Windows dark mode: {e}")
-
-    # QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True) # Removed: Deprecated in Qt6, HighDPI is on by default
+            print(f"Warning (launcher_app): Could not set Windows theme mode: {e}")
 
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME_LAUNCHER)
-    app.setApplicationVersion("Beta.v5.0.1.Dev-ADas") # Updated version for v5
+    app.setApplicationVersion("Beta.v5.0.1.Dev-ADas")  # Updated version for v5
 
     # --- Post-QApplication instantiation settings ---
     app.setStyle('Fusion')
-    # qtmodern.styles.dark(app) # Apply qtmodern dark style first # Commented out for Phase 1 Theming
+
+    # Initialize theme based on saved preference
+    try:
+        credential_manager = CredentialManager()
+        theme = credential_manager.load_app_theme()
+        if theme == "dark":
+            qtmodern.styles.dark(app)
+        else:
+            qtmodern.styles.light(app)
+    except Exception as e:
+        print(f"Warning (launcher_app): Could not set application theme: {e}")
+        # Default to light theme if there's an error
+        qtmodern.styles.light(app)
 
     # Load global QSS stylesheet
     try:
-        qss_path = resource_path("style.qss") # Corrected: removed "assets" argument
+        # Get the project root directory (where launcher_app.py is located)
+        project_root = os.path.dirname(os.path.abspath(__file__))
+        qss_path = os.path.join(project_root, "assets", "style.qss")
+        
         if os.path.exists(qss_path):
-            with open(qss_path, "r") as f:
+            with open(qss_path, "r", encoding='utf-8') as f:
                 stylesheet = f.read()
             # Append to existing stylesheet (e.g., from qtmodern)
             current_stylesheet = app.styleSheet()
             app.setStyleSheet(current_stylesheet + "\n" + stylesheet)
             print(f"Successfully loaded and appended global stylesheet from {qss_path}")
         else:
-            print(f"Warning (launcher_app): Global stylesheet 'assets/style.qss' not found at '{qss_path}'. Skipping.")
+            print(f"Warning (launcher_app): Global stylesheet not found at '{qss_path}'. Skipping.")
     except Exception as e:
         print(f"Warning (launcher_app): Error loading global stylesheet: {e}")
 
@@ -253,6 +331,13 @@ def launch():
                 loading_screen.append_log("Cannot re-run setup: CredentialManager instance not available.", "CRITICAL")
                 loading_screen.update_progress(0, "Internal Error.")
             return # Halt further normal startup flow
+
+        if status_from_init == "NETWORK_PATH_ERROR": # Added check for network path error
+            error_detail = init_data.get("error", "Configured central resource paths are not accessible.")
+            loading_screen.append_log(f"Network Path Error: {error_detail}", "ERROR")
+            loading_screen.append_log("Please check your network connection and the Central App's shared folder paths and permissions, then restart.", "ERROR")
+            loading_screen.update_progress(0, "Network Path Error!")
+            return # Keep loading screen open
 
         # Handle other cases (true first run that wasn't caught by launcher, other non-GUI errors)
         if not actual_init_success:

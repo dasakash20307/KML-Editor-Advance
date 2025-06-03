@@ -1,9 +1,13 @@
 # File: DilasaKMLTool_v4/ui/widgets/google_earth_webview_widget.py
 # ----------------------------------------------------------------------
-from PySide6.QtWidgets import QWidget, QVBoxLayout
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QMessageBox, QApplication, QLabel
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEngineSettings # Corrected import
 from PySide6.QtCore import QUrl, Slot, Qt # Added Qt import here
+from PySide6.QtGui import QGuiApplication # Added for clipboard
+import os
+import shutil
+import tempfile
 
 class GoogleEarthWebViewWidget(QWidget):
     def __init__(self, parent=None):
@@ -27,7 +31,7 @@ class GoogleEarthWebViewWidget(QWidget):
 
         # Example: Run JavaScript after the page loads (for testing)
         # Get user agent to infer WebEngine version
-        self.web_view.page().runJavaScript("navigator.userAgent", self.js_callback)
+        # self.web_view.page().runJavaScript("navigator.userAgent", self.js_callback) # Commented out for now
 
     def js_callback(self, result):
         print(f"JavaScript Result: {result}")
@@ -55,6 +59,39 @@ class GoogleEarthWebViewWidget(QWidget):
         '''
         return self.web_view
 
+    def display_kml_and_show_instructions(self, kml_file_path: str, kml_file_name: str):
+        """
+        Copies the KML file path to the clipboard and shows instructions to open in Google Earth Pro.
+        It does NOT load the KML into the embedded web view.
+        """
+        if not kml_file_path or not kml_file_name:
+            # print("GoogleEarthWebViewWidget: KML file path or name is missing.") # Or log via a passed callback
+            QMessageBox.warning(self, "KML Error", "Cannot process KML: File path or name is missing.")
+            return
+
+        try:
+            QGuiApplication.clipboard().setText(kml_file_path)
+            instruction_message = (
+                f"Path for KML file '{kml_file_name}' copied to clipboard.\n\n"
+                f"To view in Google Earth Pro (Desktop):\n"
+                f"1. Open Google Earth Pro application.\n"
+                f"2. Go to File > Open...\n"
+                f"3. Paste the copied path (Ctrl+V or Cmd+V) into the filename field and press Enter/Open."
+            )
+            QMessageBox.information(self, "Open in Google Earth Pro", instruction_message)
+            # print(f"GoogleEarthWebViewWidget: Copied path to clipboard: {kml_file_path}") # Or log
+        except Exception as e:
+            # print(f"GoogleEarthWebViewWidget: Error copying to clipboard or showing message: {e}") # Or log
+            QMessageBox.critical(self, "Error", f"Could not copy path to clipboard or show instructions: {e}")
+
+    def clear_view(self):
+        """
+        Resets the web view to the initial Google Earth URL.
+        """
+        # self.web_view.setUrl(QUrl("about:blank")) # Option 1: Blank page
+        self.web_view.setUrl(QUrl("https://earth.google.com/web/")) # Option 2: Reload GE
+        # print("GoogleEarthWebViewWidget: View cleared/reloaded.") # Or log
+
     def cleanup(self):
         """
         Placeholder for any cleanup logic needed for the web view.
@@ -64,6 +101,63 @@ class GoogleEarthWebViewWidget(QWidget):
         # self.web_view.setUrl(QUrl("about:blank")) # Example: clear page
         # No specific cleanup needed for QWebEngineView itself unless page-specific actions.
         pass
+
+class GoogleEarthViewWidget(QWidget):
+    def __init__(self, parent=None, log_message_callback=None):
+        super().__init__(parent)
+        self.log_message_callback = log_message_callback if log_message_callback else print
+        self.temp_dir = tempfile.mkdtemp(prefix="kml_editor_ge_")
+        self.current_temp_file = None
+        
+        # Setup UI
+        layout = QVBoxLayout()
+        self.info_label = QLabel("Select a KML file to copy its path for Google Earth Pro.")
+        self.info_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.info_label)
+        self.setLayout(layout)
+
+    def process_kml_for_google_earth(self, original_kml_path):
+        """Process KML file for Google Earth viewing"""
+        try:
+            # Create a copy in temp directory
+            kml_filename = os.path.basename(original_kml_path)
+            temp_kml_path = os.path.join(self.temp_dir, kml_filename)
+            
+            # Copy the file
+            shutil.copy2(original_kml_path, temp_kml_path)
+            self.current_temp_file = temp_kml_path
+            
+            # Convert path to Windows format
+            windows_path = temp_kml_path.replace('/', '\\')
+            
+            # Copy to clipboard
+            clipboard = QGuiApplication.clipboard()
+            clipboard.setText(windows_path)
+            
+            # Update info label
+            self.info_label.setText(
+                f"KML file path copied to clipboard.\n"
+                f"Open Google Earth Pro and use 'File > Open' to view the KML.\n"
+                f"Path: {windows_path}"
+            )
+            
+            self.log_message_callback(f"KML prepared for Google Earth: {windows_path}", "info")
+            return True
+            
+        except Exception as e:
+            self.log_message_callback(f"Error preparing KML for Google Earth: {str(e)}", "error")
+            self.info_label.setText("Error preparing KML file. Please try again.")
+            return False
+
+    def cleanup(self):
+        """Clean up temporary files"""
+        try:
+            if self.current_temp_file and os.path.exists(self.current_temp_file):
+                os.remove(self.current_temp_file)
+            if os.path.exists(self.temp_dir):
+                os.rmdir(self.temp_dir)
+        except Exception as e:
+            self.log_message_callback(f"Error cleaning up temp files: {str(e)}", "warning")
 
 if __name__ == '__main__':
     # This part is for basic testing if you run this file directly

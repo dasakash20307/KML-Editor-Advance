@@ -4,12 +4,13 @@ import os
 import json
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QLineEdit, QPushButton,
-    QFormLayout, QLabel
+    QFormLayout, QLabel, QComboBox, QGroupBox
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEngineSettings, QWebEnginePage # Make sure QWebEngineSettings is imported
 from PySide6.QtCore import QUrl, Slot, QObject, Signal
 from PySide6.QtWebChannel import QWebChannel
+from core.utils import resource_path  # Add this import
 
 # Helper class for Python-JavaScript communication
 class KMLJSBridge(QObject):
@@ -19,6 +20,17 @@ class KMLJSBridge(QObject):
 
     @Slot(str)
     def jsLogMessage(self, message: str):
+        if "Map initialized successfully" in message:
+            self._parent_widget.map_initialized = True
+            if self._parent_widget.pending_kml_content:
+                self._parent_widget.display_kml(
+                    self._parent_widget.pending_kml_content,
+                    self._parent_widget.pending_placemark_name,
+                    self._parent_widget.pending_placemark_description
+                )
+                self._parent_widget.pending_kml_content = None
+                self._parent_widget.pending_placemark_name = None
+                self._parent_widget.pending_placemark_description = None
         if hasattr(self._parent_widget, 'log_message_callback') and callable(self._parent_widget.log_message_callback):
             self._parent_widget.log_message_callback(f"JS Log: {message}", "info_js")
         else:
@@ -26,183 +38,230 @@ class KMLJSBridge(QObject):
 
 
 class KMLEditorViewWidget(QWidget):
-    save_triggered_signal = Signal()
+    save_triggered_signal = Signal(dict)
 
     def __init__(self, parent=None, log_message_callback=None):
         super().__init__(parent)
-
         self.log_message_callback = log_message_callback if log_message_callback else self._default_log
-
         self.web_view = QWebEngineView()
-        settings = self.web_view.settings()
-        settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
-        # --- ADD THIS LINE ---
-        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
-        # --- For further debugging, you might also try (with caution): ---
-        # settings.setAttribute(QWebEngineSettings.WebAttribute.AllowRunningInsecureContent, True) # If there were mixed content issues (less likely for Esri HTTPS)
-        # settings.setAttribute(QWebEngineSettings.WebAttribute.AutoLoadImages, True) # Should be true by default
+        self.web_view.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+        self.web_view.settings().setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
+        
+        # Initialize instance variables
+        self.original_kml_content = None
+        self.pending_kml_content = None
+        self.current_placemark_name = None
+        self.current_placemark_description = None
+        self.credential_manager = None
+        self.is_editing = False
+        
+        # Create UI elements
+        self.name_input = QLineEdit()
+        self.description_input = QTextEdit()
+        self.edit_button = QPushButton("Edit KML")
+        self.save_button = QPushButton("Save Changes")
+        self.cancel_button = QPushButton("Cancel Edit")
+        self.base_layer_combo = QComboBox()
+        
+        # Setup UI
+        self._setup_ui()
+        self._setup_connections()
+        self._load_html()
 
-        # UI Elements for KML Editing
-        self.placemark_name_edit = QLineEdit()
-        self.placemark_name_edit.setPlaceholderText("Placemark Name (UUID or custom)")
-        self.placemark_name_edit.setReadOnly(True)
-
-        self.placemark_description_edit = QTextEdit()
-        self.placemark_description_edit.setPlaceholderText("Placemark Description")
-        self.placemark_description_edit.setReadOnly(True)
-        self.placemark_description_edit.setFixedHeight(100)
-
-        self.edit_kml_button = QPushButton("Edit KML Geometry")
-        self.save_changes_button = QPushButton("Save Changes")
-        self.cancel_edit_button = QPushButton("Cancel Edit")
-
-        self.save_changes_button.setVisible(False)
-        self.cancel_edit_button.setVisible(False)
-
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(5, 5, 5, 5)
-        main_layout.addWidget(self.web_view, 1)
-
-        form_layout = QFormLayout()
-        form_layout.addRow(QLabel("Name:"), self.placemark_name_edit)
-        form_layout.addRow(QLabel("Description:"), self.placemark_description_edit)
-        main_layout.addLayout(form_layout)
-
+    def _setup_ui(self):
+        main_layout = QVBoxLayout()
+        
+        # Map view
+        main_layout.addWidget(self.web_view, stretch=1)
+        
+        # Controls panel
+        controls_group = QGroupBox("KML Editor Controls")
+        controls_layout = QFormLayout()
+        
+        # Base layer selection
+        self.base_layer_combo.addItems(["Esri", "OpenStreetMap"])
+        controls_layout.addRow("Base Layer:", self.base_layer_combo)
+        
+        # Name and description inputs
+        controls_layout.addRow("Name:", self.name_input)
+        controls_layout.addRow("Description:", self.description_input)
+        
+        # Buttons
         button_layout = QHBoxLayout()
-        button_layout.addWidget(self.edit_kml_button)
-        button_layout.addStretch()
-        button_layout.addWidget(self.save_changes_button)
-        button_layout.addWidget(self.cancel_edit_button)
-        main_layout.addLayout(button_layout)
-
+        button_layout.addWidget(self.edit_button)
+        button_layout.addWidget(self.save_button)
+        button_layout.addWidget(self.cancel_button)
+        controls_layout.addRow("Actions:", button_layout)
+        
+        controls_group.setLayout(controls_layout)
+        main_layout.addWidget(controls_group)
+        
+        # Initial button states
+        self.save_button.setEnabled(False)
+        self.cancel_button.setEnabled(False)
+        
         self.setLayout(main_layout)
 
-        self.py_bridge = KMLJSBridge(self)
-        self.web_channel = QWebChannel(self.web_view.page())
-        self.web_view.page().setWebChannel(self.web_channel)
-        self.web_channel.registerObject("kml_editor_bridge", self.py_bridge)
+    def _setup_connections(self):
+        # Button connections
+        self.edit_button.clicked.connect(self.enter_edit_mode)
+        self.save_button.clicked.connect(self._handle_save_changes)
+        self.cancel_button.clicked.connect(self._handle_cancel_edit)
+        
+        # Base layer selection
+        self.base_layer_combo.currentTextChanged.connect(self._switch_base_map_layer_js)
+        
+        # Web view setup
+        self.web_view.loadFinished.connect(self.on_load_finished)
+        
+        # Create channel
+        self.channel = QWebChannel()
+        self.js_bridge = KMLJSBridge(self)
+        self.channel.registerObject("kml_editor_bridge", self.js_bridge)
+        self.web_view.page().setWebChannel(self.channel)
 
-        base_path = os.path.dirname(os.path.abspath(__file__))
-        html_file_path = os.path.join(base_path, "..", "web_content", "kml_editor", "kml_editor.html")
-
-        if not os.path.exists(html_file_path):
-            self.log_message_callback(f"CRITICAL: HTML file for KML Editor not found at: {html_file_path}", "error")
-            self.web_view.setHtml("<html><body><h1>Error: KML Editor HTML not found.</h1><p>Please check installation.</p></body></html>")
-        else:
-            self.web_view.setUrl(QUrl.fromLocalFile(html_file_path))
-
-        self.original_kml_content = None
-        self.current_placemark_name_original = ""
-        self.current_placemark_description_original = ""
-
-        self.edit_kml_button.clicked.connect(self.enter_edit_mode)
-        self.save_changes_button.clicked.connect(self._handle_save_changes)
-        self.cancel_edit_button.clicked.connect(self._handle_cancel_edit)
-
-        self.placemark_name_edit.setText("N/A")
-        self.placemark_description_edit.setText("No KML loaded. Load a KML file to see details and map.")
-
-    def _default_log(self, message, level="info"):
-        print(f"KMLEditorViewWidget_LOG [{level.upper()}]: {message}")
-
-    def load_kml_to_map_via_js(self, kml_content: str):
-        if not kml_content:
-            self.log_message_callback("load_kml_to_map_via_js: KML content is empty.", "warning")
-            return
-        try:
-            js_command = f"loadKmlToMap({json.dumps(kml_content)});"
-            self.web_view.page().runJavaScript(js_command)
-            self.log_message_callback(f"Sent KML content to JS for loading. Length: {len(kml_content)}", "debug")
-        except Exception as e:
-            self.log_message_callback(f"Error sending KML to JS: {e}", "error")
-
-    def enable_editing_via_js(self):
-        self.web_view.page().runJavaScript("enableMapEditing();")
-        self.log_message_callback("Sent command to JS: enableMapEditing()", "debug")
-
-    def disable_editing_via_js(self):
-        self.web_view.page().runJavaScript("disableMapEditing();")
-        self.log_message_callback("Sent command to JS: disableMapEditing()", "debug")
-
-    def get_edited_data_from_js(self, result_callback: callable):
-        self.log_message_callback("Requesting edited geometry from JS...", "debug")
-        self.web_view.page().runJavaScript("getEditedGeometry();", result_callback)
-
-    def enter_edit_mode(self):
-        if self.original_kml_content is None:
-            self.log_message_callback("Cannot enter edit mode: No KML loaded.", "warning")
-            return
-
-        self.enable_editing_via_js()
-        self.edit_kml_button.setVisible(False)
-        self.save_changes_button.setVisible(True)
-        self.cancel_edit_button.setVisible(True)
-        self.placemark_name_edit.setReadOnly(False)
-        self.placemark_description_edit.setReadOnly(False)
-        self.log_message_callback("Entered KML edit mode.", "info")
-
-    def exit_edit_mode(self, reload_original_kml: bool = False):
-        self.disable_editing_via_js()
-        self.edit_kml_button.setVisible(True)
-        self.save_changes_button.setVisible(False)
-        self.cancel_edit_button.setVisible(False)
-        self.placemark_name_edit.setReadOnly(True)
-        self.placemark_description_edit.setReadOnly(True)
-
-        if reload_original_kml and self.original_kml_content is not None:
-            self.placemark_name_edit.setText(self.current_placemark_name_original)
-            self.placemark_description_edit.setText(self.current_placemark_description_original)
-            self.load_kml_to_map_via_js(self.original_kml_content)
-            self.log_message_callback("Exited edit mode, original KML reloaded.", "info")
-        else:
-            self.log_message_callback("Exited edit mode.", "info")
-
-    def _handle_save_changes(self):
-        self.log_message_callback("KMLEditorViewWidget: Save Changes button clicked. Emitting signal.", "info")
-        self.save_triggered_signal.emit()
-
-    def _handle_cancel_edit(self):
-        self.log_message_callback("Cancel Edit clicked.", "info")
-        self.exit_edit_mode(reload_original_kml=True)
+    def _load_html(self):
+        html_path = resource_path("ui/web_content/kml_editor/kml_editor.html")
+        self.web_view.setUrl(QUrl.fromLocalFile(html_path))
 
     def display_kml(self, kml_file_content: str, placemark_name: str, placemark_description: str):
-        if not kml_file_content:
-            self.log_message_callback("display_kml: KML content is empty. Clearing map.", "warning")
-            self.clear_map()
-            return
-
+        """Display KML content and associated metadata"""
         self.original_kml_content = kml_file_content
-        self.current_placemark_name_original = placemark_name
-        self.current_placemark_description_original = placemark_description
-
-        self.placemark_name_edit.setText(placemark_name)
-        self.placemark_description_edit.setText(placemark_description)
-
+        self.current_placemark_name = placemark_name
+        self.current_placemark_description = placemark_description
+        
+        # Update UI
+        self.name_input.setText(placemark_name)
+        self.description_input.setText(placemark_description)
+        self.name_input.setReadOnly(True)
+        self.description_input.setReadOnly(True)
+        
+        # Load KML to map
         self.load_kml_to_map_via_js(kml_file_content)
-        self.exit_edit_mode()
-        self.log_message_callback(f"Displayed KML for placemark: {placemark_name}", "info")
-        self.edit_kml_button.setEnabled(True)
+        
+        # Reset edit state
+        self.is_editing = False
+        self.save_button.setEnabled(False)
+        self.cancel_button.setEnabled(False)
+        self.edit_button.setEnabled(True)
 
-    def clear_map(self):
-        self.original_kml_content = None
-        self.current_placemark_name_original = ""
-        self.current_placemark_description_original = ""
+    def enter_edit_mode(self):
+        """Enable editing mode"""
+        if self.original_kml_content is None:
+            self.log_message_callback("No KML content loaded to edit", "warning")
+            return
+        
+        self.is_editing = True
+        self.name_input.setReadOnly(False)
+        self.description_input.setReadOnly(False)
+        self.save_button.setEnabled(True)
+        self.cancel_button.setEnabled(True)
+        self.edit_button.setEnabled(False)
+        
+        # Enable map editing
+        self.enable_editing_via_js()
 
-        self.placemark_name_edit.clear()
-        self.placemark_name_edit.setText("N/A")
-        self.placemark_description_edit.clear()
-        self.placemark_description_edit.setText("Map cleared. No KML loaded.")
+    def exit_edit_mode(self, reload_original_kml: bool = False):
+        """Disable editing mode"""
+        self.is_editing = False
+        self.name_input.setReadOnly(True)
+        self.description_input.setReadOnly(True)
+        self.save_button.setEnabled(False)
+        self.cancel_button.setEnabled(False)
+        self.edit_button.setEnabled(True)
+        
+        # Disable map editing
+        self.disable_editing_via_js()
+        
+        if reload_original_kml and self.original_kml_content:
+            self.load_kml_to_map_via_js(self.original_kml_content)
 
-        self.web_view.page().runJavaScript("if (typeof clearMap === 'function') { clearMap(); } else { console.warn('JS function clearMap not defined.'); }")
+    def _handle_save_changes(self):
+        """Handle save button click"""
+        def handle_geometry_result(geometry_data):
+            try:
+                # Create the data dictionary
+                save_data = {
+                    'geometry': geometry_data,
+                    'name': self.name_input.text(),
+                    'description': self.description_input.toPlainText()
+                }
+                # Emit save signal with the data dictionary
+                self.save_triggered_signal.emit(save_data)
+                self.exit_edit_mode()
+            except Exception as e:
+                self.log_message_callback(f"Error saving changes: {str(e)}", "error")
+        
+        # Get edited geometry from JavaScript
+        self.get_edited_data_from_js(handle_geometry_result)
 
-        self.exit_edit_mode()
-        self.edit_kml_button.setEnabled(False)
-        self.log_message_callback("Map and KML data cleared.", "info")
+    def _handle_cancel_edit(self):
+        """Handle cancel button click"""
+        self.name_input.setText(self.current_placemark_name)
+        self.description_input.setText(self.current_placemark_description)
+        self.exit_edit_mode(reload_original_kml=True)
+
+    # JavaScript interface methods
+    def load_kml_to_map_via_js(self, kml_content: str):
+        """Load KML content to the map"""
+        script = f'loadKmlToMap(`{kml_content}`);'
+        self.web_view.page().runJavaScript(script)
+
+    def enable_editing_via_js(self):
+        """Enable map editing mode"""
+        self.web_view.page().runJavaScript('enableMapEditing();')
+
+    def disable_editing_via_js(self):
+        """Disable map editing mode"""
+        self.web_view.page().runJavaScript('disableMapEditing();')
+
+    def get_edited_data_from_js(self, result_callback: callable):
+        """Get edited geometry data from JavaScript"""
+        self.web_view.page().runJavaScript('getEditedGeometry();', result_callback)
+
+    def _switch_base_map_layer_js(self, layer_name: str):
+        """Switch the base map layer"""
+        self.web_view.page().runJavaScript(f'switchBaseLayer("{layer_name}");')
+
+    def set_credential_manager(self, credential_manager):
+        """Set the credential manager instance"""
+        self.credential_manager = credential_manager
+        self._apply_default_map_view_settings()
+
+    def _apply_default_map_view_settings(self):
+        """Apply default map view settings from credential manager"""
+        if self.credential_manager:
+            try:
+                settings = {
+                    'kmlFillColor': self.credential_manager.get_kml_fill_color(),
+                    'kmlStrokeColor': self.credential_manager.get_kml_stroke_color(),
+                    'kmlStrokeWidth': self.credential_manager.get_kml_stroke_width(),
+                    'maxZoom': self.credential_manager.get_max_zoom(),
+                    'initialZoom': self.credential_manager.get_initial_zoom()
+                }
+                script = f'setMapDisplaySettings({json.dumps(settings)});'
+                self.web_view.page().runJavaScript(script)
+            except Exception as e:
+                self.log_message_callback(f"Error applying map settings: {str(e)}", "warning")
+
+    def _default_log(self, message, level="info"):
+        """Default logging function if none provided"""
+        print(f"[{level.upper()}] KMLEditorView: {message}")
 
     def cleanup(self):
-        self.log_message_callback("KMLEditorViewWidget cleanup initiated.", "debug")
-        if self.web_view and self.web_view.page():
-            self.web_view.stop()
+        """Cleanup resources"""
+        if self.web_view:
+            self.web_view.setUrl(QUrl('about:blank'))
+            self.web_view.deleteLater()
+
+    def on_load_finished(self, success):
+        """Handle the web view load finished event."""
+        if success:
+            self.log_message_callback("Web view page loaded successfully.", "info")
+            if hasattr(self, 'original_kml_content') and self.original_kml_content:
+                self.load_kml_to_map_via_js(self.original_kml_content)
+        else:
+            self.log_message_callback("Web view page failed to load.", "error")
 
 # (Rest of the file, including the if __name__ == '__main__': block, remains the same)
 if __name__ == '__main__':
@@ -238,15 +297,8 @@ if __name__ == '__main__':
     placemark_name_test = "Test Placemark from Python"
     placemark_desc_test = "This is a test description loaded from Python code. It might contain special characters like < & > and \"quotes\"."
 
-    def on_load_finished(success):
-        if success:
-            test_logger("Web view page loaded successfully.", "info")
-            editor_widget.display_kml(dummy_kml_content, placemark_name_test, placemark_desc_test)
-        else:
-            test_logger("Web view page failed to load.", "error")
-
     if editor_widget.web_view.page():
-        editor_widget.web_view.page().loadFinished.connect(on_load_finished)
+        editor_widget.web_view.page().loadFinished.connect(editor_widget.on_load_finished)
     else:
         test_logger("Web view page is None, cannot connect loadFinished signal.", "error")
 

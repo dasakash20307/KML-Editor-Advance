@@ -1,0 +1,117 @@
+a. From the API When the Rows are getting Fetched the database is written but the kml files are not getting store as the KML file lock has implementation and also blocks the machich which has initiate the Lock on the KML Due to that the KML Files are not able to Created Sucessfull and Shown as Locked and when taaped to the Row so the Forced unlock the status is shown as deleted. Following are the Detailed Observation and Suggesion;
+
+b. Filter Option is just Removed from the system as we implemeted as per our Project but now the Filter is just not there, only the Button is there but no Filter Option, Please see the `Project_Logfile.md` file so you can know what is in the past and currently what is there,
+
+c. Allinement of current remaining task and the Project Implementation also getting lost and Did not able to Track the Project.
+
+d. The Refresh of database and table on import, deletation, Edit and other things are not there.
+
+e. Problems in the Locking Mechanisms of KML and the Database, needs to Throughly rectify as needs to be based on the Central App and the Connnected application Feature and the lock should allowed the mechich to do the write, delete or modify in the Files which is locked by it as auto removeal of the Lock when the device change focus and do other stuf . as well as there needs to be robust locking mecanism needs to be implenent so no errors are arive.
+
+f. Maps are working Fine But needs to be Conect the Max Zoom level contron and the KML File Colour width and all to using above view controll mechanism.
+
+g. The GE mode Functions are also Affected, on the GE mode when user taps the row the files are not performing the task as previously as, Copy File Path and Show the Instructions as, CRL+I, CTRL+V, then Enter, then, Then CTRL +H for history View, where currently the Copy not happened and popup also Not Shown.
+
+h. Needs to Add Another Feature where needs to to Control the Table View where Using Table View Editor Button at the Top of the Table Srip where the Filter Button is reside needs to shows the show another button with named Table View Editor, Where User Can Choese Which Collumn User needs to seen, And can be Custom Sorting using Numbering or Dragging Option then the Save button for the save the Config,
+
+I. THere is no Logo of Organization on the Loading Screen, So add the Logo to the Loading Screen as well, Needs to Improve the Loading bar UI where Currently its not Looking Good as looks like old age,
+
+j. As currently map view shows the Map but some of the Buttons are not showing the Proper things, as '-' or zoom out button sighs output zebrish, and also needs to include a section in the View option like Custom Map Integration Where We can Implement Other than Erise or other Default maps like google maps with proper API or Whateer is needs for the Login and authentication. Please Also include the Option. then also include option in a Map to change the View mode where curenty the Eries needs to be default, and using the add new custom maps options we can add thoese maps also the Dafult maps.
+
+
+
+**Project To-Do List & Next Steps**
+
+**Legend:**
+*   **DONE** - Task is completed.
+*   **PROVISIONALLY DONE** - Task is likely complete but awaiting final confirmation or specific feedback from you.
+*   **PENDING** - Task is not yet started or is partially complete and requires further action.
+*   **NEEDS CLARIFICATION** - More information is needed from you to proceed effectively.
+
+---
+
+*   **DONE** ~~1. Remove Date Filter Functionality (User Request)~~
+    *   **Fix:** Confirmed this was already removed in prior development. No action needed.
+    *   **PRD Ref:** N/A (User override of initial plan)
+
+*   **DONE** ~~2. Fix KML Deletion from Filesystem (Original Item 9)~~
+    *   **Fix:** Refactored `DataHandler.handle_delete_checked_rows` and `handle_clear_all_data` to correctly acquire KML locks (including force acquire for Central App on stale locks), delete KML files, and then their associated `.kml.lock` files and database records, respecting Central App mode and KML file existence.
+    *   **PRD Ref:** 4.6 (Locking Mechanisms), specifically addressing KML file deletion aspects. Addresses parts of Problem 'e'.
+
+*   **DONE** ~~3. Implement Table View Editor (Original Item 4; PRD 4.7.4; Problem 'h')~~
+    *   **Fix:**
+        *   Created `ui/dialogs/table_view_editor_dialog.py` with UI for managing visible/hidden and ordered columns.
+        *   Added `save_table_view_config()` and `load_table_view_config()` to `core/credential_manager.py`.
+        *   Integrated into `ui/main_window.py`: added menu/toolbar actions, dialog invocation, and `_apply_table_column_configuration()` method to reflect saved settings.
+    *   **PRD Ref:** 4.7.4
+
+*   **DONE** ~~4. Resolve Google Earth Mode Functionality (Original Item 5; PRD 4.8.3; Problem 'g')~~
+    *   **Fix:**
+        *   Modified `ui/widgets/google_earth_webview_widget.py` to include `display_kml_and_show_instructions()` (copies path, shows QMessageBox) and `clear_view()`.
+        *   Updated `ui/kml_handlers.py` (`on_table_selection_changed`) to call the new GE widget method when GE view is active and a valid KML file exists.
+        *   Removed the old `_trigger_ge_polygon_upload()` method as its direct KML generation for GE is superseded.
+    *   **PRD Ref:** 4.8.3
+
+*   **DONE** ~~5. Implement Central/Connected App Path Sharing & Network Checks (Original Item 6; PRD 4.10; Task 14 from concepts)~~
+    *   **Fix:**
+        *   Created `ui/dialogs/sharing_info_dialog.py` for Central App to display and allow copying of DB/KML paths.
+        *   Integrated this dialog into `ui/main_window.py` via a menu action, visible only in Central App mode.
+        *   Updated `launcher_app.py` (`InitializationThread`) to perform path existence checks for `central_db_path` (parent directory) and `central_kml_folder` when in "Connected App" mode, logging results to the loading screen and showing a `QMessageBox` on critical failure.
+    *   **PRD Ref:** 4.10
+
+*   **DONE** ~~6. Implement Final UI Styling & Theming (Original Item 7; PRD 4.11; CA6, Tasks 1, 16 from concepts)~~
+    *   **Fix:**
+        *   Populated `assets/style.qss` with global styles for common Qt widgets and specific application components.
+        *   Removed inline `setStyleSheet` calls from `ui/main_window.py`, `ui/dialogs/output_mode_dialog.py`, and `ui/loading_screen_widget.py`, setting `objectName` where necessary to apply QSS rules.
+    *   **PRD Ref:** 4.11
+
+*   **DONE** ~~7. Fix the Data Refresh Mechanism (Original Item 8; PRD 4.7.2; Problem 'd')~~
+    *   **Fix:** Ensured `PolygonTableModel.update_data()` uses `beginResetModel`/`endResetModel`. Reviewed `DataHandler` and `KMLHandler` to confirm they emit signals (`data_changed_signal`, `kml_data_updated_signal`) after data modifications, which `MainWindow` connects to its `load_data_into_table()` method. Direct calls to `load_data_into_table()` from handlers were removed in favor of a consistent signal-based refresh.
+    *   **PRD Ref:** 4.7.2
+
+*   **PROVISIONALLY DONE** ~~8. Update the Loading Screen Progress Bar Styling (Original Item 9; Problem 'i' part 2)~~
+    *   **Fix:** Added modern styling for `QProgressBar` and `QProgressBar::chunk` (e.g., `LoadingScreenWidget QProgressBar`, `LoadingScreenWidget QProgressBar::chunk`) within `assets/style.qss` to improve its visual appearance, providing a flat look with a light blue indicator suitable for a dark theme.
+    *   **PRD Ref:** 4.1.2 (LoadingScreenWidget styling), 4.11 (general theming).
+    *   **Context:** The current QSS rules aim for a modern, clean look.
+    *   **Next Steps:** **Awaiting your confirmation.** Please let me know if the current styling (described in the QSS snippet from my previous message) is acceptable, or if you have more specific visual changes in mind for the progress bar.
+
+*   **DONE** ~~9. Fix and Update the Self-Held Lock Logic Robustness (Original Item 10; PRD 4.6; Problems 'a', 'e')~~
+    *   **Fix:** Reviewed `core/sync_manager.py`. Confirmed that `DatabaseLockManager.acquire_lock()` and `KMLFileLockManager.acquire_kml_lock()` correctly handle self-held locks by comparing `holder_device_id` with `current_device_id`. If a match occurs, the heartbeat is updated, and the lock is re-confirmed, allowing the current instance to proceed. This addresses the issue of the application blocking itself.
+    *   **PRD Ref:** 4.6.2 (Self-Held Lock Logic)
+
+*   **NEEDS CLARIFICATION / LIKELY COVERED** ~~10. Fix and update the Tooling/Process Issues during Previous Development (Original Item 11; Problem 'c')~~
+    *   **Context:** Problem 'c' from `reference_prd.txt` states: "Allinement of current remaining task and the Project Implementation also getting lost and Did not able to Track the Project." This To-Do list and structured approach aims to resolve this. Original development tasks (from `v5_task_and_Concept.md`) that might fall under "tooling/process issues" (like KML parsing, DB/KML locking, CSV import, KML editor core) have largely been addressed by the fixes for other items (e.g., KML-first data handling, locking mechanism fixes, new editor integration points).
+    *   **PRD Ref:** General project management. Specific technical areas covered in sections 4.3-4.8.
+    *   **Next Steps:** **Awaiting your input.** Please specify if there are any *particular outstanding technical issues* from the previous development phase (Tasks 7-11 in the `v5_task_and_Concept.md` document which correspond to KML Parsing/Display, DB Locking, KML Locking, CSV Import Enhancements, and KML Editor Core) that you believe are *not* covered by the fixes already implemented in the items above.
+
+*   **PENDING** ~~11. KML Visual Editor issues (Original Item 3; PRD 4.8.2; Problems 'f', 'j' from `reference_prd.txt`, and your pending detailed list)~~
+    *   **Context:** The KML Visual Editor (`KMLEditorViewWidget` using OpenLayers) is a core feature.
+        *   Problem 'f': "Maps are working Fine But needs to be Conect the Max Zoom level contron and the KML File Colour width and all to using above view controll mechanism." This involves connecting the `DefaultViewSettingsDialog` outputs (stored in `CredentialManager`) to the OpenLayers map's display styles (fill/stroke color, opacity, line width) and view parameters (max zoom).
+        *   Problem 'j':
+            *   Part 1: "map view shows the Map but some of the Buttons are not showing the Proper things, as '-' or zoom out button sighs output zebrish". This likely refers to OpenLayers default control button styling/character encoding.
+            *   Part 2: "also needs to include a section in the View option like Custom Map Integration Where We can Implement Other than Erise or other Default maps like google maps with proper API or Whateer is needs for the Login and authentication. Please Also include the Option. then also include option in a Map to change the View mode where curenty the Eries needs to be default, and using the add new custom maps options we can add thoese maps also the Dafult maps." This has two sub-parts:
+                *   Allowing users to switch between predefined base layers (e.g., Esri, OpenStreetMap) within the OpenLayers editor.
+                *   A more advanced "Custom Map Integration" feature for users to add their own tile server URLs is likely out of scope for V5.0 as per PRD 1.4 and 7 (Future Considerations), but the basic layer switching is feasible.
+    *   **PRD Ref:** 4.8.2 (KML Visual Editor - Core Functionality, Map Controls & Styling, Button Character Fix, Simplified Base Layers).
+    *   **Next Steps:**
+        1.  **Awaiting your detailed list of any *other* specific problems or bugs you are encountering with the KML Visual Editor.**
+        2.  Once I have the full list, I will plan and implement fixes for:
+            *   Integrating `DefaultViewSettingsDialog` with OpenLayers map styling and zoom (Problem 'f').
+            *   Addressing OpenLayers control button display issues (Problem 'j', Part 1).
+            *   Implementing a base layer switcher (e.g., Esri/OSM) for the OpenLayers map (Problem 'j', Part 2 simplified).
+            *   Any other issues you list.
+
+---
+
+Please provide:
+1.  Your feedback on the **Loading Screen Progress Bar Styling** (Item 8).
+2.  Clarification on any outstanding **Tooling/Process Issues** (Item 10).
+3.  The **detailed list of issues for the KML Visual Editor** (Item 11).
+
+I'm ready to proceed once I have this information.
+
+User: Todo List User Confirmations:
+        Todo 8: yes the Loading Icon is Now Looks Mordern and Nice, But there are Issues in the Darkmode as you applied, as this Does not follows system Mode as, Currently use has lite mode but its shows dark mode, (New Implement Request: Add a Button to Switch between Darkmode and Lite mode or Can Be Add a Workspace Style Settings, as There needs User Can Define the Colour Pallets for Universal main Elements, Selects the Text Elements Colors and Switch Between Dark and Lite mode), The Universal controll of darkmode Shows some Errors in the System Where So many elements did not follows the universal QSS style sheets `Exclude the Table View as its has its own reason for the Elegibility Criteria and Colour only change the Text colour to Black for this table only`, Please fix the Style Issue,
+        Todo 10: Please do not Do anything in this Context as we will do that later on.
+        Todo 11: Kml Visial Editor, OpenLayers has some minor issues, As Zoom out Button is Shows as a zebrish word not as '-', The Eries Map is only able to Zoom in till level 18 but the KML Editor is Go Go Beyond That (It can be mapped to the max Zoom Settings on the View>Default>KMLViewSettings So User Can Controll How much max he can zoom), So Constrain to the level 18 only so the tiles did not get Disapers. When Info opens the info button gets Gibrish again and the Info arc Redirect the User to the arcgis website please remove that. 
+        Todo 12: Additional Task; The Filter option did not open after clickig the Filter Button Please Fix the Filters Options as well.

@@ -4,8 +4,18 @@ var vectorSource;
 var vectorLayer;
 var selectInteraction;
 var modifyInteraction;
-// webChannel will be populated by the QWebChannel setup
 var webChannel;
+var esriLayer;
+var osmLayer;
+
+// Default map constraints (can be updated from Python)
+var mapConstraints = {
+    maxZoom: 18, // Default max zoom
+    initialZoom: 2,
+    kmlFillColor: 'rgba(255, 255, 0, 0.2)',
+    kmlStrokeColor: 'yellow',
+    kmlStrokeWidth: 3
+};
 
 document.addEventListener("DOMContentLoaded", function () {
     console.log("DOM Content Loaded. Setting up QWebChannel.");
@@ -15,8 +25,6 @@ document.addEventListener("DOMContentLoaded", function () {
             if (webChannel) {
                 console.log("QWebChannel bridge 'kml_editor_bridge' connected.");
                 initMap(); // Initialize map after channel is ready
-                // Notify Python that the JS editor is ready (optional)
-                // if (webChannel.jsEditorReady) webChannel.jsEditorReady("KML Editor JavaScript is ready.");
             } else {
                 console.error("KML Editor Bridge object (kml_editor_bridge) not found in QWebChannel.");
                 alert("Error: Could not connect to Python backend (QWebChannel bridge not found). Map functionality will be limited.");
@@ -35,40 +43,43 @@ function initMap() {
         // Configure Esri World Imagery Source
         const esriSource = new ol.source.XYZ({
             url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-            attributions: 'Tiles &copy; <a href="https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer">ArcGIS</a>',
-            maxZoom: 19, // Esri World Imagery typically supports up to zoom level 19
-            tileLoadFunction: function(tile, src) { // Optional: Add error logging for Esri tiles
-                const image = tile.getImage();
-                image.onload = function() {
-                    // console.log('JS: Esri Tile load end:', src);
-                };
-                image.onerror = function() {
-                    console.error('JS: Esri Tile load error for URL:', src);
-                    if (webChannel && webChannel.jsLogMessage) {
-                        webChannel.jsLogMessage("Error: Failed to load Esri map tile: " + src);
-                    }
-                };
-                image.src = src;
-            }
+            attributions: 'Tiles © Esri',
+            maxZoom: 19,
+            crossOrigin: 'anonymous'
         });
 
-        vectorSource = new ol.source.Vector(); // Ensure vectorSource is initialized
+        // Configure OpenStreetMap Source
+        const osmSource = new ol.source.OSM({
+            crossOrigin: 'anonymous'
+        });
+
+        esriLayer = new ol.layer.Tile({
+            source: esriSource,
+            visible: true
+        });
+
+        osmLayer = new ol.layer.Tile({
+            source: osmSource,
+            visible: false
+        });
+
+        vectorSource = new ol.source.Vector();
         vectorLayer = new ol.layer.Vector({
             source: vectorSource,
-            style: new ol.style.Style({ // Basic default style for KML features
+            style: new ol.style.Style({ 
                 stroke: new ol.style.Stroke({
-                    color: 'yellow',
-                    width: 3 // Increased width for better visibility
+                    color: mapConstraints.kmlStrokeColor,
+                    width: mapConstraints.kmlStrokeWidth
                 }),
                 fill: new ol.style.Fill({
-                    color: 'rgba(255, 255, 0, 0.2)' // Lighter yellow fill
+                    color: mapConstraints.kmlFillColor
                 }),
-                image: new ol.style.Circle({ // Style for points
+                image: new ol.style.Circle({
                     radius: 7,
                     fill: new ol.style.Fill({
-                        color: '#ffcc33' // Default yellow for points too
+                        color: '#ffcc33'
                     }),
-                    stroke: new ol.style.Stroke({ // Add stroke to points
+                    stroke: new ol.style.Stroke({
                         color: 'black',
                         width: 1
                     })
@@ -76,31 +87,42 @@ function initMap() {
             })
         });
 
+        const controls = [
+            new ol.control.Zoom(),
+            new ol.control.Attribution({
+                collapsible: true,
+                collapsed: true
+            }),
+            new ol.control.ScaleLine(),
+            new ol.control.FullScreen()
+        ];
+
         map = new ol.Map({
             target: 'map',
             layers: [
-                new ol.layer.Tile({
-                    source: esriSource // Use the new Esri source here
-                }),
+                osmLayer,
+                esriLayer,
                 vectorLayer
             ],
             view: new ol.View({
-                center: ol.proj.fromLonLat([0, 0]), // Default center
-                zoom: 2 // Default zoom
-            })
+                center: ol.proj.fromLonLat([0, 0]),
+                zoom: mapConstraints.initialZoom,
+                maxZoom: mapConstraints.maxZoom
+            }),
+            controls: controls
         });
 
-        console.log("JS: OpenLayers map object should be initialized with Esri Tiles.");
-        // if (webChannel && webChannel.jsEditorReady) { // Check if jsEditorReady exists
-             // webChannel.jsEditorReady(); // If you have a corresponding slot in Python
-        // }
+        console.log("JS: OpenLayers map object initialized with Esri & OSM Tiles.");
+        
+        if (webChannel && webChannel.jsLogMessage) {
+            webChannel.jsLogMessage("JS Info: Map initialized successfully.");
+        }
 
     } catch (e) {
         console.error("JS: CRITICAL ERROR during map initialization:", e.message, e.stack);
         if (webChannel && webChannel.jsLogMessage) {
-            webChannel.jsLogMessage("CRITICAL JS ERROR during map initialization: " + e.message);
+            webChannel.jsLogMessage("JS Critical Error: Map initialization failed - " + e.message);
         }
-        // Optionally, display an error message in the map div
         const mapDiv = document.getElementById('map');
         if (mapDiv) {
             mapDiv.innerHTML = '<p style="color:red;text-align:center;padding:20px;">Critical Error: Map could not be initialized. Check console.</p>';
@@ -141,9 +163,9 @@ function loadKmlToMap(kmlString) {
         if (features && features.length > 0) {
             vectorSource.addFeatures(features);
             map.getView().fit(vectorSource.getExtent(), {
-                padding: [70, 70, 70, 70], // Increased padding
+                padding: [70, 70, 70, 70], 
                 duration: 1000,
-                maxZoom: 18 // Prevent zooming too close on small features (can be adjusted based on Esri maxZoom)
+                maxZoom: mapConstraints.maxZoom // Use constrained maxZoom here too
             });
             console.log(`Loaded ${features.length} features from KML.`);
             if (webChannel && webChannel.jsLogMessage) {
@@ -277,13 +299,76 @@ function clearMap() {
     }
     if (map) {
         map.getView().setCenter(ol.proj.fromLonLat([0, 0]));
-        map.getView().setZoom(2);
+        map.getView().setZoom(mapConstraints.initialZoom);
     }
     disableMapEditing();
     console.log("Map cleared and view reset.");
     if (webChannel && webChannel.jsLogMessage) {
         webChannel.jsLogMessage("JS Info: Map cleared and view reset.");
     }
+}
+
+function switchBaseLayer(layerName) {
+    console.log("JS: switchBaseLayer called with:", layerName);
+    if (!map || !esriLayer || !osmLayer) {
+        console.error("JS Error: Map or base layers not initialized for switching.");
+        return;
+    }
+    if (layerName === 'Esri') {
+        esriLayer.setVisible(true);
+        osmLayer.setVisible(false);
+        console.log("JS: Switched to Esri layer.");
+    } else if (layerName === 'OSM') {
+        esriLayer.setVisible(false);
+        osmLayer.setVisible(true);
+        console.log("JS: Switched to OSM layer.");
+    } else {
+        console.warn("JS Warning: Unknown layer name for switchBaseLayer:", layerName);
+    }
+}
+
+// New function to apply settings from Python
+function setMapDisplaySettings(settings) {
+    console.log("JS: setMapDisplaySettings called with:", settings);
+    if (!map || !vectorLayer) {
+        console.error("JS Error: Map or vectorLayer not ready for setMapDisplaySettings.");
+        return;
+    }
+
+    let newMaxZoom = parseInt(settings.kml_max_zoom, 10);
+    if (isNaN(newMaxZoom) || newMaxZoom < 1 || newMaxZoom > 22) {
+        newMaxZoom = 18; // Fallback to a sensible default if parsing fails or out of range
+        console.warn("JS: Invalid kml_max_zoom received, defaulting to 18.");
+    }
+    mapConstraints.maxZoom = newMaxZoom;
+    map.getView().setMaxZoom(newMaxZoom);
+    console.log("JS: View maxZoom updated to", newMaxZoom);
+
+    mapConstraints.kmlFillColor = settings.kml_fill_color_hex ? settings.kml_fill_color_hex + Math.round(settings.kml_fill_opacity_percent * 2.55).toString(16).padStart(2, '0') : 'rgba(0,123,255,0.5)';
+    mapConstraints.kmlStrokeColor = settings.kml_line_color_hex || '#000000';
+    mapConstraints.kmlStrokeWidth = parseInt(settings.kml_line_width_px, 10) || 1;
+
+    vectorLayer.setStyle(new ol.style.Style({
+        stroke: new ol.style.Stroke({
+            color: mapConstraints.kmlStrokeColor,
+            width: mapConstraints.kmlStrokeWidth
+        }),
+        fill: new ol.style.Fill({
+            color: mapConstraints.kmlFillColor
+        }),
+        image: new ol.style.Circle({ 
+            radius: 7,
+            fill: new ol.style.Fill({
+                color: mapConstraints.kmlFillColor 
+            }),
+            stroke: new ol.style.Stroke({
+                color: mapConstraints.kmlStrokeColor,
+                width: 1
+            })
+        })
+    }));
+    vectorSource.refresh(); // To apply new style to existing features
+    console.log("JS: KML vector layer style updated.");
 }
 
 console.log("kml_editor_map.js loaded (modified for Esri Tiles).");

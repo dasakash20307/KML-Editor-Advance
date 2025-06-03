@@ -23,20 +23,30 @@ class OutputModeDialog(QDialog):
         self.rb_single = QRadioButton("Single Consolidated KML File")
         self.rb_single.setChecked(True)
         self.button_group.addButton(self.rb_single)
-        layout.addWidget(self.rb_single)
-        hint_single = QLabel("  (All selected valid polygons will be combined into one .kml file)")
-        hint_single.setStyleSheet("font-style: italic; color: grey; padding-left: 15px;")
-        layout.addWidget(hint_single)
+        single_file_layout = QVBoxLayout()
+        single_file_layout.addWidget(self.rb_single)
+
+        hint_single = QLabel("Merges all selected records into one KML file.")
+        hint_single.setObjectName("hintLabel")
+        single_file_layout.addWidget(hint_single)
+        single_file_layout.addStretch()
+
+        layout.addLayout(single_file_layout)
 
         layout.addSpacing(10)
 
         # Multiple KMLs Option
         self.rb_multiple = QRadioButton("Multiple Individual KML Files")
         self.button_group.addButton(self.rb_multiple)
-        layout.addWidget(self.rb_multiple)
-        hint_multiple = QLabel("  (Each selected valid polygon will be saved as a separate .kml file, named by its UUID)")
-        hint_multiple.setStyleSheet("font-style: italic; color: grey; padding-left: 15px;")
-        layout.addWidget(hint_multiple)
+        multi_file_layout = QVBoxLayout()
+        multi_file_layout.addWidget(self.rb_multiple)
+
+        hint_multiple = QLabel("Exports each selected record as a separate KML file to the chosen directory.")
+        hint_multiple.setObjectName("hintLabel")
+        multi_file_layout.addWidget(hint_multiple)
+        multi_file_layout.addStretch()
+
+        layout.addLayout(multi_file_layout)
         
         layout.addStretch()
 

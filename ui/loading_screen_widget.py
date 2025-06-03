@@ -35,21 +35,29 @@ class LoadingScreenWidget(QWidget):
         main_layout.setContentsMargins(20, 20, 20, 20) # Add some padding
 
         # --- Information Labels ---
-        self.app_name_label = QLabel(app_name)
-        self.app_name_label.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
-        self.app_name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        main_layout.addWidget(self.app_name_label)
+        self.title_label = QLabel(app_name)
+        self.title_label.setObjectName("titleLabel")
+        self.title_label.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(self.title_label)
+
+        self.company_label = QLabel(company_name)
+        self.company_label.setObjectName("companyLabel")
+        self.company_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Normal))
+        self.company_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(self.company_label)
 
         self.tagline_label = QLabel(tagline)
+        self.tagline_label.setObjectName("taglineLabel")
         self.tagline_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Normal))
         self.tagline_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         main_layout.addWidget(self.tagline_label)
 
         main_layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
 
-
         # --- Progress Bar ---
         self.progress_bar = QProgressBar()
+        self.progress_bar.setObjectName("progressBar")
         self.progress_bar.setRange(0, 100) # Default range, can be updated
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(True)
@@ -57,6 +65,7 @@ class LoadingScreenWidget(QWidget):
         main_layout.addWidget(self.progress_bar)
 
         self.status_label = QLabel("Initializing...")
+        self.status_label.setObjectName("statusLabel")
         self.status_label.setFont(QFont("Segoe UI", 9))
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         main_layout.addWidget(self.status_label)
@@ -65,11 +74,13 @@ class LoadingScreenWidget(QWidget):
 
         # --- Collapsible Log Section ---
         self.log_group_box = QGroupBox("Details")
+        self.log_group_box.setObjectName("logGroup")
         self.log_group_box.setCheckable(True) # Makes the title a checkbox to toggle
         self.log_group_box.setChecked(False) # Start collapsed
 
         log_layout = QVBoxLayout()
         self.log_text_edit = QTextEdit()
+        self.log_text_edit.setObjectName("logArea")
         self.log_text_edit.setReadOnly(True)
         self.log_text_edit.setFont(QFont("Consolas", 8)) # Monospaced font for logs
         self.log_text_edit.setFixedHeight(100) # Initial height for log area
@@ -87,53 +98,22 @@ class LoadingScreenWidget(QWidget):
         # --- Footer Labels ---
         footer_layout = QHBoxLayout()
         self.version_label = QLabel(f"Version: {version_code}")
+        self.version_label.setObjectName("versionLabelLoading")
         self.version_label.setFont(QFont("Segoe UI", 8))
 
         self.developer_label = QLabel(f"Developer: {developer_name}")
+        self.developer_label.setObjectName("developerLabel")
         self.developer_label.setFont(QFont("Segoe UI", 8))
+
+        self.support_label = QLabel(f"Support: {support_email}")
+        self.support_label.setObjectName("supportLabel")
+        self.support_label.setFont(QFont("Segoe UI", 8))
 
         footer_layout.addWidget(self.version_label)
         footer_layout.addStretch()
         footer_layout.addWidget(self.developer_label)
+        footer_layout.addWidget(self.support_label)
         main_layout.addLayout(footer_layout)
-
-        # Apply some basic styling (can be enhanced with QSS)
-        self.setStyleSheet("""
-            QWidget {
-                /* General font for the widget if not overridden */
-                /* font-family: "Segoe UI"; */ /* Already set by individual labels */
-            }
-            LoadingScreenWidget {
-                border: 1px solid #CCCCCC; /* Subtle border */
-                border-radius: 10px; /* Added for rounded corners */
-            }
-            QLabel {
-                /* color will now be inherited or set by theme */
-            }
-            QProgressBar {
-                min-height: 20px;
-                text-align: center;
-            }
-            QProgressBar::chunk {
-                background-color: #0078D7; /* Blue progress chunk */
-                width: 10px; /* Width of the progress segments */
-                margin: 0.5px;
-            }
-            QGroupBox {
-                font-weight: bold;
-                margin-top: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 5px;
-            }
-            QTextEdit {
-                background-color: #F0F0F0; /* Light gray for log background */
-                color: #000000; /* Black text for logs */
-                border: 1px solid #B0B0B0;
-            }
-        """)
 
     @Slot(str, str) # level can be 'INFO', 'WARNING', 'ERROR'
     def append_log(self, message, level="INFO"):

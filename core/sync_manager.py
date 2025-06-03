@@ -290,14 +290,17 @@ class KMLFileLockManager:
         self.STALE_LOCK_GRACE_PERIOD_SECONDS: int = 300
         self.DEFAULT_KML_LOCK_DURATION_SECONDS: int = 300
 
-        if not self.kml_folder_path.is_dir():
-            try:
-                self.kml_folder_path.mkdir(parents=True, exist_ok=True)
-                self._log(f"KML folder created at {self.kml_folder_path}", "info")
-            except OSError as e:
-                self._log(f"Could not create KML folder at {self.kml_folder_path}: {e}", "error")
-                # Potentially raise an error or set a state indicating failure
-                # For now, path operations will likely fail if dir doesn't exist.
+        if self.kml_folder_path:
+            if not self.kml_folder_path.is_dir():
+                try:
+                    self.kml_folder_path.mkdir(parents=True, exist_ok=True)
+                    self._log(f"KML folder created at {self.kml_folder_path}", "info")
+                except OSError as e:
+                    self._log(f"Could not create KML folder at {self.kml_folder_path}: {e}", "error")
+                    # Potentially raise an error or set a state indicating failure
+                    # For now, path operations will likely fail if dir doesn't exist.
+        else:
+            self._log("KML folder path string was empty or None. KMLFileLockManager may not function correctly.", "warning")
 
     def _log(self, message, level='info'):
         if self.logger:
@@ -306,7 +309,7 @@ class KMLFileLockManager:
             # Fallback to print if no logger is provided
             print(f"KMLFileLockManager: [{level.upper()}] {message}")
 
-    def _get_lock_file_path(self, kml_filename: str) -> Path:
+    def _get_lock_file_path(self, kml_filename: str) -> Optional[Path]:
         """Constructs and returns the full path for a KML lock file."""
         if not self.kml_folder_path: return None # Return None if base path is None
         return self.kml_folder_path / f"{kml_filename}.lock"
@@ -327,10 +330,10 @@ class KMLFileLockManager:
             return False, "Device ID or Nickname not available.", None
 
         try:
-            if lock_file_path.exists():
+            if os.path.exists(str(lock_file_path)):
                 lock_data = None
                 try:
-                    with open(lock_file_path, 'r') as f:
+                    with open(str(lock_file_path), 'r') as f:
                         lock_data = json.load(f)
                 except (IOError, json.JSONDecodeError) as e:
                     msg = f"Could not read/parse lock file '{lock_file_path}': {e}. Assuming stale."
@@ -389,7 +392,7 @@ class KMLFileLockManager:
                     'operation_description': operation_description,
                     'heartbeat_time_iso': datetime.now(timezone.utc).isoformat()
                 }
-                with open(lock_file_path, 'w') as f:
+                with open(str(lock_file_path), 'w') as f:
                     json.dump(new_lock_data, f, indent=4)
                 self._log(f"KML lock acquired for '{kml_filename}': {lock_file_path} by device {current_device_id}", "info")
                 return True, f"KML lock acquired for '{kml_filename}'", new_lock_data
@@ -419,9 +422,9 @@ class KMLFileLockManager:
             return False
 
         try:
-            if lock_file_path.exists():
+            if os.path.exists(str(lock_file_path)):
                 try:
-                    os.remove(lock_file_path)
+                    os.remove(str(lock_file_path))
                     self._log(f"Removed existing lock file '{lock_file_path}' for force acquire by {current_device_nickname}.", "info")
                 except OSError as e_remove:
                     self._log(f"Failed to remove existing lock file '{lock_file_path}' for force_acquire: {e_remove}", "error")
@@ -435,7 +438,7 @@ class KMLFileLockManager:
                 'operation_description': operation_description,
                 'heartbeat_time_iso': datetime.now(timezone.utc).isoformat()
             }
-            with open(lock_file_path, 'w') as f:
+            with open(str(lock_file_path), 'w') as f:
                 json.dump(new_lock_data, f, indent=4)
             self._log(f"KML lock forcibly acquired for '{kml_filename}': {lock_file_path} by device {current_device_id}", "warning")
             return True
@@ -459,10 +462,10 @@ class KMLFileLockManager:
             return False
 
         try:
-            if lock_file_path.exists():
+            if os.path.exists(str(lock_file_path)):
                 lock_data = None
                 try:
-                    with open(lock_file_path, 'r') as f:
+                    with open(str(lock_file_path), 'r') as f:
                         lock_data = json.load(f)
                 except (IOError, json.JSONDecodeError) as e:
                     self._log(f"Could not read/parse lock file '{lock_file_path}' during release: {e}. Cannot verify ownership.", "warning")
@@ -470,7 +473,7 @@ class KMLFileLockManager:
 
                 if lock_data and lock_data.get('holder_device_id') == current_device_id:
                     try:
-                        os.remove(lock_file_path)
+                        os.remove(str(lock_file_path))
                         self._log(f"KML lock released for '{kml_filename}': {lock_file_path} by device {current_device_id}", "info")
                         action_taken = True
                         return True
@@ -515,10 +518,10 @@ class KMLFileLockManager:
             return False
 
         try:
-            if lock_file_path.exists():
+            if os.path.exists(str(lock_file_path)):
                 lock_data = None
                 try:
-                    with open(lock_file_path, 'r') as f:
+                    with open(str(lock_file_path), 'r') as f:
                         lock_data = json.load(f)
                 except (IOError, json.JSONDecodeError) as e:
                     self._log(f"Could not read/parse KML lock file '{lock_file_path}' for heartbeat: {e}", "error")
@@ -532,7 +535,7 @@ class KMLFileLockManager:
                         lock_data['expected_duration_seconds'] = new_expected_duration
 
                     try:
-                        with open(lock_file_path, 'w') as f:
+                        with open(str(lock_file_path), 'w') as f:
                             json.dump(lock_data, f, indent=4)
                         # self._log(f"KML Heartbeat updated for '{kml_filename}' by {self.credential_manager.get_device_nickname()}.", "debug") # Can be verbose
                         return True
@@ -557,8 +560,8 @@ class KMLFileLockManager:
         lock_file_path = self._get_lock_file_path(kml_filename)
         if not lock_file_path: return None # Check if path construction failed
         try:
-            if lock_file_path.exists():
-                with open(lock_file_path, 'r') as f:
+            if os.path.exists(str(lock_file_path)):
+                with open(str(lock_file_path), 'r') as f:
                     return json.load(f)
             return None
         except (IOError, json.JSONDecodeError) as e:
@@ -636,14 +639,14 @@ if __name__ == '__main__':
     # Test 1: User1 acquires lock
     print("\n--- Test 1: User1 acquires lock ---")
     acq_status_u1 = lock_manager_user1.acquire_lock(60, "User1_Initial_Sync")
-    assert acq_status_u1 is True, f"Test 1 Failed: User1 could not acquire lock. Status: {acq_status_u1}"
-    assert os.path.exists(actual_lock_file), f"Test 1 Failed: Lock file '{actual_lock_file}' not created."
+    assert acq_status_u1 is True, f"Test 1 Failed: User1 could not acquire lock. Status: {acq_status_u1}" # type: ignore
+    assert actual_lock_file is not None and os.path.exists(actual_lock_file), f"Test 1 Failed: Lock file '{actual_lock_file}' not created."
     print(f"Test 1 Passed. User1 acquired lock. Status: {acq_status_u1}")
 
     # Test 2: User2 tries to acquire (should be busy)
     print("\n--- Test 2: User2 tries to acquire (expect busy) ---")
     acq_status_u2_busy = lock_manager_user2.acquire_lock(30, "User2_Quick_Update")
-    assert acq_status_u2_busy is False, f"Test 2 Failed: User2 should be busy. Status: {acq_status_u2_busy}"
+    assert acq_status_u2_busy is False, f"Test 2 Failed: User2 should be busy. Status: {acq_status_u2_busy}" # type: ignore
     print(f"Test 2 Passed. User2 found lock busy. Status: {acq_status_u2_busy}")
     current_lock_holder_info = lock_manager_user2.get_current_lock_info() # From User2's perspective
     assert current_lock_holder_info is not None, "Test 2 Failed: Lock info should not be None for busy lock"
@@ -654,39 +657,39 @@ if __name__ == '__main__':
     print("\n--- Test 3: User1 updates heartbeat ---")
     time.sleep(0.1) # Ensure timestamp can change if system clock resolution is low
     hb_status_u1 = lock_manager_user1.update_heartbeat()
-    assert hb_status_u1 is True, "Test 3 Failed: User1 could not update heartbeat."
+    assert hb_status_u1 is True, "Test 3 Failed: User1 could not update heartbeat." # type: ignore
     print("Test 3 Passed. User1 updated heartbeat.")
     lock_info_after_hb = lock_manager_user1.get_current_lock_info() # From User1's perspective
     assert lock_info_after_hb is not None, "Test 3 Failed: Lock info should not be None after heartbeat"
-    assert lock_info_after_hb['heartbeat_time_iso'] != current_lock_holder_info['heartbeat_time_iso'], "Test 3 Failed: Heartbeat time did not change"
+    assert current_lock_holder_info is not None and lock_info_after_hb['heartbeat_time_iso'] != current_lock_holder_info['heartbeat_time_iso'], "Test 3 Failed: Heartbeat time did not change"
 
     # Test 4: User1 re-acquires its own lock
     print("\n--- Test 4: UserOne re-acquires its own lock ---")
     status1_reacquire = lock_manager_user1.acquire_lock(120, "Further processing by UserSyncOne")
-    assert status1_reacquire is True, f"Test 4 Failed: UserOne failed to re-acquire its own lock, got {status1_reacquire}"
+    assert status1_reacquire is True, f"Test 4 Failed: UserOne failed to re-acquire its own lock, got {status1_reacquire}" # type: ignore
     print(f"Test 4 Passed. UserOne re-acquire_lock status: {status1_reacquire}")
     reacquired_info = lock_manager_user1.get_current_lock_info()
     assert reacquired_info is not None, "Test 4 Failed: Lock info should not be None after re-acquire"
-    assert reacquired_info['operation_description'] == "Further processing by UserSyncOne", "Test 4 Failed: Operation description not updated"
-    assert reacquired_info['expected_duration_seconds'] == 120, "Test 4 Failed: Duration not updated"
+    assert reacquired_info is not None and reacquired_info['operation_description'] == "Further processing by UserSyncOne", "Test 4 Failed: Operation description not updated"
+    assert reacquired_info is not None and reacquired_info['expected_duration_seconds'] == 120, "Test 4 Failed: Duration not updated"
 
     # Test 5: User1 releases lock
     print("\n--- Test 5: User1 releases lock ---")
     rel_status_u1 = lock_manager_user1.release_lock()
-    assert rel_status_u1 is True, "Test 5 Failed: User1 could not release lock."
-    assert not os.path.exists(actual_lock_file), f"Test 5 Failed: Lock file '{actual_lock_file}' not deleted."
+    assert rel_status_u1 is True, "Test 5 Failed: User1 could not release lock." # type: ignore
+    assert actual_lock_file is not None and not os.path.exists(actual_lock_file), f"Test 5 Failed: Lock file '{actual_lock_file}' not deleted."
     print("Test 5 Passed. User1 released lock.")
 
     # Test 6: User2 acquires lock now
     print("\n--- Test 6: User2 acquires lock (should succeed) ---")
     acq_status_u2_ok = lock_manager_user2.acquire_lock(45, "User2_Main_Task")
-    assert acq_status_u2_ok is True, f"Test 6 Failed: User2 could not acquire lock. Status: {acq_status_u2_ok}"
-    assert os.path.exists(actual_lock_file), f"Test 6 Failed: Lock file '{actual_lock_file}' not created by User2."
+    assert acq_status_u2_ok is True, f"Test 6 Failed: User2 could not acquire lock. Status: {acq_status_u2_ok}" # type: ignore
+    assert actual_lock_file is not None and os.path.exists(actual_lock_file), f"Test 6 Failed: Lock file '{actual_lock_file}' not created by User2."
     print(f"Test 6 Passed. User2 acquired lock. Status: {acq_status_u2_ok}")
 
     # Test 7: Simulate stale lock by User2, User1 detects and force acquires
     print("\n--- Test 7: User1 detects stale lock from User2 and force acquires ---")
-    if os.path.exists(actual_lock_file):
+    if actual_lock_file and os.path.exists(actual_lock_file):
         with open(actual_lock_file, 'r+') as f_stale:
             stale_lock_data = json.load(f_stale)
             # Make it significantly stale
@@ -704,17 +707,17 @@ if __name__ == '__main__':
     _QMESSAGEBOX_AVAILABLE = False
 
     acq_status_u1_stale = lock_manager_user1.acquire_lock(60, "User1_Checking_Stale_Lock")
-    assert acq_status_u1_stale == "STALE_LOCK_DETECTED", f"Test 7 Failed: User1 should have detected stale. Status: {acq_status_u1_stale}"
+    assert acq_status_u1_stale == "STALE_LOCK_DETECTED", f"Test 7 Failed: User1 should have detected stale. Status: {acq_status_u1_stale}" # type: ignore
     print(f"User1 detected stale lock. Status: {acq_status_u1_stale}")
 
     # User1 force acquires
     print("UserOne forcing acquire on stale lock")
     force_acq_status_u1 = lock_manager_user1.force_acquire_lock(70, "User1_Forced_Acquisition")
-    assert force_acq_status_u1 is True, "Test 7 Failed: User1 could not force acquire."
+    assert force_acq_status_u1 is True, "Test 7 Failed: User1 could not force acquire." # type: ignore
     print("User1 force acquired the lock.")
     new_holder_info = lock_manager_user1.get_current_lock_info()
     assert new_holder_info is not None, "Test 7 Failed: Lock info should not be None after force acquire"
-    assert new_holder_info['holder_nickname'] == "UserSyncOne", "Test 7 Failed: User1 is not the new holder."
+    assert new_holder_info is not None and new_holder_info['holder_nickname'] == "UserSyncOne", "Test 7 Failed: User1 is not the new holder."
     print(f"Lock now held by {new_holder_info['holder_nickname']}.")
 
     _QMESSAGEBOX_AVAILABLE = original_qmessagebox_available_state # Restore
@@ -722,15 +725,15 @@ if __name__ == '__main__':
     # Test 8: User2 tries to release User1's forcibly acquired lock (should fail)
     print("\n--- Test 8: User2 tries to release User1's lock (expect fail) ---")
     rel_status_u2_fail = lock_manager_user2.release_lock()
-    assert rel_status_u2_fail is False, "Test 8 Failed: User2 should not have released User1's lock."
+    assert rel_status_u2_fail is False, "Test 8 Failed: User2 should not have released User1's lock." # type: ignore
     print(f"Test 8 Passed. User2 failed to release lock. Status: {rel_status_u2_fail}")
-    assert os.path.exists(actual_lock_file), "Test 8 Failed: Lock file should still exist (held by User1)."
+    assert actual_lock_file is not None and os.path.exists(actual_lock_file), "Test 8 Failed: Lock file should still exist (held by User1)."
 
     # Test 9: User1 releases its lock
     print("\n--- Test 9: User1 releases its forcibly acquired lock ---")
     rel_status_u1_final = lock_manager_user1.release_lock()
-    assert rel_status_u1_final is True, "Test 9 Failed: User1 could not release its lock."
-    assert not os.path.exists(actual_lock_file), f"Test 9 Failed: Lock file '{actual_lock_file}' not deleted."
+    assert rel_status_u1_final is True, "Test 9 Failed: User1 could not release its lock." # type: ignore
+    assert actual_lock_file is not None and not os.path.exists(actual_lock_file), f"Test 9 Failed: Lock file '{actual_lock_file}' not deleted."
     print("Test 9 Passed. User1 released lock.")
 
     # Cleanup

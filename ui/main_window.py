@@ -6,6 +6,8 @@ import csv
 import utm
 import tempfile
 import subprocess
+import platform
+import ctypes
 
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTableView,
                                QSplitter, QFrame, QStatusBar, QMenuBar, QMenu, QToolBar, QPushButton,
@@ -23,6 +25,7 @@ from core.kml_generator import add_polygon_to_kml_object # Used by KMLHandler vi
 import simplekml # Used by KMLHandler via MainWindow's _trigger_ge_polygon_upload
 import datetime
 import uuid
+import qtmodern.styles
 
 # Dialogs and Custom Widgets
 from .dialogs.api_sources_dialog import APISourcesDialog
@@ -36,6 +39,8 @@ from .table_delegates import EvaluationStatusDelegate
 from .lock_handlers import LockHandler
 from .data_handlers import DataHandler
 from .kml_handlers import KMLHandler
+from .dialogs.table_view_editor_dialog import TableViewEditorDialog # Added
+from .dialogs.sharing_info_dialog import SharingInfoDialog # Added
 
 
 # Constants
@@ -60,6 +65,35 @@ class MainWindow(QMainWindow):
         self.credential_manager = credential_manager
         if self.db_manager is None: QMessageBox.critical(self, "Initialization Error", "Database Manager not provided."); sys.exit(1)
         if self.credential_manager is None: QMessageBox.critical(self, "Initialization Error", "Credential Manager not provided."); sys.exit(1)
+
+        # Initialize theme
+        app = QApplication.instance()
+        if app and self.credential_manager:
+            current_theme = self.credential_manager.load_app_theme()
+            if current_theme == "dark":
+                qtmodern.styles.dark(app)
+                if platform.system() == "Windows":
+                    try:
+                        ctypes.windll.uxtheme.SetPreferredAppMode(2)  # Dark
+                    except Exception as e:
+                        print(f"Failed to set Windows dark mode: {e}")
+            else:  # Light theme
+                qtmodern.styles.light(app)
+                if platform.system() == "Windows":
+                    try:
+                        ctypes.windll.uxtheme.SetPreferredAppMode(1)  # Light
+                    except Exception as e:
+                        print(f"Failed to set Windows light mode: {e}")
+
+            # Apply global QSS stylesheet
+            try:
+                qss_path = resource_path("assets/style.qss")
+                if os.path.exists(qss_path):
+                    with open(qss_path, "r") as f:
+                        stylesheet = f.read()
+                    app.setStyleSheet(stylesheet)
+            except Exception as e:
+                print(f"Error loading global stylesheet: {e}")
 
         self.db_lock_manager = None
         if self.db_manager and self.credential_manager:
@@ -156,19 +190,26 @@ class MainWindow(QMainWindow):
 
     def _create_header(self):
         # ... (header creation code remains same)
-        header_widget = QWidget(); header_widget.setFixedHeight(60); header_widget.setStyleSheet("border-bottom: 1px solid #D0D0D0;")
+        header_widget = QWidget(); header_widget.setFixedHeight(60); # header_widget.setStyleSheet("border-bottom: 1px solid #D0D0D0;") # Removed inline style
+        header_widget.setObjectName("mainWindowHeader") # Added object name
         header_layout = QHBoxLayout(header_widget); header_layout.setContentsMargins(5,5,5,5); header_layout.setSpacing(5)
         logo_path = resource_path(LOGO_FILE_NAME_MW)
         if os.path.exists(logo_path): pixmap=QPixmap(logo_path);logo_label=QLabel();logo_label.setPixmap(pixmap.scaled(40,40,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)); header_layout.addWidget(logo_label,0,Qt.AlignmentFlag.AlignVCenter)
         else: header_layout.addWidget(QLabel("[L]"))
         title_label=QLabel(APP_NAME_MW);title_label.setFont(QFont("Segoe UI",16,QFont.Weight.Bold));title_label.setAlignment(Qt.AlignmentFlag.AlignCenter);header_layout.addWidget(title_label,1)
-        version_label=QLabel(APP_VERSION_MW);version_label.setFont(QFont("Segoe UI",8,QFont.Weight.Normal,True));version_label.setStyleSheet(f"color:{INFO_COLOR_MW};");header_layout.addWidget(version_label,0,Qt.AlignmentFlag.AlignVCenter|Qt.AlignmentFlag.AlignRight)
+        version_label=QLabel(APP_VERSION_MW);version_label.setFont(QFont("Segoe UI",8,QFont.Weight.Normal,True)); # version_label.setStyleSheet(f"color:{INFO_COLOR_MW};"); # Removed inline style
+        version_label.setObjectName("versionLabel") # Added object name
+        header_layout.addWidget(version_label,0,Qt.AlignmentFlag.AlignVCenter|Qt.AlignmentFlag.AlignRight)
         self.main_layout.addWidget(header_widget)
 
     def _create_menus_and_toolbar(self):
         menubar=self.menuBar();file_menu=menubar.addMenu("&File")
         self.export_data_action=QAction(QIcon.fromTheme("document-save-as",QIcon(self.app_icon_path)),"Export Displayed Data as &CSV...",self)
         file_menu.addAction(self.export_data_action)
+
+        self.sharing_info_action = QAction(QIcon.fromTheme("network-transmit-receive"), "Central App Sharing Info...", self) # Added
+        file_menu.addAction(self.sharing_info_action) # Added
+
         file_menu.addSeparator();exit_action=QAction(QIcon.fromTheme("application-exit"),"E&xit",self);exit_action.setShortcut("Ctrl+Q");exit_action.setStatusTip("Exit application");exit_action.triggered.connect(self.close);file_menu.addAction(exit_action)
 
         data_menu=menubar.addMenu("&Data")
@@ -197,6 +238,14 @@ class MainWindow(QMainWindow):
         self.default_kml_view_settings_action.triggered.connect(self.open_default_kml_view_settings_dialog)
         self.view_menu.addAction(self.default_kml_view_settings_action)
 
+        self.table_view_editor_action = QAction("Table View Editor...", self) # Added
+        self.view_menu.addAction(self.table_view_editor_action) # Added
+
+        self.view_menu.addSeparator() # Added Separator for theme toggle
+        self.toggle_theme_action = QAction("Toggle Theme (Light/Dark)", self) # Added
+        self.toggle_theme_action.triggered.connect(self._toggle_theme) # Added
+        self.view_menu.addAction(self.toggle_theme_action) # Added
+
         help_menu=menubar.addMenu("&Help");self.about_action=QAction(QIcon.fromTheme("help-about"),"&About",self);self.about_action.triggered.connect(self.handle_about);help_menu.addAction(self.about_action)
         self.ge_instructions_action=QAction("GE &Instructions",self) # Will connect to KMLHandler
         help_menu.addAction(self.ge_instructions_action)
@@ -211,6 +260,11 @@ class MainWindow(QMainWindow):
 
         manage_api_toolbar_action=QAction(QIcon.fromTheme("preferences-system"),"Manage API Sources",self);manage_api_toolbar_action.triggered.connect(self.handle_manage_api_sources);self.toolbar.addAction(manage_api_toolbar_action)
         self.toolbar.addSeparator();self.toolbar.addAction(self.generate_kml_action);self.toolbar.addAction(self.delete_checked_action)
+
+        # Add Table View Editor to toolbar for easier access
+        self.edit_table_view_toolbar_button = QPushButton(QIcon.fromTheme("view-list-tree"), "Edit Table View") # Added
+        self.toolbar.addSeparator() # Added
+        self.toolbar.addWidget(self.edit_table_view_toolbar_button) # Added
 
     def _connect_signals(self):
         # Connections to DataHandler
@@ -236,6 +290,12 @@ class MainWindow(QMainWindow):
         if hasattr(self.kml_editor_widget, 'save_triggered_signal'):
             self.kml_editor_widget.save_triggered_signal.connect(self._handle_save_kml_changes_triggered)
 
+        # Connection for Table View Editor
+        self.table_view_editor_action.triggered.connect(self._open_table_view_editor) # Added
+        self.edit_table_view_toolbar_button.clicked.connect(self._open_table_view_editor) # Added
+
+        # Connection for Sharing Info Dialog
+        self.sharing_info_action.triggered.connect(self._open_sharing_info_dialog) # Added
 
     def _create_status_bar(self):
         self._main_status_bar=QStatusBar()
@@ -271,7 +331,7 @@ class MainWindow(QMainWindow):
         strip_layout.setContentsMargins(0,0,0,0); strip_layout.addStretch()
         self.toggle_filter_panel_button = QPushButton(" Filters")
         self.toggle_filter_panel_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
-        self.toggle_filter_panel_button.setStyleSheet("padding: 3px;")
+        # self.toggle_filter_panel_button.setStyleSheet("padding: 3px;") # Removed inline style
         self.toggle_filter_panel_button.clicked.connect(self._toggle_filter_panel_visibility)
         strip_layout.addWidget(self.toggle_filter_panel_button)
         right_pane_layout.addWidget(self.table_editors_strip)
@@ -298,66 +358,56 @@ class MainWindow(QMainWindow):
         self.right_splitter.setStretchFactor(0,3); self.right_splitter.setStretchFactor(1,1); right_pane_layout.addWidget(self.right_splitter,1); self.main_splitter.addWidget(right_pane_widget)
         self.main_splitter.setStretchFactor(0,1); self.main_splitter.setStretchFactor(1,2); self.main_layout.addWidget(self.main_splitter,1)
 
+        # Conditionally enable/disable actions based on app mode
+        self._update_ui_for_app_mode()
+
     def toggle_all_checkboxes(self,state_int): self.source_model.set_all_checkboxes(Qt.CheckState(state_int))
 
     # on_table_selection_changed is now primarily handled by KMLHandler,
     # which is directly connected to table_view.selectionModel().selectionChanged.
     # The old on_table_selection_changed in MainWindow can be removed or simplified if it had other duties.
-    # For now, let's remove the duplicated logic for map view updates from here.
+    # For now, let's remove the duplicated logic for map updates from here.
     # def on_table_selection_changed(self,selected,deselected):
     #     # This method now primarily handles map updates. KML/GE logic is delegated.
     #     # self.kml_handler.on_table_selection_changed(selected, deselected) # Delegate to KML Handler
     #     pass # Logic moved to KMLHandler.on_table_selection_changed
 
 
-    def _handle_save_kml_changes_triggered(self):
+    def _handle_save_kml_changes_triggered(self, save_data: dict):
+        """Handle save signal from KML editor with edited data"""
         self.log_message("MainWindow: Save KML changes triggered.", "info")
 
         # Retrieve necessary data from KMLEditorViewWidget
-        # These attributes (current_db_id, current_kml_filename) were set in KMLHandler.on_table_selection_changed
         db_id = getattr(self.kml_editor_widget, 'current_db_id', None)
         original_kml_filename = getattr(self.kml_editor_widget, 'current_kml_filename', None)
-
-        edited_name = self.kml_editor_widget.placemark_name_edit.text()
-        edited_description = self.kml_editor_widget.placemark_description_edit.toPlainText()
 
         if db_id is None or original_kml_filename is None:
             self.log_message("Error: DB ID or original KML filename not available in KML Editor for saving.", "error")
             QMessageBox.critical(self, "Save Error", "Cannot save changes: Missing context (DB ID or original filename).\nPlease re-select the item from the table.")
-            self.kml_editor_widget.exit_edit_mode(reload_original_kml=True) # Revert editor
+            self.kml_editor_widget.exit_edit_mode(reload_original_kml=True)
             return
 
-        # Define a callback for when JS returns the geometry
-        def _on_geometry_received(geometry_json_str):
-            self.log_message(f"MainWindow: Received geometry from JS: {geometry_json_str[:100]}...", "debug")
-            if geometry_json_str is None or geometry_json_str.lower() == "null":
-                self.log_message("Error: Failed to retrieve edited geometry from map. Save aborted.", "error")
-                QMessageBox.warning(self, "Save Error", "Could not retrieve edited geometry from the map. Save operation cancelled.")
-                self.kml_editor_widget.exit_edit_mode(reload_original_kml=True) # Revert editor UI
-                return
+        # Extract data from the save_data dictionary
+        geometry_json_str = save_data.get('geometry')
+        edited_name = save_data.get('name', '')
+        edited_description = save_data.get('description', '')
 
-            # Call KMLHandler to perform the save operation
-            save_success = self.kml_handler.save_edited_kml(
-                db_id, original_kml_filename, geometry_json_str,
-                edited_name, edited_description
-            )
+        if geometry_json_str is None or geometry_json_str.lower() == "null":
+            self.log_message("Error: Failed to retrieve edited geometry from map. Save aborted.", "error")
+            QMessageBox.warning(self, "Save Error", "Could not retrieve edited geometry from the map. Save operation cancelled.")
+            self.kml_editor_widget.exit_edit_mode(reload_original_kml=True)
+            return
 
-            # KMLHandler.save_edited_kml now handles reloading the KML into the editor or clearing it.
-            # It also handles user messages for success/failure.
-            # So, MainWindow just needs to ensure the editor exits edit mode if it's still in it,
-            # though KMLHandler.save_edited_kml should manage display_kml which calls exit_edit_mode.
-            # A failsafe call to exit_edit_mode might be okay if KMLHandler's display_kml doesn't always get called on failure paths.
-            if not save_success:
-                 # If save failed, KMLHandler should have reloaded original or cleared.
-                 # Ensure editor is out of edit mode.
-                self.kml_editor_widget.exit_edit_mode(reload_original_kml=True) # Ensure exit with original data on fail
-            else:
-                # On success, KMLHandler reloads the new KML which calls exit_edit_mode.
-                pass
+        # Call KMLHandler to perform the save operation
+        save_success = self.kml_handler.save_edited_kml(
+            db_id, original_kml_filename, geometry_json_str,
+            edited_name, edited_description
+        )
 
-
-        # Request the edited geometry from JavaScript
-        self.kml_editor_widget.get_edited_data_from_js(_on_geometry_received)
+        if not save_success:
+            # If save failed, KMLHandler should have reloaded original or cleared.
+            # Ensure editor is out of edit mode.
+            self.kml_editor_widget.exit_edit_mode(reload_original_kml=True)
 
 
     def refresh_api_source_dropdown(self):
@@ -373,11 +423,7 @@ class MainWindow(QMainWindow):
 
     def handle_export_csv_template(self):
         """Calls the DataHandler method to export the CSV template."""
-        if hasattr(self, 'data_handler'):
-            self.data_handler.handle_export_csv_template()
-        else:
-            self.log_message("DataHandler not initialized. Cannot export CSV template.", "error")
-            QMessageBox.critical(self, "Error", "DataHandler not available.")
+        self.data_handler.handle_export_csv_template()
 
     def _handle_ge_view_toggle(self,checked):
         original_action_blocked,original_button_blocked=self.toggle_ge_view_action.signalsBlocked(),self.toggle_ge_view_button.signalsBlocked()
@@ -455,36 +501,121 @@ class MainWindow(QMainWindow):
         self.move(x, y)
 
     def _setup_filter_panel(self):
-        # Placeholder method to set up the filter panel
-        filter_panel = QGroupBox("Filter Data")
-        filter_layout = QGridLayout(filter_panel)
+        self.filter_groupbox = QGroupBox("Filter Data")
+        filter_layout = QGridLayout(self.filter_groupbox)
+        filter_layout.setContentsMargins(5, 10, 5, 5) # Add some top margin for title
+        filter_layout.setSpacing(10)
 
-        # Example filter widgets (replace with actual filter logic)
-        filter_layout.addWidget(QLabel("Farmer Name:"), 0, 0)
-        filter_layout.addWidget(QLineEdit(), 0, 1)
+        # Row 0: Response Code
+        filter_layout.addWidget(QLabel("Response Code:"), 0, 0)
+        self.filter_response_code_edit = QLineEdit()
+        self.filter_response_code_edit.setPlaceholderText("Enter Response Code (exact)")
+        filter_layout.addWidget(self.filter_response_code_edit, 0, 1, 1, 3) # Span 3 columns
 
-        filter_layout.addWidget(QLabel("Village:"), 1, 0)
-        filter_layout.addWidget(QLineEdit(), 1, 1)
+        # Row 1: Farmer Name
+        filter_layout.addWidget(QLabel("Farmer Name:"), 1, 0)
+        self.filter_farmer_name_edit = QLineEdit()
+        self.filter_farmer_name_edit.setPlaceholderText("Contains text (case-insensitive)")
+        filter_layout.addWidget(self.filter_farmer_name_edit, 1, 1, 1, 3)
 
-        filter_layout.addWidget(QLabel("Evaluation Status:"), 2, 0)
-        status_combo = QComboBox()
-        status_combo.addItem("All")
-        status_combo.addItem("Eligible")
-        status_combo.addItem("Not Eligible")
-        status_combo.addItem("Not Evaluated Yet")
-        filter_layout.addWidget(status_combo, 2, 1)
+        # Row 2: Village
+        filter_layout.addWidget(QLabel("Village Name:"), 2, 0)
+        self.filter_village_edit = QLineEdit()
+        self.filter_village_edit.setPlaceholderText("Contains text (case-insensitive)")
+        filter_layout.addWidget(self.filter_village_edit, 2, 1, 1, 3)
 
-        filter_panel.setVisible(False) # Initially hidden
-        return filter_panel
+        # Row 3: Evaluation Status & KML File Status
+        filter_layout.addWidget(QLabel("Evaluation Status:"), 3, 0)
+        self.filter_eval_status_combo = QComboBox()
+        self.filter_eval_status_combo.addItems(["All", "Not Evaluated Yet", "Eligible", "Not Eligible"])  # Match the order in EvaluationStatusDelegate
+        filter_layout.addWidget(self.filter_eval_status_combo, 3, 1)
+
+        filter_layout.addWidget(QLabel("KML File Status:"), 3, 2)
+        self.filter_kml_status_combo = QComboBox()
+        self.filter_kml_status_combo.addItems(["All", "Created", "Edited", "Errored", "File Deleted", "Pending Deletion"])
+        filter_layout.addWidget(self.filter_kml_status_combo, 3, 3)
+
+        # Row 4: Action Buttons
+        self.apply_filters_button = QPushButton("Apply Filters")
+        self.apply_filters_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton))
+        self.apply_filters_button.clicked.connect(self._apply_filters)
+        filter_layout.addWidget(self.apply_filters_button, 4, 0, 1, 2) # Span 2 cols, align left
+
+        self.clear_filters_button = QPushButton("Clear Filters")
+        self.clear_filters_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogCancelButton))
+        self.clear_filters_button.clicked.connect(self._clear_filters)
+        filter_layout.addWidget(self.clear_filters_button, 4, 2, 1, 2) # Span 2 cols, align right
+        
+        filter_layout.setColumnStretch(1, 1) # Allow middle columns to stretch a bit
+        filter_layout.setColumnStretch(3, 1)
+
+        self.filter_groupbox.setVisible(False) # Initially hidden
+        return self.filter_groupbox
 
     def _toggle_filter_panel_visibility(self):
-        # Placeholder method to toggle filter panel visibility
-        filter_panel = self.findChild(QGroupBox, "Filter Data") # Find the filter panel by object name or type
-        if filter_panel:
-            is_visible = filter_panel.isVisible()
-            filter_panel.setVisible(not is_visible)
-            self.toggle_filter_panel_button.setText(f"GE View: {'Hide Filters' if not is_visible else 'Show Filters'}") # Update button text
+        is_visible = self.filter_groupbox.isVisible()
+        self.filter_groupbox.setVisible(not is_visible)
+        self.toggle_filter_panel_button.setText(" Filters" if is_visible else " Hide Filters")
+        self.toggle_filter_panel_button.setIcon(self.style().standardIcon(
+            QStyle.StandardPixmap.SP_FileDialogDetailedView if is_visible else QStyle.StandardPixmap.SP_FileDialogListView
+        ))
+        self.log_message(f"Filter panel toggled to {'hidden' if is_visible else 'visible'}.")
 
+    def _apply_filters(self):
+        # Placeholder for applying filter logic
+        criteria = {
+            "response_code": self.filter_response_code_edit.text(),
+            "farmer_name": self.filter_farmer_name_edit.text(),
+            "village": self.filter_village_edit.text(),
+            "evaluation_status": self.filter_eval_status_combo.currentText(),
+            "kml_file_status": self.filter_kml_status_combo.currentText()
+        }
+        self.log_message(f"Apply filters called with criteria: {criteria}", "info")        
+        if hasattr(self.filter_proxy_model, 'set_filter_criteria'):
+            self.filter_proxy_model.set_filter_criteria(criteria)
+        else:
+            self.log_message("PolygonFilterProxyModel does not have set_filter_criteria method.", "error")
+
+    def _clear_filters(self):
+        # Placeholder for clearing filter logic
+        self.filter_response_code_edit.clear()
+        self.filter_farmer_name_edit.clear()
+        self.filter_village_edit.clear()
+        self.filter_eval_status_combo.setCurrentIndex(0) # "All"
+        self.filter_kml_status_combo.setCurrentIndex(0) # "All"
+        self.log_message("Clear filters called.", "info")
+        if hasattr(self.filter_proxy_model, 'clear_filter_criteria'):
+            self.filter_proxy_model.clear_filter_criteria()
+        else:
+            self.log_message("PolygonFilterProxyModel does not have clear_filter_criteria method.", "error")
+
+    def _update_ui_for_app_mode(self):
+        """Enable/disable UI elements based on the application mode."""
+        app_mode = self.credential_manager.get_app_mode()
+        is_central_app = (app_mode == "Central App")
+
+        # Enable sharing info action only for Central App
+        if hasattr(self, 'sharing_info_action'):
+            self.sharing_info_action.setEnabled(is_central_app)
+            self.sharing_info_action.setVisible(is_central_app) # Also hide if not central
+
+        # Example: Disable data modification actions if not Central App
+        # (Adjust as per actual desired restrictions for Connected App)
+        # if hasattr(self, 'delete_checked_action'):
+        #     self.delete_checked_action.setEnabled(is_central_app)
+        # if hasattr(self, 'clear_all_data_action'):
+        #     self.clear_all_data_action.setEnabled(is_central_app)
+        # if hasattr(self.kml_editor_widget, 'edit_mode_button'): # Assuming editor has an edit button
+        #     self.kml_editor_widget.edit_mode_button.setEnabled(is_central_app)
+
+        self.log_message(f"UI updated for {app_mode} mode.", "info")
+
+    def _open_sharing_info_dialog(self):
+        if self.credential_manager.get_app_mode() == "Central App":
+            dialog = SharingInfoDialog(self.credential_manager, self)
+            dialog.exec()
+        else:
+            QMessageBox.information(self, "Sharing Info", "This feature is available only in 'Central App' mode.")
 
     # Placeholder for _setup_main_content_area to avoid breaking the call order
     # It's split into _setup_main_content_area_models_views and _setup_main_content_area_layout
@@ -492,3 +623,159 @@ class MainWindow(QMainWindow):
         self._setup_main_content_area_models_views()
         # Instantiation of handlers is done in __init__ after models/views are ready
         self._setup_main_content_area_layout()
+
+    def _get_user_configurable_headers(self):
+        """Returns the list of column headers that the user can show/hide/reorder."""
+        if self.source_model and hasattr(self.source_model, '_headers'):
+            # Exclude the first header if it's the checkbox column
+            if self.source_model._headers and self.source_model._headers[0] == "": # Assuming checkbox header is empty string or specific ID
+                return self.source_model._headers[1:]
+            return self.source_model._headers
+        return []
+
+    def _open_table_view_editor(self):
+        all_configurable_headers = self._get_user_configurable_headers()
+        if not all_configurable_headers:
+            QMessageBox.warning(self, "Table View Editor", "Could not retrieve column headers to configure.")
+            return
+
+        current_visible_ordered_config = self.credential_manager.load_table_view_config()
+        
+        # If no saved config, default to all configurable headers being visible in their original order
+        if current_visible_ordered_config is None:
+            current_visible_ordered_config = list(all_configurable_headers)
+        else:
+            # Filter current_visible_ordered_config to ensure all headers in it are valid and known
+            current_visible_ordered_config = [h for h in current_visible_ordered_config if h in all_configurable_headers]
+
+
+        dialog = TableViewEditorDialog(all_configurable_headers, current_visible_ordered_config, self)
+        dialog.settings_saved.connect(self._handle_table_view_settings_saved)
+        
+        # Pass logger if dialog expects it, e.g. dialog.set_logger(self.log_message)
+        # For now, dialog has its own print-based logger.
+
+        if dialog.exec(): # This will be true if dialog.accept() was called
+            self.log_message("Table view editor dialog accepted.", "info")
+        else:
+            self.log_message("Table view editor dialog cancelled or closed.", "info")
+
+    def _handle_table_view_settings_saved(self, new_ordered_visible_headers: list[str]):
+        self.log_message(f"Table view settings to save: {new_ordered_visible_headers}", "info")
+        if self.credential_manager.save_table_view_config(new_ordered_visible_headers):
+            self.log_message("Table view configuration saved successfully.", "info")
+            self._apply_table_column_configuration(new_ordered_visible_headers)
+        else:
+            self.log_message("Failed to save table view configuration.", "error")
+            QMessageBox.warning(self, "Save Error", "Could not save table view column configuration.")
+    
+    def _apply_table_column_configuration(self, ordered_visible_headers_config: list[str] | None = None):
+        if not self.source_model or not hasattr(self.source_model, '_headers') or not self.table_view:
+            self.log_message("Cannot apply table column config: model or table view not ready.", "warning")
+            return
+
+        all_model_headers = self.source_model._headers # Includes checkbox header at index 0
+        
+        # Determine the list of headers the user actually configured (excludes checkbox)
+        user_configurable_headers_from_model = all_model_headers[1:] if all_model_headers and all_model_headers[0] == "" else all_model_headers
+
+        final_ordered_visible_list_no_checkbox = []
+
+        if ordered_visible_headers_config is None:
+            loaded_config = self.credential_manager.load_table_view_config()
+            if loaded_config is not None:
+                final_ordered_visible_list_no_checkbox = [h for h in loaded_config if h in user_configurable_headers_from_model]
+            else: # No saved config, default to all configurable headers visible
+                final_ordered_visible_list_no_checkbox = list(user_configurable_headers_from_model)
+        else: # Config was passed directly (e.g. after saving from dialog)
+            final_ordered_visible_list_no_checkbox = [h for h in ordered_visible_headers_config if h in user_configurable_headers_from_model]
+
+
+        header_view = self.table_view.horizontalHeader()
+
+        # First, set visibility for all user-configurable columns
+        for i, model_header_text in enumerate(user_configurable_headers_from_model):
+            logical_index = i + 1 # Add 1 because column 0 is checkbox
+            if model_header_text in final_ordered_visible_list_no_checkbox:
+                self.table_view.setColumnHidden(logical_index, False)
+            else:
+                self.table_view.setColumnHidden(logical_index, True)
+
+        # Then, reorder the visible columns
+        # The checkbox column (logical index 0) is always at visual index 0 and fixed.
+        # We are reordering starting from visual index 1.
+        current_visual_idx_for_user_cols = 0
+        for target_header_text in final_ordered_visible_list_no_checkbox:
+            try:
+                # Find the logical index of this header in the model (add 1 for checkbox offset)
+                logical_idx_of_target_header = user_configurable_headers_from_model.index(target_header_text) + 1
+            except ValueError:
+                self.log_message(f"Header '{target_header_text}' from config not found in model headers. Skipping move.", "warning")
+                continue
+
+            current_visual_idx_of_target = header_view.visualIndex(logical_idx_of_target_header)
+            
+            # Target visual index is checkbox (0) + current_visual_idx_for_user_cols
+            target_visual_index_overall = current_visual_idx_for_user_cols + 1 
+
+            if current_visual_idx_of_target != target_visual_index_overall:
+                header_view.moveSection(current_visual_idx_of_target, target_visual_index_overall)
+            
+            current_visual_idx_for_user_cols += 1
+        
+        self.log_message(f"Applied table column configuration. Visible and ordered: {final_ordered_visible_list_no_checkbox}", "info")
+
+    def _toggle_theme(self):
+        app = QApplication.instance()
+        if not app or not self.credential_manager:
+            self.log_message("Application instance or CredentialManager not available for theme toggle.", "error")
+            return
+
+        current_theme = self.credential_manager.load_app_theme()  # Should return 'light' or 'dark'
+        new_theme = "dark" if current_theme == "light" else "light"
+
+        self.log_message(f"Toggling theme from {current_theme} to {new_theme}", "info")
+
+        # First save the theme preference
+        if not self.credential_manager.save_app_theme(new_theme):
+            self.log_message("Failed to save theme preference.", "error")
+            return
+
+        # Apply the theme
+        if new_theme == "dark":
+            qtmodern.styles.dark(app)
+            if platform.system() == "Windows":
+                try:
+                    ctypes.windll.uxtheme.SetPreferredAppMode(2)  # Dark
+                except Exception as e:
+                    self.log_message(f"Failed to set Windows dark mode: {e}", "warning")
+        else:  # Light theme
+            qtmodern.styles.light(app)
+            if platform.system() == "Windows":
+                try:
+                    ctypes.windll.uxtheme.SetPreferredAppMode(1)  # Light
+                except Exception as e:
+                    self.log_message(f"Failed to set Windows light mode: {e}", "warning")
+
+        # Reload and reapply the global QSS stylesheet AFTER qtmodern style
+        try:
+            qss_path = resource_path("assets/style.qss")
+            if os.path.exists(qss_path):
+                with open(qss_path, "r") as f:
+                    stylesheet = f.read()
+                app.setStyleSheet(stylesheet)
+                self.log_message(f"Global QSS re-applied after theme toggle.", "info")
+            else:
+                self.log_message(f"Global stylesheet 'assets/style.qss' not found at '{qss_path}' during theme toggle.", "warning")
+        except Exception as e:
+            self.log_message(f"Error reloading global stylesheet during theme toggle: {e}", "error")
+
+        # Force a repaint of all widgets
+        for widget in QApplication.allWidgets():
+            widget.style().unpolish(widget)
+            widget.style().polish(widget)
+            widget.update()
+
+        QMessageBox.information(self, "Theme Changed", 
+                              f"Theme changed to {new_theme}. Most changes should apply immediately. "
+                              "Some elements might require an application restart to fully reflect the new theme.")

@@ -1,2 +1,292 @@
-/* Global QSS Stylesheet - Initially empty */
-/* Add custom styles here that should apply across the application */
+/* Global QSS Stylesheet */
+/* This stylesheet provides base styles that work well with both light and dark themes */
+
+/* General Window & Dialog Styling */
+QWidget {
+    font-family: "Segoe UI", Arial, sans-serif;
+}
+
+/* GroupBox Styling */
+QGroupBox {
+    border: 1px solid palette(mid);
+    border-radius: 5px;
+    margin-top: 1ex;
+    font-weight: bold;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 3px;
+    border-radius: 3px;
+}
+
+/* Label Styling */
+QLabel {
+    background-color: transparent;
+}
+
+/* Button Styling */
+QPushButton {
+    padding: 5px 10px;
+    border-radius: 4px;
+    min-width: 60px;
+    border: 1px solid palette(mid);
+}
+
+QPushButton:hover {
+    background-color: palette(highlight);
+    color: palette(highlighted-text);
+}
+
+QPushButton:pressed {
+    background-color: palette(dark);
+}
+
+QPushButton:disabled {
+    color: palette(disabled-text);
+    border-color: palette(mid);
+}
+
+/* Input Field Styling (QLineEdit, QTextEdit) */
+QLineEdit, QTextEdit, QPlainTextEdit {
+    border: 1px solid palette(mid);
+    border-radius: 4px;
+    padding: 4px;
+}
+
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
+    border: 1px solid palette(highlight);
+}
+
+QLineEdit:read-only, QTextEdit:read-only, QPlainTextEdit:read-only {
+    background-color: palette(window);
+}
+
+/* ComboBox Styling */
+QComboBox {
+    border: 1px solid palette(mid);
+    border-radius: 4px;
+    padding: 1px 18px 1px 3px;
+    min-width: 6em;
+}
+
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 20px;
+    border-left-width: 1px;
+    border-left-color: palette(mid);
+    border-left-style: solid;
+    border-top-right-radius: 3px;
+    border-bottom-right-radius: 3px;
+}
+
+QComboBox QAbstractItemView {
+    border: 1px solid palette(mid);
+    selection-background-color: palette(highlight);
+    selection-color: palette(highlighted-text);
+}
+
+/* TableView Styling */
+QTableView {
+    gridline-color: palette(mid);
+    selection-background-color: palette(highlight);
+    selection-color: palette(highlighted-text);
+    border: 1px solid palette(mid);
+}
+
+QHeaderView::section {
+    padding: 4px;
+    border: 1px solid palette(mid);
+    font-weight: bold;
+}
+
+QHeaderView::section:horizontal {
+    border-top: none;
+}
+
+QHeaderView::section:vertical {
+    border-left: none;
+}
+
+/* ScrollBar Styling */
+QScrollBar:horizontal {
+    border: 1px solid palette(mid);
+    height: 12px;
+    margin: 0px 20px 0 20px;
+}
+
+QScrollBar::handle:horizontal {
+    min-width: 20px;
+    border-radius: 4px;
+    background: palette(button);
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    border: 1px solid palette(mid);
+    width: 18px;
+    subcontrol-position: right;
+    subcontrol-origin: margin;
+}
+
+QScrollBar::add-line:horizontal {
+    right: 0px;
+}
+
+QScrollBar::sub-line:horizontal {
+    left: 0px;
+    subcontrol-position: left;
+}
+
+QScrollBar:vertical {
+    border: 1px solid palette(mid);
+    width: 12px;
+    margin: 20px 0 20px 0;
+}
+
+QScrollBar::handle:vertical {
+    min-height: 20px;
+    border-radius: 4px;
+    background: palette(button);
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    border: 1px solid palette(mid);
+    height: 18px;
+    subcontrol-position: bottom;
+    subcontrol-origin: margin;
+}
+
+QScrollBar::add-line:vertical {
+    bottom: 0px;
+}
+
+QScrollBar::sub-line:vertical {
+    top: 0px;
+    subcontrol-position: top;
+}
+
+/* ProgressBar Styling */
+QProgressBar {
+    border: 1px solid palette(mid);
+    border-radius: 4px;
+    text-align: center;
+}
+
+QProgressBar::chunk {
+    background-color: palette(highlight);
+    border-radius: 3px;
+}
+
+/* Menu Bar, ToolBar, Status Bar */
+QMenuBar {
+    border-bottom: 1px solid palette(mid);
+}
+
+QMenuBar::item:selected {
+    background: palette(highlight);
+    color: palette(highlighted-text);
+}
+
+QMenu {
+    border: 1px solid palette(mid);
+}
+
+QMenu::item:selected {
+    background-color: palette(highlight);
+    color: palette(highlighted-text);
+}
+
+QToolBar {
+    border: none;
+    padding: 2px;
+}
+
+QStatusBar {
+    border-top: 1px solid palette(mid);
+}
+
+/* Specific Styles for MainWindow components */
+QWidget#mainWindowHeader {
+    border-bottom: 1px solid palette(mid);
+}
+
+QLabel#versionLabel {
+    color: palette(highlight);
+}
+
+/* Style for hint labels in dialogs */
+QLabel#hintLabel {
+    font-style: italic;
+    color: palette(disabled-text);
+    padding-left: 15px;
+}
+
+/* Styles for LoadingScreenWidget */
+LoadingScreenWidget QLabel#titleLabel {
+    font-size: 18pt;
+    font-weight: bold;
+    color: palette(highlight);
+    padding-bottom: 5px;
+}
+
+LoadingScreenWidget QLabel#companyLabel {
+    font-size: 10pt;
+    padding-bottom: 2px;
+}
+
+LoadingScreenWidget QLabel#taglineLabel {
+    font-size: 9pt;
+    font-style: italic;
+    color: palette(highlight);
+    padding-bottom: 10px;
+}
+
+LoadingScreenWidget QLabel#versionLabelLoading {
+    font-size: 8pt;
+    color: palette(highlight);
+    padding-bottom: 5px;
+}
+
+LoadingScreenWidget QLabel#developerLabel {
+    font-size: 8pt;
+    color: palette(highlight);
+}
+
+LoadingScreenWidget QLabel#supportLabel {
+    font-size: 8pt;
+    color: palette(highlight);
+    padding-bottom: 10px;
+}
+
+LoadingScreenWidget QProgressBar {
+    min-height: 20px;
+    margin-left: 10px;
+    margin-right: 10px;
+}
+
+LoadingScreenWidget QTextEdit#logArea {
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 9pt;
+    border: 1px solid palette(mid);
+}
+
+LoadingScreenWidget QGroupBox#logGroup {
+    border: 1px solid palette(mid);
+    border-radius: 5px;
+    margin-top: 1ex;
+    font-weight: bold;
+}
+
+LoadingScreenWidget QGroupBox#logGroup::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 3px;
+    border-radius: 3px;
+}
+
+/* Ensure WebEngineView has a white background */
+QWebEngineView {
+    background-color: white;
+}

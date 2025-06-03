@@ -50,55 +50,62 @@ class PolygonTableModel(QAbstractTableModel): # QAbstractTableModel inherits QOb
         row, col = index.row(), index.column()
         if row >= len(self._data): return None
         record = self._data[row]
-        db_id = record[0]
+        db_id_for_checkbox = record[0] # id from DB
 
         if role == Qt.ItemDataRole.CheckStateRole and col == self.CHECKBOX_COL:
-            return self._check_states.get(db_id, Qt.CheckState.Unchecked)
+            return self._check_states.get(db_id_for_checkbox, Qt.CheckState.Unchecked)
 
         if role == Qt.ItemDataRole.DisplayRole:
-            if col == self.CHECKBOX_COL: return None
+            if col == self.CHECKBOX_COL: return None # Checkbox column has no display text
+            
+            # Map visual column index (col) to record tuple index
             value = None
-            if col == self.DB_ID_COL: value = record[0]
-            elif col == self.UUID_COL: value = record[1]
-            elif col == self.RESPONSE_CODE_COL: value = record[2]
-            elif col == self.EVALUATION_STATUS_COL: value = record[8]
-            elif col == self.FARMER_NAME_COL: value = record[3]
-            elif col == self.VILLAGE_COL: value = record[4]
-            elif col == self.DATE_ADDED_COL: value = record[5]
-            elif col == self.KML_FILE_NAME_COL: value = record[10]
-            elif col == self.PLACEMARK_NAME_COL: value = record[11] # NEW INDEX
-            elif col == self.KML_FILE_STATUS_COL: value = record[12] # Shifted from 11
-            elif col == self.EDIT_COUNT_COL: value = record[13] # Shifted from 12
-            elif col == self.LAST_EDIT_DATE_COL: value = record[14] # Shifted from 13
-            elif col == self.EDITOR_DEVICE_ID_COL: value = record[15] # Shifted from 14
-            elif col == self.EDITOR_NICKNAME_COL: value = record[16] # Shifted from 15
-            elif col == self.DEVICE_CODE_COL: value = record[9]
-            elif col == self.EXPORT_COUNT_COL: value = record[6]
-            elif col == self.LAST_EXPORTED_COL: value = record[7]
-            elif col == self.LAST_MODIFIED_COL: value = record[18] # Shifted from 16
-            else: return None
+            if col == self.DB_ID_COL: value = record[0]                 # id
+            elif col == self.UUID_COL: value = record[1]                # uuid
+            elif col == self.RESPONSE_CODE_COL: value = record[2]       # response_code
+            elif col == self.FARMER_NAME_COL: value = record[3]         # farmer_name
+            elif col == self.VILLAGE_COL: value = record[4]            # village_name
+            elif col == self.DATE_ADDED_COL: value = record[5]          # date_added
+            elif col == self.EXPORT_COUNT_COL: value = record[6]        # kml_export_count
+            elif col == self.LAST_EXPORTED_COL: value = record[7]       # last_kml_export_date
+            elif col == self.EVALUATION_STATUS_COL: value = record[8]   # evaluation_status
+            elif col == self.DEVICE_CODE_COL: value = record[9]         # device_code
+            elif col == self.KML_FILE_NAME_COL: value = record[10]      # kml_file_name
+            elif col == self.PLACEMARK_NAME_COL: value = record[11]     # kml_placemark_name
+            elif col == self.KML_FILE_STATUS_COL: value = record[12]    # kml_file_status
+            elif col == self.EDIT_COUNT_COL: value = record[13]         # edit_count
+            elif col == self.LAST_EDIT_DATE_COL: value = record[14]     # last_edit_date
+            elif col == self.EDITOR_DEVICE_ID_COL: value = record[15]   # editor_device_id
+            elif col == self.EDITOR_NICKNAME_COL: value = record[16]   # editor_device_nickname
+            elif col == self.LAST_MODIFIED_COL: value = record[17]      # last_modified
+            else: return None # Should not happen if column constants and _headers are aligned
 
             if col == self.EXPORT_COUNT_COL and value is None: return "0"
-            if col == self.LAST_EXPORTED_COL and value is None: return ""
-            if isinstance(value, (datetime.datetime, datetime.date)):
+            if col == self.LAST_EXPORTED_COL and value is None: return "" # Or "N/A"
+            if isinstance(value, (datetime.datetime, datetime.date)):\
                 return value.strftime("%Y-%m-%d %H:%M:%S") if isinstance(value, datetime.datetime) else value.strftime("%Y-%m-%d")
             return str(value) if value is not None else ""
 
         elif role == Qt.ItemDataRole.BackgroundRole:
-            status_value = record[8]
+            # evaluation_status is at record[8]
+            status_value = record[8] 
             if status_value == "Eligible": return QColor(144, 238, 144, int(255 * 0.7))
             elif status_value == "Not Eligible": return QColor(255, 182, 193, int(255 * 0.7))
-            elif status_value == "Not Evaluated Yet": return QColor(255, 255, 255)
-            else: return QColor(255, 255, 255)
+            elif status_value == "Not Evaluated Yet": return QColor(255, 255, 255) # No specific color or light gray
+            else: return QColor(255, 255, 255) # Default background
 
         elif role == Qt.ItemDataRole.TextAlignmentRole:
             return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter if col != self.CHECKBOX_COL else Qt.AlignmentFlag.AlignCenter
+        
         elif role == Qt.ItemDataRole.ForegroundRole:
-            if col == self.KML_FILE_STATUS_COL and record[11] and \
-               ("error" in str(record[11]).lower() or "deleted" in str(record[11]).lower()):
+            # kml_file_status is at record[12]
+            if col == self.KML_FILE_STATUS_COL and record[12] and \
+               ("error" in str(record[12]).lower() or "deleted" in str(record[12]).lower()): # CORRECTED from record[11]
                 return QColor("red")
+        
         elif role == Qt.ItemDataRole.FontRole and col != self.CHECKBOX_COL:
-             return QFont("Segoe UI", 9)
+             return QFont("Segoe UI", 9) # Example font
+        
         return None
 
     def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
@@ -106,7 +113,7 @@ class PolygonTableModel(QAbstractTableModel): # QAbstractTableModel inherits QOb
         row, col = index.row(), index.column()
         if row >= len(self._data) or not self._data[row]: return False
         
-        db_id_any_type = self._data[row][0] # This is the DB ID
+        db_id_any_type = self._data[row][0] # This is the DB ID (record[0])
         try:
             db_id = int(db_id_any_type)
         except (ValueError, TypeError):
@@ -116,7 +123,6 @@ class PolygonTableModel(QAbstractTableModel): # QAbstractTableModel inherits QOb
             else:
                 print(f"Invalid db_id type: {db_id_any_type}")
             return False
-
 
         if role == Qt.ItemDataRole.CheckStateRole and col == self.CHECKBOX_COL:
             self._check_states[db_id] = Qt.CheckState(value)
@@ -177,13 +183,25 @@ class PolygonTableModel(QAbstractTableModel): # QAbstractTableModel inherits QOb
 class PolygonFilterProxyModel(QSortFilterProxyModel):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.filter_uuid_text = ""
-        self.filter_export_status = "All"
-        self.filter_error_status = "All"
+        # Old filters - will be replaced by self.filter_criteria
+        # self.filter_uuid_text = ""
+        # self.filter_export_status = "All"
+        # self.filter_error_status = "All"
+        self.filter_criteria = {} # New dictionary to hold all filter criteria
 
-    def set_uuid_filter(self, text): self.filter_uuid_text = text.lower(); self.invalidateFilter()
-    def set_export_status_filter(self, status): self.filter_export_status = status; self.invalidateFilter()
-    def set_error_status_filter(self, status): self.filter_error_status = status; self.invalidateFilter()
+    # def set_uuid_filter(self, text): self.filter_uuid_text = text.lower(); self.invalidateFilter()
+    # def set_export_status_filter(self, status): self.filter_export_status = status; self.invalidateFilter()
+    # def set_error_status_filter(self, status): self.filter_error_status = status; self.invalidateFilter()
+
+    def set_filter_criteria(self, criteria: dict):
+        """Sets the filter criteria and invalidates the filter."""
+        self.filter_criteria = criteria
+        self.invalidateFilter()
+
+    def clear_filter_criteria(self):
+        """Clears all filter criteria and invalidates the filter."""
+        self.filter_criteria = {}
+        self.invalidateFilter()
 
     def filterAcceptsRow(self, source_row, source_parent):
         source_model = self.sourceModel()
@@ -192,20 +210,75 @@ class PolygonFilterProxyModel(QSortFilterProxyModel):
             
         if not source_model or source_row >= len(source_model._data): return False
         record = source_model._data[source_row]
-        if not record or len(record) < 17: return False 
+        # DB query columns: id, uuid, response_code, farmer_name, village_name, date_added,
+        # kml_export_count, last_kml_export_date, evaluation_status,
+        # device_code, kml_file_name, kml_placemark_name, kml_file_status,
+        # edit_count, last_edit_date, editor_device_id, editor_device_nickname,
+        # last_modified
+        # Record indices:     0,    1,             2,             3,              4,            5,
+        #                     6,                    7,                   8,
+        #                     9,              10,                 11,               12,
+        #                  13,               14,                 15,                     16,
+        #                  17
 
-        if self.filter_uuid_text:
-            uuid_val_from_record = record[1] 
-            if uuid_val_from_record is None or self.filter_uuid_text not in str(uuid_val_from_record).lower(): return False
+        if not record or len(record) < 18: return False 
 
-        export_count_from_record = record[6] 
-        export_count = export_count_from_record if export_count_from_record is not None else 0
-        if self.filter_export_status == "Exported" and export_count == 0: return False
-        if self.filter_export_status == "Not Exported" and export_count > 0: return False
+        # Check against each criterion in self.filter_criteria
+        fc = self.filter_criteria
 
-        kml_status_val_from_record = record[11] 
-        kml_status_val = str(kml_status_val_from_record).lower() if kml_status_val_from_record is not None else ""
-        if self.filter_error_status == "Error Records" and not ("error" in kml_status_val or "deleted" in kml_status_val): return False
-        elif self.filter_error_status == "Valid Records" and ("error" in kml_status_val or "deleted" in kml_status_val): return False
+        # Response Code (Index 2) - Exact match
+        response_code_filter = fc.get("response_code", "").strip()
+        if response_code_filter:
+            record_response_code = str(record[2]) if record[2] is not None else ""
+            if response_code_filter != record_response_code:
+                return False
+
+        # Farmer Name (Index 3) - Contains, case-insensitive
+        farmer_name_filter = fc.get("farmer_name", "").strip().lower()
+        if farmer_name_filter:
+            record_farmer_name = str(record[3]).lower() if record[3] is not None else ""
+            if farmer_name_filter not in record_farmer_name:
+                return False
+
+        # Village Name (Index 4) - Contains, case-insensitive
+        village_filter = fc.get("village", "").strip().lower()
+        if village_filter:
+            record_village = str(record[4]).lower() if record[4] is not None else ""
+            if village_filter not in record_village:
+                return False
+
+        # Evaluation Status (Index 8) - Exact match, unless "All"
+        eval_status_filter = fc.get("evaluation_status", "All")
+        if eval_status_filter != "All":
+            record_eval_status = str(record[8]) if record[8] is not None else ""
+            if eval_status_filter != record_eval_status:
+                return False
+
+        # KML File Status (Index 12) - Exact match, unless "All"
+        kml_status_filter = fc.get("kml_file_status", "All")
+        if kml_status_filter != "All":
+            record_kml_status = str(record[12]) if record[12] is not None else ""
+            if kml_status_filter != record_kml_status:
+                return False
+
+        # --- Legacy Filters (if they need to be kept alongside or removed) ---
+        # filter_uuid_text: Handled by general search bar if any. Not part of this panel.
+        # filter_export_status: Could be added as a combo box if needed.
+        # filter_error_status: Partially covered by KML File Status.
+        # The old uuid, export, error filters are commented out as the new panel takes precedence.
+        
+        # if self.filter_uuid_text:
+        #     uuid_val_from_record = record[1]
+        #     if uuid_val_from_record is None or self.filter_uuid_text not in str(uuid_val_from_record).lower(): return False
+
+        # export_count_from_record = record[6]
+        # export_count = export_count_from_record if export_count_from_record is not None else 0
+        # if self.filter_export_status == "Exported" and export_count == 0: return False
+        # if self.filter_export_status == "Not Exported" and export_count > 0: return False
+
+        # kml_status_val_from_record = record[12]
+        # kml_status_val = str(kml_status_val_from_record).lower() if kml_status_val_from_record is not None else ""
+        # if self.filter_error_status == "Error Records" and not ("error" in kml_status_val or "deleted" in kml_status_val): return False
+        # elif self.filter_error_status == "Valid Records" and ("error" in kml_status_val or "deleted" in kml_status_val): return False
 
         return True

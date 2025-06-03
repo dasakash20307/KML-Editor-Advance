@@ -2,6 +2,7 @@ import sqlite3
 import uuid
 import os
 import platformdirs
+import json # Added for table view config
 
 class CredentialManager:
     DB_FILE_NAME = "device_config.db"
@@ -16,6 +17,9 @@ class CredentialManager:
         "kml_view_mode": "Outline and Fill",  # Options: "Outline and Fill", "Outline Only", "Fill Only"
         "kml_max_zoom": 18 # Integer, e.g., 18 (typical max for many tile layers)
     }
+    TABLE_VIEW_CONFIG_KEY = "table_view_column_config" # Key for storing table view config
+    APP_THEME_KEY = "app_theme_preference" # Key for storing app theme
+    DEFAULT_APP_THEME = "light" # Default theme
 
     def __init__(self):
         # Use platformdirs to get the user-specific data directory
@@ -200,6 +204,71 @@ class CredentialManager:
             print(f"Error saving KML default view settings: {e}")
             return False
 
+    def save_table_view_config(self, ordered_visible_headers: list[str]):
+        """Saves the ordered list of visible table column headers as a JSON string."""
+        if not isinstance(ordered_visible_headers, list):
+            print("Error: save_table_view_config expects a list.")
+            return False
+        try:
+            config_json = json.dumps(ordered_visible_headers)
+            self._set_setting(self.TABLE_VIEW_CONFIG_KEY, config_json)
+            # print(f"Saved table view config: {config_json}") # For debugging
+            return True
+        except TypeError as e:
+            print(f"Error serializing table view config to JSON: {e}")
+            return False
+        except Exception as e:
+            print(f"Unexpected error saving table view config: {e}")
+            return False
+
+    def load_table_view_config(self) -> list[str] | None:
+        """Loads the ordered list of visible table column headers. Returns None if not set or error."""
+        try:
+            config_json = self._get_setting(self.TABLE_VIEW_CONFIG_KEY)
+            if config_json:
+                # print(f"Loaded table view config JSON: {config_json}") # For debugging
+                config_list = json.loads(config_json)
+                if isinstance(config_list, list) and all(isinstance(item, str) for item in config_list):
+                    return config_list
+                else:
+                    print("Error: Table view config in DB is not a list of strings.")
+                    self._set_setting(self.TABLE_VIEW_CONFIG_KEY, None) # Clear invalid setting
+                    return None
+            return None # No config saved yet
+        except json.JSONDecodeError as e:
+            print(f"Error decoding table view config JSON from DB: {e}")
+            self._set_setting(self.TABLE_VIEW_CONFIG_KEY, None) # Clear invalid setting
+            return None
+        except Exception as e:
+            print(f"Unexpected error loading table view config: {e}")
+            return None
+
+    def save_app_theme(self, theme_name: str):
+        """Saves the application theme preference (e.g., 'dark', 'light')."""
+        if theme_name not in ["dark", "light"]:
+            print(f"Warning: Invalid theme name '{theme_name}' provided to save_app_theme. Not saving.")
+            return False
+        try:
+            self._set_setting(self.APP_THEME_KEY, theme_name)
+            print(f"Saved app theme: {theme_name}")  # For debugging
+            return True
+        except Exception as e:
+            print(f"Error saving app theme: {e}")
+            return False
+
+    def load_app_theme(self) -> str:
+        """Loads the application theme preference. Returns default if not set or error."""
+        try:
+            theme_name = self._get_setting(self.APP_THEME_KEY)
+            if theme_name in ["dark", "light"]:
+                print(f"Loaded app theme: {theme_name}")  # For debugging
+                return theme_name
+            print(f"App theme not set or invalid in DB. Returning default: {self.DEFAULT_APP_THEME}")  # For debugging
+            return self.DEFAULT_APP_THEME  # Return default if not set or invalid
+        except Exception as e:
+            print(f"Error loading app theme: {e}. Returning default.")
+            return self.DEFAULT_APP_THEME
+
 if __name__ == '__main__':
     print("--- Test CredentialManager (with platformdirs) ---")
     expected_app_data_dir = platformdirs.user_data_dir(CredentialManager.APP_NAME, CredentialManager.APP_AUTHOR)
@@ -343,3 +412,45 @@ if __name__ == '__main__':
 
     print(f"\nTo inspect, check the DB file: {db_file_path_for_test}")
     print("--- Test Complete ---")
+
+    # Test Table View Config settings
+    print("\n--- Testing Table View Config Settings ---")
+    initial_tv_config = cm.load_table_view_config()
+    print(f"Initial table view config (should be None if fresh DB): {initial_tv_config}")
+    assert initial_tv_config is None, f"Expected initial table view config to be None, got {initial_tv_config}"
+
+    test_config_v1 = ["ID", "Name", "Status"]
+    print(f"Saving table view config v1: {test_config_v1}")
+    save_v1_ok = cm.save_table_view_config(test_config_v1)
+    assert save_v1_ok, "Failed to save table view config v1"
+    loaded_config_v1 = cm.load_table_view_config()
+    print(f"Loaded table view config v1: {loaded_config_v1}")
+    assert loaded_config_v1 == test_config_v1, f"Load v1 failed. Expected {test_config_v1}, got {loaded_config_v1}"
+
+    test_config_v2 = ["Name", "Status", "ID", "Date Added", "UUID"]
+    print(f"Saving table view config v2: {test_config_v2}")
+    save_v2_ok = cm.save_table_view_config(test_config_v2)
+    assert save_v2_ok, "Failed to save table view config v2"
+    loaded_config_v2 = cm.load_table_view_config()
+    print(f"Loaded table view config v2: {loaded_config_v2}")
+    assert loaded_config_v2 == test_config_v2, f"Load v2 failed. Expected {test_config_v2}, got {loaded_config_v2}"
+
+    print("Saving empty list as table view config...")
+    save_empty_ok = cm.save_table_view_config([])
+    assert save_empty_ok, "Failed to save empty table view config"
+    loaded_empty_config = cm.load_table_view_config()
+    print(f"Loaded empty table view config: {loaded_empty_config}")
+    assert loaded_empty_config == [], f"Load empty failed. Expected [], got {loaded_empty_config}"
+
+    # Test loading invalid data (manual DB edit would be needed to fully test this part of load)
+    # For now, setting an invalid JSON directly to test load_table_view_config error handling
+    print("Testing load of intentionally malformed JSON for table view config...")
+    cm._set_setting(cm.TABLE_VIEW_CONFIG_KEY, "not a json list")
+    malformed_load = cm.load_table_view_config()
+    assert malformed_load is None, f"Expected None for malformed JSON, got {malformed_load}"
+    print(f"Loading malformed JSON resulted in: {malformed_load} (expected None)")
+    # Check if the setting was cleared
+    assert cm._get_setting(cm.TABLE_VIEW_CONFIG_KEY) is None, "Malformed JSON was not cleared from DB"
+    print("Malformed JSON was correctly cleared from DB after failed load attempt.")
+
+    print("\nAll CredentialManager tests (including platformdirs init, KML view, and Table view) completed.")
