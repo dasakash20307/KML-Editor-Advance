@@ -212,12 +212,12 @@ class KMLHandler(QObject):
 
                 # Override name and description in the generated KML
                 # Assuming add_polygon_to_kml_object creates one placemark in Document
-                if kml_doc.Document and kml_doc.Document.features: # Check if features (Placemarks) exist
+                if kml_doc.document and kml_doc.document.features: # Check if features (Placemarks) exist
                     # Find the first placemark to modify its name and description
                     # This assumes add_polygon_to_kml_object adds one main placemark.
                     # If it adds multiple, logic needs to identify the correct one.
                     placemark_to_update = None
-                    for feature in kml_doc.Document.features:
+                    for feature in kml_doc.document.features:
                         if isinstance(feature, simplekml.placemark.Placemark):
                             placemark_to_update = feature
                             break
@@ -231,7 +231,7 @@ class KMLHandler(QObject):
                      self.log_message_callback("KML Document or features list is empty after generation.", "warning")
 
 
-                kml_doc.Document.name = edited_name # Set overall KML document name as well
+                kml_doc.document.name = edited_name # Set overall KML document name as well
 
                 kml_doc.save(full_kml_path)
                 new_kml_content_str = kml_doc.kml() # Get string content for display
