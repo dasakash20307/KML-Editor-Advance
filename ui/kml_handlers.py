@@ -241,9 +241,15 @@ class KMLHandler(QObject):
                                     continue
 
                             if not single_feature:
-                                self.log_message_callback(f"Could not find feature with matching db_id {db_id} in the received FeatureCollection.", "error")
-                                QMessageBox.critical(self.main_window_ref, "Save Error", f"Edited geometry data for ID {db_id} not found in map data.")
-                                return False # Indicate failure
+                                # Attempt to get the first feature if we can't find the specific ID
+                                # This is a fallback for single KML editing when the ID doesn't match
+                                if len(features) == 1 and self.main_window_ref.current_mode != "multi":
+                                    self.log_message_callback(f"Using first and only feature for db_id {db_id} despite ID mismatch.", "warning")
+                                    single_feature = features[0]
+                                else:
+                                    self.log_message_callback(f"Could not find feature with matching db_id {db_id} in the received FeatureCollection.", "error")
+                                    QMessageBox.critical(self.main_window_ref, "Save Error", f"Edited geometry data for ID {db_id} not found in map data.")
+                                    return False # Indicate failure
 
                             geojson_geom = single_feature.get("geometry")
                             if not geojson_geom:

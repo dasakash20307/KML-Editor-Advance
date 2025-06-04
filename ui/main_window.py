@@ -91,7 +91,7 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
 
         # Set global application font
-        if app: # Ensure app instance exists
+        if app and isinstance(app, QApplication): # Ensure app instance exists and is QApplication
             font = QFont("Segoe UI", 12)
             app.setFont(font)
 
@@ -115,7 +115,7 @@ class MainWindow(QMainWindow):
             # Apply global QSS stylesheet
             try:
                 qss_path = resource_path("assets/style.qss")
-                if os.path.exists(qss_path):
+                if os.path.exists(qss_path) and isinstance(app, QApplication):
                     with open(qss_path, "r") as f:
                         stylesheet = f.read()
                     app.setStyleSheet(stylesheet)
@@ -266,7 +266,7 @@ class MainWindow(QMainWindow):
         data_menu.addAction(self.import_csv_action)
         self.fetch_api_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ArrowDown),"&Fetch from API...",self)
         data_menu.addAction(self.fetch_api_action)
-        self.manage_api_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_SettingsIcon),"Manage A&PI Sources...",self)
+        self.manage_api_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton),"Manage A&PI Sources...",self)
         self.manage_api_action.triggered.connect(self.handle_manage_api_sources);data_menu.addAction(self.manage_api_action);data_menu.addSeparator()
         self.delete_checked_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon),"Delete Checked Rows...",self)
         data_menu.addAction(self.delete_checked_action)
@@ -286,7 +286,7 @@ class MainWindow(QMainWindow):
         self.toggle_ge_view_action.setCheckable(True);self.toggle_ge_view_action.toggled.connect(self._handle_ge_view_toggle)
         self.view_menu.addAction(self.toggle_ge_view_action)
         self.view_menu.addSeparator()
-        self.default_kml_view_settings_action = QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DesktopSettingsIcon),"Default KML View Settings...", self)
+        self.default_kml_view_settings_action = QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton),"Default KML View Settings...", self)
         self.default_kml_view_settings_action.triggered.connect(self.open_default_kml_view_settings_dialog)
         self.view_menu.addAction(self.default_kml_view_settings_action)
 
@@ -299,10 +299,7 @@ class MainWindow(QMainWindow):
         self.view_menu.addAction(self.toggle_theme_action)
         self.view_menu.addSeparator() # Separator before toolbar toggles
 
-        # Add toggle action for Multi-KML Toolbar
-        toggle_multi_kml_toolbar_action = self.multi_kml_toolbar.toggleViewAction()
-        toggle_multi_kml_toolbar_action.setText("Multi-KML Toolbar")
-        self.view_menu.addAction(toggle_multi_kml_toolbar_action)
+        # Multi-KML Toolbar toggle will be added after toolbar creation
 
         help_menu=menubar.addMenu("&Help")
         self.about_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation),"&About",self)
@@ -314,7 +311,7 @@ class MainWindow(QMainWindow):
         self.toolbar.addAction(self.import_csv_action);self.toolbar.addSeparator()
 
         self.toggle_ge_view_button=QPushButton("GE View: OFF")
-        self.toggle_ge_view_button.setIcon(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_GlobeIcon)) # SP_GlobeIcon or SP_CommandLink
+        self.toggle_ge_view_button.setIcon(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_CommandLink)) # Using SP_CommandLink as alternative
         self.toggle_ge_view_button.setCheckable(True);self.toggle_ge_view_button.toggled.connect(self._handle_ge_view_toggle)
         self.toolbar.addWidget(self.toggle_ge_view_button);self.toolbar.addSeparator()
 
@@ -323,7 +320,7 @@ class MainWindow(QMainWindow):
         self.fetch_api_toolbar_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ArrowDown),"&Fetch from Selected API",self)
         self.toolbar.addAction(self.fetch_api_toolbar_action)
 
-        manage_api_toolbar_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_SettingsIcon),"Manage API Sources",self)
+        manage_api_toolbar_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton),"Manage API Sources",self)
         manage_api_toolbar_action.triggered.connect(self.handle_manage_api_sources);self.toolbar.addAction(manage_api_toolbar_action)
         self.toolbar.addSeparator();self.toolbar.addAction(self.generate_kml_action);self.toolbar.addAction(self.delete_checked_action)
 
@@ -368,6 +365,14 @@ class MainWindow(QMainWindow):
 
         # Add the toolbar to the main window, initially at the top
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.multi_kml_toolbar)
+        
+        # Add toggle action for Multi-KML Toolbar to the view menu
+        toggle_multi_kml_toolbar_action = self.multi_kml_toolbar.toggleViewAction()
+        toggle_multi_kml_toolbar_action.setText("Multi-KML Toolbar")
+        self.view_menu.addAction(toggle_multi_kml_toolbar_action)
+        
+        # Current mode tracker for KML handler (needed for saving logic)
+        self.current_mode = "single"  # Initialize as single mode
 
 
     def _connect_signals(self):
@@ -439,20 +444,14 @@ class MainWindow(QMainWindow):
     def _setup_main_content_area_layout(self): # Split from _setup_main_content_area
         # This part layouts the widgets after they (and handlers) are created
 
-        # Create a placeholder for KML Editor Controls panel
-        self.kml_editor_controls_placeholder = QWidget()
-        self.kml_editor_controls_placeholder.setMinimumHeight(50) # Ensure it's visible and shrinkable
-        # You could add a QLabel to it for identification during development:
-        # placeholder_layout = QVBoxLayout(self.kml_editor_controls_placeholder)
-        # placeholder_layout.addWidget(QLabel("KML Editor Controls Placeholder - Resizable"))
-        # self.kml_editor_controls_placeholder.setStyleSheet("background-color: lightblue;")
+        # Create a placeholder for KML Editor Controls panel - NOT USED ANYMORE
+        # self.kml_editor_controls_placeholder = QWidget()
+        # self.kml_editor_controls_placeholder.setMinimumHeight(50)
 
-
-        # Vertical splitter for map_stack (top) and KML editor controls placeholder (bottom)
+        # Vertical splitter for map_stack only - controls are now inside KMLEditorViewWidget
         self.left_vertical_splitter = QSplitter(Qt.Orientation.Vertical)
         self.left_vertical_splitter.addWidget(self.map_stack)
-        self.left_vertical_splitter.addWidget(self.kml_editor_controls_placeholder)
-        self.left_vertical_splitter.setSizes([400, 100]) # Initial sizes: map stack, controls placeholder
+        # No need to add controls placeholder separately as they're integrated into the KMLEditorViewWidget
 
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.addWidget(self.left_vertical_splitter) # Add new vertical splitter to the left
@@ -917,7 +916,8 @@ class MainWindow(QMainWindow):
             if os.path.exists(qss_path):
                 with open(qss_path, "r") as f:
                     stylesheet = f.read()
-                app.setStyleSheet(stylesheet)
+                if isinstance(app, QApplication):
+                    app.setStyleSheet(stylesheet)
                 self.log_message(f"Global QSS re-applied after theme toggle.", "info")
             else:
                 self.log_message(f"Global stylesheet 'assets/style.qss' not found at '{qss_path}' during theme toggle.", "warning")
@@ -939,6 +939,7 @@ class MainWindow(QMainWindow):
         if self.multi_kml_view_button.isChecked():
             # Enable multi KML mode
             self.multi_kml_handler.enable_multi_kml_mode()
+            self.current_mode = "multi"  # Update current mode
             # Load selected KMLs if any are checked
             # This might need a dedicated button like "Load Selected for Multi-View"
             # For now, let's assume it loads automatically or is triggered by another action.
@@ -947,10 +948,12 @@ class MainWindow(QMainWindow):
                  self.multi_kml_view_button.setChecked(False)
                  # And revert to single KML mode UI by calling enable_single_kml_mode
                  self.multi_kml_handler.enable_single_kml_mode()
+                 self.current_mode = "single"  # Reset mode
                  return # Exit early
         else:
             # Switch back to single KML mode
             self.multi_kml_handler.enable_single_kml_mode()
+            self.current_mode = "single"  # Update current mode
         
         self.log_message(f"Multi-KML mode {'enabled' if self.multi_kml_view_button.isChecked() else 'disabled'}.", "info")
 
