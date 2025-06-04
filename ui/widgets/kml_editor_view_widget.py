@@ -263,6 +263,29 @@ class KMLEditorViewWidget(QWidget):
         else:
             self.log_message_callback("Web view page failed to load.", "error")
 
+    def clear_map(self):
+        """Clear the KML content from the map view"""
+        self.original_kml_content = None
+        self.current_placemark_name = None
+        self.current_placemark_description = None
+        
+        # Clear UI elements
+        self.name_input.clear()
+        self.name_input.setReadOnly(True)
+        self.description_input.clear()
+        self.description_input.setReadOnly(True)
+        
+        # Reset buttons
+        self.save_button.setEnabled(False)
+        self.cancel_button.setEnabled(False)
+        self.edit_button.setEnabled(False)
+        
+        # Clear map via JavaScript
+        self.web_view.page().runJavaScript('clearMap();')
+        
+        # Reset edit state
+        self.is_editing = False
+
 # (Rest of the file, including the if __name__ == '__main__': block, remains the same)
 if __name__ == '__main__':
     import sys

@@ -234,62 +234,75 @@ function disableMapEditing() {
 
 function getEditedGeometry() {
     console.log("JS: getEditedGeometry called.");
-    if (!vectorSource || vectorSource.getFeatures().length === 0) {
-        console.warn("No features available to get geometry from.");
+    if (!vectorSource) {
+        console.warn("JS Warning: getEditedGeometry - vectorSource is not available.");
+        if (webChannel && webChannel.jsLogMessage) {
+            webChannel.jsLogMessage("JS Warning: getEditedGeometry - vectorSource not available.");
+        }
+        return JSON.stringify({ type: 'FeatureCollection', features: [] });
+    }
+    
+    const features = vectorSource.getFeatures();
+    if (features.length === 0) {
+        console.warn("JS Warning: getEditedGeometry - no features available in vectorSource.");
         if (webChannel && webChannel.jsLogMessage) {
             webChannel.jsLogMessage("JS Warning: getEditedGeometry - no features available.");
         }
-        return JSON.stringify(null);
+        return JSON.stringify({ type: 'FeatureCollection', features: [] });
     }
 
-    const feature = vectorSource.getFeatures()[0];
-    if (!feature) {
-        console.warn("First feature is undefined.");
-         if (webChannel && webChannel.jsLogMessage) {
-            webChannel.jsLogMessage("JS Warning: getEditedGeometry - first feature undefined.");
-        }
-        return JSON.stringify(null);
-    }
+    const geojsonFormat = new ol.format.GeoJSON();
+    let featuresArray = [];
 
-    try {
-        const geometry = feature.getGeometry();
-        if (!geometry) {
-            console.warn("Geometry is undefined for the feature.");
-            if (webChannel && webChannel.jsLogMessage) {
-                webChannel.jsLogMessage("JS Warning: getEditedGeometry - geometry undefined for feature.");
+    features.forEach(function(feature) {
+        try {
+            const geometry = feature.getGeometry();
+            if (!geometry) {
+                console.warn("JS Warning: Feature found with no geometry, skipping.", feature.getId());
+                 if (webChannel && webChannel.jsLogMessage) {
+                    webChannel.jsLogMessage(`JS Warning: Feature ID ${feature.getId()} has no geometry.`);
+                }
+                return; // Skip this feature
             }
-            return JSON.stringify(null);
-        }
 
-        const transformedGeom = geometry.clone().transform(map.getView().getProjection(), 'EPSG:4326');
-        const coordinates = transformedGeom.getCoordinates();
-        let geojsonType = transformedGeom.getType();
-        let finalCoordinates;
-
-        if (geojsonType === 'Polygon' && Array.isArray(coordinates) && Array.isArray(coordinates[0])) {
-            finalCoordinates = coordinates[0].map(coord => [coord[0], coord[1], coord[2] || 0.0]);
-        } else if (geojsonType === 'LineString' && Array.isArray(coordinates)) {
-             finalCoordinates = coordinates.map(coord => [coord[0], coord[1], coord[2] || 0.0]);
-        } else if (geojsonType === 'Point' && Array.isArray(coordinates)) {
-            finalCoordinates = [[coordinates[0], coordinates[1], coordinates[2] || 0.0]];
-        } else {
-            console.warn("Unhandled geometry type for coordinate extraction:", geojsonType);
+            // Clone and transform geometry to EPSG:4326 before writing to GeoJSON
+            const transformedGeometry = geometry.clone().transform(
+                map.getView().getProjection(), // From map projection (e.g., EPSG:3857)
+                'EPSG:4326'                   // To Lon/Lat
+            );
+            
+            const geojsonFeatureObject = {
+                type: 'Feature',
+                geometry: geojsonFormat.writeGeometryObject(transformedGeometry), // Geometry is now in EPSG:4326
+                properties: {
+                    // ol.format.KML typically reads <Placemark id="..."> into feature.id_
+                    // and <name>, <description> into feature.get('name'), feature.get('description')
+                    db_id: feature.getId() || feature.get('db_id') || null, 
+                    name: feature.get('name') || null, 
+                    description: feature.get('description') || null
+                }
+            };
+            featuresArray.push(geojsonFeatureObject);
+        } catch (e) {
+            let errorMsg = "JS Error: Error processing a feature for getEditedGeometry";
+            let featureIdForError = feature ? feature.getId() || feature.get('db_id') : 'unknown';
+            console.error(`${errorMsg} (ID: ${featureIdForError}):`, e.message, e.stack, feature);
             if (webChannel && webChannel.jsLogMessage) {
-                webChannel.jsLogMessage("JS Warning: getEditedGeometry - unhandled geometry type: " + geojsonType);
+                 webChannel.jsLogMessage(`${errorMsg} (ID: ${featureIdForError}) - ${e.message}`);
             }
-            return JSON.stringify(null);
         }
+    });
 
-        console.log("Extracted and transformed coordinates:", finalCoordinates);
-        return JSON.stringify(finalCoordinates);
-
-    } catch (e) {
-        console.error("Error getting/transforming edited geometry:", e);
-        if (webChannel && webChannel.jsLogMessage) {
-            webChannel.jsLogMessage("JS Error: getEditedGeometry - " + e.message);
-        }
-        return JSON.stringify(null);
+    const featureCollection = {
+        type: 'FeatureCollection',
+        features: featuresArray
+    };
+    
+    if (webChannel && webChannel.jsLogMessage) {
+        webChannel.jsLogMessage(`JS Info: getEditedGeometry returning FeatureCollection with ${featuresArray.length} features.`);
     }
+    // console.log("JS: Returning FeatureCollection:", JSON.stringify(featureCollection)); // For debugging, can be verbose
+    return JSON.stringify(featureCollection);
 }
 
 function clearMap() {

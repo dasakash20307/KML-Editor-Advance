@@ -40,6 +40,7 @@ class PolygonTableModel(QAbstractTableModel): # QAbstractTableModel inherits QOb
         self._data = []
         self._check_states = {}
         self._headers = ["", "DB ID", "UUID", "Response Code", "Evaluation Status", "Farmer Name", "Village", "Date Added", "KML File Name", "Placemark Name", "KML File Status", "Times Edited", "Last Edit Date", "Editor Device ID", "Editor Nickname", "Device Code (Creator)", "Export Count", "Last Exported", "Last Modified"]
+        self._checkboxes_visible = True  # Checkboxes are now visible by default
         if data_list: self.update_data(data_list)
 
     def rowCount(self, parent=QModelIndex()): return len(self._data)
@@ -52,6 +53,10 @@ class PolygonTableModel(QAbstractTableModel): # QAbstractTableModel inherits QOb
         record = self._data[row]
         db_id_for_checkbox = record[0] # id from DB
 
+        # Only show checkboxes if they're visible (multi-KML mode)
+        if col == self.CHECKBOX_COL and not self._checkboxes_visible:
+            return None
+            
         if role == Qt.ItemDataRole.CheckStateRole and col == self.CHECKBOX_COL:
             return self._check_states.get(db_id_for_checkbox, Qt.CheckState.Unchecked)
 
@@ -148,7 +153,8 @@ class PolygonTableModel(QAbstractTableModel): # QAbstractTableModel inherits QOb
 
     def flags(self, index):
         flags = super().flags(index)
-        if index.column() == self.CHECKBOX_COL: flags |= Qt.ItemFlag.ItemIsUserCheckable
+        if index.column() == self.CHECKBOX_COL:
+            flags |= Qt.ItemFlag.ItemIsUserCheckable
         elif index.column() == self.EVALUATION_STATUS_COL:
             flags |= Qt.ItemFlag.ItemIsEditable | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
         else: flags |= Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
@@ -178,6 +184,42 @@ class PolygonTableModel(QAbstractTableModel): # QAbstractTableModel inherits QOb
                  # Ensure db_id is int for keys in _check_states
                 self._check_states[int(row_data[0])] = state
         self.endResetModel()
+
+    def get_checked_rows(self):
+        """
+        Get all rows with checked status as a list of dictionaries
+        with field names matching DB columns
+        """
+        result = []
+        for row_idx, row_data in enumerate(self._data):
+            if not row_data or len(row_data) < 1:
+                continue
+                
+            db_id = row_data[0]
+            if db_id in self._check_states and self._check_states[db_id] == Qt.CheckState.Checked:
+                # Create a dictionary with DB field names and values
+                row_dict = {
+                    'id': row_data[0],
+                    'uuid': row_data[1],
+                    'response_code': row_data[2],
+                    'farmer_name': row_data[3],
+                    'village_name': row_data[4],
+                    'date_added': row_data[5],
+                    'kml_export_count': row_data[6],
+                    'last_kml_export_date': row_data[7],
+                    'evaluation_status': row_data[8],
+                    'device_code': row_data[9],
+                    'kml_file_name': row_data[10],
+                    'kml_placemark_name': row_data[11],
+                    'kml_file_status': row_data[12],
+                    'edit_count': row_data[13],
+                    'last_edit_date': row_data[14],
+                    'editor_device_id': row_data[15],
+                    'editor_device_nickname': row_data[16],
+                    'last_modified': row_data[17]
+                }
+                result.append(row_dict)
+        return result
 
 # --- Filter Proxy Model ---
 class PolygonFilterProxyModel(QSortFilterProxyModel):

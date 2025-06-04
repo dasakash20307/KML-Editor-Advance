@@ -41,6 +41,7 @@ from .data_handlers import DataHandler
 from .kml_handlers import KMLHandler
 from .dialogs.table_view_editor_dialog import TableViewEditorDialog # Added
 from .dialogs.sharing_info_dialog import SharingInfoDialog # Added
+from .multi_kml_view_edit import MultiKmlViewEdit # Added for Multi-KML feature
 
 
 # Constants
@@ -172,6 +173,13 @@ class MainWindow(QMainWindow):
             source_model=self.source_model,
             filter_proxy_model=self.filter_proxy_model
         )
+        
+        # Initialize the Multi-KML feature handler
+        self.multi_kml_handler = MultiKmlViewEdit(
+            main_window_ref=self,
+            credential_manager=self.credential_manager,
+            kml_handler=self.kml_handler
+        )
 
         self.resize(1200, 800); self._center_window()
         self._create_header()
@@ -296,6 +304,14 @@ class MainWindow(QMainWindow):
 
         # Connection for Sharing Info Dialog
         self.sharing_info_action.triggered.connect(self._open_sharing_info_dialog) # Added
+        
+        # Multi-KML connections
+        self.multi_kml_view_button.clicked.connect(self._toggle_multi_kml_mode)
+        self.multi_kml_editor_button.clicked.connect(self.multi_kml_handler.enter_multi_edit_mode)
+        self.single_kml_editor_button.clicked.connect(lambda: self.multi_kml_handler.enable_single_kml_mode())
+        self.multi_kml_save_button.clicked.connect(self.multi_kml_handler.save_multi_kml_edits)
+        self.multi_kml_cancel_button.clicked.connect(self.multi_kml_handler.cancel_multi_edit)
+        self.multi_kml_handler.multi_kml_saved_signal.connect(self.on_multi_kml_saved)
 
     def _create_status_bar(self):
         self._main_status_bar=QStatusBar()
@@ -326,6 +342,14 @@ class MainWindow(QMainWindow):
 
         right_pane_widget = QWidget(); right_pane_layout = QVBoxLayout(right_pane_widget); right_pane_layout.setContentsMargins(10,0,10,10)
 
+        # Remove KML controls strip for Multi-KML buttons from here
+        # self.kml_controls_strip = QWidget()
+        # kml_controls_layout = QHBoxLayout(self.kml_controls_strip)
+        # kml_controls_layout.setContentsMargins(0,0,0,0)
+        # ... (Multi-KML buttons were here) ...
+        # kml_controls_layout.addStretch()
+        # right_pane_layout.addWidget(self.kml_controls_strip) # No longer adding this strip here
+        
         self.table_editors_strip = QWidget()
         strip_layout = QHBoxLayout(self.table_editors_strip)
         strip_layout.setContentsMargins(0,0,0,0); strip_layout.addStretch()
@@ -339,9 +363,14 @@ class MainWindow(QMainWindow):
         filter_panel_widget = self._setup_filter_panel()
         right_pane_layout.addWidget(filter_panel_widget)
 
+        # Create and add the Multi-KML Operations GroupBox
+        multi_kml_operations_group = self._setup_multi_kml_operations_panel()
+        right_pane_layout.addWidget(multi_kml_operations_group) # Add this before the splitter
+
         self.right_splitter = QSplitter(Qt.Orientation.Vertical)
         table_container = QWidget(); table_layout = QVBoxLayout(table_container); table_layout.setContentsMargins(0,0,0,0)
         checkbox_header_layout = QHBoxLayout(); self.select_all_checkbox = QCheckBox("Select/Deselect All"); self.select_all_checkbox.stateChanged.connect(self.toggle_all_checkboxes); checkbox_header_layout.addWidget(self.select_all_checkbox); checkbox_header_layout.addStretch(); table_layout.addLayout(checkbox_header_layout)
+        self.select_all_checkbox.setVisible(True) # Ensure it's always visible
 
         # self.table_view already created and model set in _setup_main_content_area_models_views
         self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows); self.table_view.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked|QAbstractItemView.EditTrigger.SelectedClicked); self.table_view.horizontalHeader().setStretchLastSection(True); self.table_view.setAlternatingRowColors(False); self.table_view.setSortingEnabled(True); self.table_view.sortByColumn(PolygonTableModel.DATE_ADDED_COL,Qt.SortOrder.DescendingOrder)
@@ -360,6 +389,10 @@ class MainWindow(QMainWindow):
 
         # Conditionally enable/disable actions based on app mode
         self._update_ui_for_app_mode()
+
+        # Initial state for Multi-KML buttons (call after multi_kml_handler is initialized)
+        if hasattr(self, 'multi_kml_handler'):
+            self.multi_kml_handler.enable_single_kml_mode() # Start in single KML mode
 
     def toggle_all_checkboxes(self,state_int): self.source_model.set_all_checkboxes(Qt.CheckState(state_int))
 
@@ -779,3 +812,64 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Theme Changed", 
                               f"Theme changed to {new_theme}. Most changes should apply immediately. "
                               "Some elements might require an application restart to fully reflect the new theme.")
+
+    def _toggle_multi_kml_mode(self):
+        """Toggle between single and multi KML editing modes"""
+        if self.multi_kml_view_button.isChecked():
+            # Enable multi KML mode
+            self.multi_kml_handler.enable_multi_kml_mode()
+            # Load selected KMLs if any are checked
+            # This might need a dedicated button like "Load Selected for Multi-View"
+            # For now, let's assume it loads automatically or is triggered by another action.
+            if not self.multi_kml_handler.load_selected_kmls():
+                 # If loading failed (e.g. no selection), uncheck the button
+                 self.multi_kml_view_button.setChecked(False)
+                 # And revert to single KML mode UI by calling enable_single_kml_mode
+                 self.multi_kml_handler.enable_single_kml_mode()
+                 return # Exit early
+        else:
+            # Switch back to single KML mode
+            self.multi_kml_handler.enable_single_kml_mode()
+        
+        self.log_message(f"Multi-KML mode {'enabled' if self.multi_kml_view_button.isChecked() else 'disabled'}.", "info")
+
+    def on_multi_kml_saved(self):
+        self.log_message("Multi-KML edits saved successfully.", "info")
+        # After saving, typically we might want to refresh data and revert to a non-editing state.
+        # This could involve going back to single KML mode or just refreshing the multi-KML view.
+        # For now, just log. The MultiKmlViewEdit class handles UI state post-save.
+        self.load_data_into_table() # Refresh table data
+
+    def _setup_multi_kml_operations_panel(self):
+        """Creates the GroupBox for Multi-KML operations."""
+        multi_kml_group = QGroupBox("Multi-KML Operations")
+        multi_kml_layout = QHBoxLayout(multi_kml_group)
+        multi_kml_layout.setContentsMargins(5, 10, 5, 5)
+        multi_kml_layout.setSpacing(10)
+
+        # Multi-KML View button (blue)
+        self.multi_kml_view_button = QPushButton("Multi-KML View")
+        self.multi_kml_view_button.setCheckable(True)
+        self.multi_kml_view_button.setStyleSheet("background-color: #0078D7; color: white; padding: 4px 8px;")
+        multi_kml_layout.addWidget(self.multi_kml_view_button)
+        
+        # Multi-KML Editor button
+        self.multi_kml_editor_button = QPushButton("Multi-KML Editor")
+        multi_kml_layout.addWidget(self.multi_kml_editor_button)
+        
+        # Single-KML Editor button (to exit multi-KML mode)
+        self.single_kml_editor_button = QPushButton("Exit Multi-KML Mode") # Renamed for clarity
+        multi_kml_layout.addWidget(self.single_kml_editor_button)
+        
+        # Multi-KML Save button
+        self.multi_kml_save_button = QPushButton("Save All Edits") # Renamed for clarity
+        multi_kml_layout.addWidget(self.multi_kml_save_button)
+        
+        # Multi-KML Cancel button
+        self.multi_kml_cancel_button = QPushButton("Cancel All Edits") # Renamed for clarity
+        multi_kml_layout.addWidget(self.multi_kml_cancel_button)
+        
+        multi_kml_layout.addStretch()
+        
+        # Set initial visibility and enabled state in enable_single_kml_mode / enable_multi_kml_mode
+        return multi_kml_group

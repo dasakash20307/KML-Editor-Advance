@@ -188,87 +188,122 @@ class KMLHandler(QObject):
     def save_edited_kml(self, db_id: int, original_kml_filename: str,
                         edited_geometry_json: str, edited_name: str, edited_description: str) -> bool:
         self.log_message_callback(f"Attempting to save edited KML for DB ID: {db_id}, Filename: {original_kml_filename}", "info")
-
-        try:
-            edited_coordinates_lon_lat_alt = json.loads(edited_geometry_json)
-            if not isinstance(edited_coordinates_lon_lat_alt, list):
-                self.log_message_callback("Parsed edited_coordinates_lon_lat_alt is not a list.", "error")
-                QMessageBox.critical(self.main_window_ref, "Save Error", "Edited geometry data is invalid (not a list).")
-                return False
-        except json.JSONDecodeError as e:
-            self.log_message_callback(f"JSONDecodeError for edited_geometry_json: {e}. Data: {edited_geometry_json}", "error")
-            QMessageBox.critical(self.main_window_ref, "Save Error", f"Could not parse edited geometry data: {e}")
-            return False
-
+        
         original_db_record = self.db_manager.get_polygon_data_by_id(db_id)
         if not original_db_record:
-            self.log_message_callback(f"Could not find original DB record for ID: {db_id}", "error")
+            self.log_message_callback(f"Could not find original DB record for ID: {db_id} before starting save op.", "error")
             QMessageBox.critical(self.main_window_ref, "Save Error", f"Original database record (ID: {db_id}) not found.")
             return False
 
-        # Prepare data for KML generation - mostly for description, UUID for placemark if name not set by simplekml
-        data_for_kml_regeneration = original_db_record.copy() # Start with a copy
-        # Ensure UUID is present for add_polygon_to_kml_object if it relies on it for default name
-        if 'uuid' not in data_for_kml_regeneration or not data_for_kml_regeneration['uuid']:
-             data_for_kml_regeneration['uuid'] = original_db_record.get('uuid', f"polygon_{db_id}")
-
+        new_kml_content_str = None
 
         def _perform_save_operations():
-            kml_folder_path = self.credential_manager.get_kml_folder_path()
-            if not kml_folder_path:
-                self.log_message_callback("KML folder path not configured. Cannot save KML.", "error")
-                QMessageBox.critical(self.main_window_ref, "Configuration Error", "KML output folder is not configured.")
+            nonlocal new_kml_content_str
+            if not self.lock_handler.kml_file_lock_manager.acquire_kml_lock(original_kml_filename):
                 return False
-
-            full_kml_path = os.path.join(kml_folder_path, original_kml_filename)
-
-            # --- KML File Lock ---
-            lock_acquired, status_msg, lock_info = self.lock_handler.kml_file_lock_manager.acquire_kml_lock(original_kml_filename, full_kml_path)
-            if not lock_acquired:
-                self.log_message_callback(f"Failed to acquire KML lock for {original_kml_filename}: {status_msg}", "error")
-                QMessageBox.warning(self.main_window_ref, "File Lock Error", f"Could not lock KML file '{original_kml_filename}':\n{status_msg}")
-                return False
-
-            new_kml_content_str = None
+            
+            self.log_message_callback(f"KML lock acquired for {original_kml_filename}", "info")
             try:
-                # Generate new KML content
+                kml_root_path = self.credential_manager.get_kml_folder_path()
+                if not kml_root_path:
+                    QMessageBox.critical(self.main_window_ref, "Error", "KML root path not configured.")
+                    return False
+                full_kml_path = os.path.join(kml_root_path, original_kml_filename)
+
+                parsed_simplekml_coords = []
+                geom_type_from_geojson = None
+
+                if edited_geometry_json:
+                    try:
+                        geojson_geom = json.loads(edited_geometry_json)
+                        geom_type_from_geojson = geojson_geom.get("type")
+                        raw_coordinates = geojson_geom.get("coordinates")
+
+                        if geom_type_from_geojson == "Polygon":
+                            if not (raw_coordinates and isinstance(raw_coordinates, list) and len(raw_coordinates) > 0):
+                                raise ValueError("Polygon coordinates missing or invalid structure.")
+                            outer_ring = raw_coordinates[0]
+                            if not isinstance(outer_ring, list):
+                                raise ValueError("Polygon outer ring is not a list.")
+                            for point in outer_ring:
+                                if isinstance(point, list) and len(point) >= 2:
+                                    alt = point[2] if len(point) > 2 and point[2] is not None else 0.0
+                                    parsed_simplekml_coords.append((point[0], point[1], alt))
+                                else:
+                                    raise ValueError("Invalid point structure in Polygon outer ring.")
+                        elif geom_type_from_geojson in ["LineString", "Point"]:
+                            self.log_message_callback(f"Received geometry type '{geom_type_from_geojson}' from map edit, but current save logic via add_polygon_to_kml_object is primarily for Polygons. Ensure this is intended if it's not a polygon.", "warning")
+                            if geom_type_from_geojson == "LineString":
+                                if not (raw_coordinates and isinstance(raw_coordinates, list)):
+                                    raise ValueError("LineString coordinates missing or invalid structure.")
+                                for point in raw_coordinates:
+                                    if isinstance(point, list) and len(point) >= 2:
+                                        alt = point[2] if len(point) > 2 and point[2] is not None else 0.0
+                                        parsed_simplekml_coords.append((point[0], point[1], alt))
+                                    else:
+                                        raise ValueError("Invalid point structure in LineString.")
+                            elif geom_type_from_geojson == "Point":
+                                if not (raw_coordinates and isinstance(raw_coordinates, list) and len(raw_coordinates) >=2):
+                                    raise ValueError("Point coordinates missing or invalid.")
+                                alt = raw_coordinates[2] if len(raw_coordinates) > 2 and raw_coordinates[2] is not None else 0.0
+                                parsed_simplekml_coords.append((raw_coordinates[0], raw_coordinates[1], alt))
+                        else:
+                            raise ValueError(f"Unsupported or unexpected GeoJSON geometry type for polygon saving: {geom_type_from_geojson}")
+
+                    except json.JSONDecodeError as e_json:
+                        self.log_message_callback(f"JSONDecodeError parsing edited_geometry_json: {e_json}", "error")
+                        QMessageBox.critical(self.main_window_ref, "Save Error", f"Invalid geometry data format: {e_json}")
+                        return False
+                    except ValueError as e_val:
+                        self.log_message_callback(f"ValueError processing GeoJSON geometry: {e_val}", "error")
+                        QMessageBox.critical(self.main_window_ref, "Save Error", f"Invalid geometry data: {e_val}")
+                        return False
+                
+                if not parsed_simplekml_coords:
+                    self.log_message_callback("Coordinates list is empty after processing GeoJSON.", "error")
+                    QMessageBox.critical(self.main_window_ref, "Save Error", "No valid coordinates found in the edited geometry.")
+                    return False
+
+                final_coordinates_for_kml_object = parsed_simplekml_coords
+
                 kml_doc = simplekml.Kml()
+                
+                metadata_for_kml_gen = {
+                    'uuid': original_db_record.get('uuid'),
+                    'response_code': original_db_record.get('response_code'),
+                    'farmer_name': edited_name,
+                    'village_name': original_db_record.get('village_name')
+                }
+                for key, value in original_db_record.items():
+                    if key not in metadata_for_kml_gen and key not in ['coordinates', 'geom_type']:
+                        metadata_for_kml_gen[key] = value
 
-                # add_polygon_to_kml_object uses data_for_kml_regeneration for description fields and default placemark name (uuid)
-                # It now uses edited_coordinates_list for geometry
-                if not add_polygon_to_kml_object(kml_doc, data_for_kml_regeneration, edited_coordinates_list=edited_coordinates_lon_lat_alt):
-                    self.log_message_callback("Failed to add polygon object during KML regeneration.", "error")
+                if not add_polygon_to_kml_object(kml_doc, 
+                                                 metadata_for_kml_gen, 
+                                                 edited_coordinates_list=final_coordinates_for_kml_object):
+                    self.log_message_callback("Failed to generate KML polygon object with new coordinates.", "error")
                     QMessageBox.critical(self.main_window_ref, "Save Error", "Failed to generate KML polygon data.")
-                    return False # Release lock will happen in finally
+                    return False
 
-                # Override name and description in the generated KML
-                # Assuming add_polygon_to_kml_object creates one placemark in Document
-                if kml_doc.document and kml_doc.document.features: # Check if features (Placemarks) exist
-                    # Find the first placemark to modify its name and description
-                    # This assumes add_polygon_to_kml_object adds one main placemark.
-                    # If it adds multiple, logic needs to identify the correct one.
+                if kml_doc.document and kml_doc.document.features:
                     placemark_to_update = None
-                    for feature in kml_doc.document.features:
-                        if isinstance(feature, simplekml.Polygon):
-                            placemark_to_update = feature
-                            break
+                    if kml_doc.document.features:
+                        placemark_to_update = kml_doc.document.features[0]
 
                     if placemark_to_update:
                         placemark_to_update.name = edited_name
-                        placemark_to_update.description = edited_description
+                        if edited_description is not None:
+                            placemark_to_update.description = edited_description
                     else:
-                        self.log_message_callback("No Placemark found in generated KML to update name/description.", "warning")
+                        self.log_message_callback("No feature found in generated KML to update name/description.", "warning")
                 else:
                      self.log_message_callback("KML Document or features list is empty after generation.", "warning")
 
-
-                kml_doc.document.name = edited_name # Set overall KML document name as well
-
+                kml_doc.document.name = edited_name 
                 kml_doc.save(full_kml_path)
-                new_kml_content_str = kml_doc.kml() # Get string content for display
+                new_kml_content_str = kml_doc.kml() 
                 self.log_message_callback(f"Successfully saved updated KML to: {full_kml_path}", "info")
 
-                # DB Update
                 device_id, device_nickname = self.credential_manager.get_device_id(), self.credential_manager.get_device_nickname()
                 update_data = {
                     'last_edit_date': datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -276,41 +311,36 @@ class KMLHandler(QObject):
                     'editor_device_id': device_id,
                     'editor_device_nickname': device_nickname,
                     'kml_file_status': 'Edited',
-                    'kml_placemark_name': edited_name  # <<<< ADD THIS LINE
+                    'kml_placemark_name': edited_name
                 }
                 if not self.db_manager.update_polygon_data_by_id(db_id, update_data):
                     self.log_message_callback(f"Failed to update database for DB ID: {db_id}", "error")
                     QMessageBox.critical(self.main_window_ref, "DB Update Error", "Failed to update database record after saving KML.")
-                    # Consider if KML file save should be rolled back or handled
-                    return False # Release lock will happen in finally
+                    return False
 
                 self.log_message_callback(f"Successfully updated DB for ID: {db_id}", "info")
-                return True # Success
+                return True
 
             except Exception as e:
-                self.log_message_callback(f"Error during KML save or DB update for {original_kml_filename}: {e}", "error")
-                QMessageBox.critical(self.main_window_ref, "Save Error", f"An error occurred while saving KML: {e}")
-                return False # Release lock will happen in finally
+                self.log_message_callback(f"General error in _perform_save_operations: {e}", "error")
+                QMessageBox.critical(self.main_window_ref, "Save Error", f"An unexpected error occurred: {e}")
+                return False
             finally:
                 self.lock_handler.kml_file_lock_manager.release_kml_lock(original_kml_filename)
                 self.log_message_callback(f"KML lock released for {original_kml_filename}", "info")
 
-        # --- DB Lock for the entire save operation (including KML file lock and DB update) ---
         lock_and_attempt_succeeded, perform_save_result = self.lock_handler._execute_db_operation_with_lock(
             _perform_save_operations, "Save Edited KML"
         )
 
-        if lock_and_attempt_succeeded and perform_save_result: # perform_save_result from _perform_save_operations is boolean
-            # Refresh the editor with the newly saved content
-            # Need to re-fetch KML content as kml_doc.kml() might not be available here
-            # Or, _perform_save_operations could return the new kml_content_str
+        if lock_and_attempt_succeeded and perform_save_result:
             try:
                 with open(os.path.join(self.credential_manager.get_kml_folder_path(), original_kml_filename), 'r', encoding='utf-8') as f:
                     saved_kml_content = f.read()
                 self.kml_editor_widget.display_kml(saved_kml_content, edited_name, edited_description)
             except Exception as e_read:
                 self.log_message_callback(f"Error reading back saved KML for display: {e_read}", "error")
-                self.kml_editor_widget.clear_map() # Fallback
+                self.kml_editor_widget.clear_map()
 
             self.kml_data_updated_signal.emit()
             self.log_message_callback(f"KML Edit Save process completed successfully for DB ID: {db_id}.", "info")
@@ -318,9 +348,7 @@ class KMLHandler(QObject):
             return True
         else:
             self.log_message_callback(f"KML Edit Save process failed or was rolled back for DB ID: {db_id}.", "error")
-            # QMessageBox for error already shown within _perform_save_operations or by _execute_db_operation_with_lock
-            # Reload original state in editor as save failed
-            if original_db_record: # Ensure record exists
+            if original_db_record:
                 kml_file_name = original_db_record.get('kml_file_name')
                 full_kml_path = os.path.join(self.credential_manager.get_kml_folder_path(), kml_file_name)
                 if os.path.exists(full_kml_path):
@@ -335,7 +363,7 @@ class KMLHandler(QObject):
                          self.log_message_callback(f"Error reloading original KML after failed save: {e_reload}", "error")
                          self.kml_editor_widget.clear_map()
                 else:
-                    self.kml_editor_widget.clear_map() # KML file seems to be gone
+                    self.kml_editor_widget.clear_map()
             else:
                 self.kml_editor_widget.clear_map()
 
