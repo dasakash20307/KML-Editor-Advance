@@ -253,7 +253,7 @@ class MainWindow(QMainWindow):
         self.export_data_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton), "Export Displayed Data as &CSV...",self)
         file_menu.addAction(self.export_data_action)
 
-        self.sharing_info_action = QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ShareIcon), "Central App Sharing Info...", self)
+        self.sharing_info_action = QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogInfoView), "Central App Sharing Info...", self)
         file_menu.addAction(self.sharing_info_action)
 
         file_menu.addSeparator()
