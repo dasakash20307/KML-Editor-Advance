@@ -1,5 +1,7 @@
 # File: main_app.py (Refactored for threading)
 # ----------------------------------------------------------------------
+VERSION = "5.1.2"
+
 import sys
 import os
 from PySide6.QtCore import Qt # Kept as it's a common import

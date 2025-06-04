@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, Q
 from PySide6.QtGui import QPixmap, QIcon, QAction, QStandardItemModel, QStandardItem, QFont, QColor
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QTimer, QSize, QSortFilterProxyModel, QDate
 
+from main_app import VERSION # Import VERSION for window title
 from database.db_manager import DatabaseManager
 from core.sync_manager import DatabaseLockManager, KMLFileLockManager
 from core.utils import resource_path
@@ -28,6 +29,7 @@ import uuid
 import qtmodern.styles
 
 # Dialogs and Custom Widgets
+from .dialogs.about_dialog import AboutDialog # Import the new AboutDialog
 from .dialogs.api_sources_dialog import APISourcesDialog
 from .dialogs.output_mode_dialog import OutputModeDialog
 from .dialogs.default_view_settings_dialog import DefaultViewSettingsDialog
@@ -58,9 +60,27 @@ ORGANIZATION_TAGLINE_MW = "Developed by Dilasa Janvikash Pratishthan to support 
 class MainWindow(QMainWindow):
     def __init__(self, db_manager, credential_manager):
         super().__init__()
-        self.setWindowTitle(f"{APP_NAME_MW} - {APP_VERSION_MW}")
-        self.app_icon_path = resource_path(APP_ICON_FILE_NAME_MW)
-        if os.path.exists(self.app_icon_path): self.setWindowIcon(QIcon(self.app_icon_path))
+        self.setWindowTitle(f"Advanced KML Editor - v{VERSION}") # Use imported VERSION
+
+        # Set window icon
+        app_icon_path_generic = resource_path(APP_ICON_FILE_NAME_MW) # Usually app_icon.ico
+        logo_png_path = resource_path("assets/logo.png")
+
+        icon_to_set = None
+        if os.path.exists(logo_png_path):
+            loaded_icon = QIcon(logo_png_path)
+            if not loaded_icon.isNull():
+                icon_to_set = loaded_icon
+
+        if icon_to_set is None and os.path.exists(app_icon_path_generic):
+            loaded_icon = QIcon(app_icon_path_generic)
+            if not loaded_icon.isNull():
+                icon_to_set = loaded_icon
+
+        if icon_to_set is None:
+            icon_to_set = QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
+
+        self.setWindowIcon(icon_to_set)
 
         self.db_manager = db_manager
         self.credential_manager = credential_manager
@@ -69,6 +89,12 @@ class MainWindow(QMainWindow):
 
         # Initialize theme
         app = QApplication.instance()
+
+        # Set global application font
+        if app: # Ensure app instance exists
+            font = QFont("Segoe UI", 12)
+            app.setFont(font)
+
         if app and self.credential_manager:
             current_theme = self.credential_manager.load_app_theme()
             if current_theme == "dark":
@@ -189,7 +215,7 @@ class MainWindow(QMainWindow):
         self._connect_signals() # Central place for signal connections
 
         self.load_data_into_table()
-        self.log_message(f"{APP_NAME_MW} {APP_VERSION_MW} started. DB at: {self.db_manager.db_path}", "info")
+        self.log_message(f"Advanced KML Editor v{VERSION} started. DB at: {self.db_manager.db_path}", "info")
 
     def _create_main_layout(self):
         self.central_widget = QWidget(); self.setCentralWidget(self.central_widget)
@@ -201,78 +227,148 @@ class MainWindow(QMainWindow):
         header_widget = QWidget(); header_widget.setFixedHeight(60); # header_widget.setStyleSheet("border-bottom: 1px solid #D0D0D0;") # Removed inline style
         header_widget.setObjectName("mainWindowHeader") # Added object name
         header_layout = QHBoxLayout(header_widget); header_layout.setContentsMargins(5,5,5,5); header_layout.setSpacing(5)
-        logo_path = resource_path(LOGO_FILE_NAME_MW)
-        if os.path.exists(logo_path): pixmap=QPixmap(logo_path);logo_label=QLabel();logo_label.setPixmap(pixmap.scaled(40,40,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)); header_layout.addWidget(logo_label,0,Qt.AlignmentFlag.AlignVCenter)
-        else: header_layout.addWidget(QLabel("[L]"))
-        title_label=QLabel(APP_NAME_MW);title_label.setFont(QFont("Segoe UI",16,QFont.Weight.Bold));title_label.setAlignment(Qt.AlignmentFlag.AlignCenter);header_layout.addWidget(title_label,1)
-        version_label=QLabel(APP_VERSION_MW);version_label.setFont(QFont("Segoe UI",8,QFont.Weight.Normal,True)); # version_label.setStyleSheet(f"color:{INFO_COLOR_MW};"); # Removed inline style
-        version_label.setObjectName("versionLabel") # Added object name
+
+        # Use window icon for header logo if possible, else fallback to dilasa_logo.jpg
+        header_logo_label = QLabel()
+        window_icon = self.windowIcon()
+        if not window_icon.isNull():
+            pixmap = window_icon.pixmap(QSize(40,40))
+            header_logo_label.setPixmap(pixmap)
+        elif os.path.exists(resource_path(LOGO_FILE_NAME_MW)): # Fallback to dilasa_logo.jpg
+            pixmap=QPixmap(resource_path(LOGO_FILE_NAME_MW))
+            header_logo_label.setPixmap(pixmap.scaled(40,40,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation))
+        else:
+            header_logo_label.setText("[L]") # Fallback text
+        header_layout.addWidget(header_logo_label,0,Qt.AlignmentFlag.AlignVCenter)
+
+        title_label=QLabel("Advanced KML Editor");title_label.setFont(QFont("Segoe UI",16,QFont.Weight.Bold));title_label.setAlignment(Qt.AlignmentFlag.AlignCenter);header_layout.addWidget(title_label,1)
+        # version_label displays main_app.VERSION now, consistent with window title
+        version_label=QLabel(f"v{VERSION}");version_label.setFont(QFont("Segoe UI",8,QFont.Weight.Normal,True));
+        version_label.setObjectName("versionLabel")
         header_layout.addWidget(version_label,0,Qt.AlignmentFlag.AlignVCenter|Qt.AlignmentFlag.AlignRight)
         self.main_layout.addWidget(header_widget)
 
     def _create_menus_and_toolbar(self):
         menubar=self.menuBar();file_menu=menubar.addMenu("&File")
-        self.export_data_action=QAction(QIcon.fromTheme("document-save-as",QIcon(self.app_icon_path)),"Export Displayed Data as &CSV...",self)
+        self.export_data_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton), "Export Displayed Data as &CSV...",self)
         file_menu.addAction(self.export_data_action)
 
-        self.sharing_info_action = QAction(QIcon.fromTheme("network-transmit-receive"), "Central App Sharing Info...", self) # Added
-        file_menu.addAction(self.sharing_info_action) # Added
+        self.sharing_info_action = QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ShareIcon), "Central App Sharing Info...", self)
+        file_menu.addAction(self.sharing_info_action)
 
-        file_menu.addSeparator();exit_action=QAction(QIcon.fromTheme("application-exit"),"E&xit",self);exit_action.setShortcut("Ctrl+Q");exit_action.setStatusTip("Exit application");exit_action.triggered.connect(self.close);file_menu.addAction(exit_action)
+        file_menu.addSeparator()
+        exit_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DialogCloseButton),"E&xit",self)
+        exit_action.setShortcut("Ctrl+Q");exit_action.setStatusTip("Exit application");exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
 
         data_menu=menubar.addMenu("&Data")
-        self.import_csv_action=QAction(QIcon.fromTheme("document-open"),"Import &CSV...",self)
+        self.import_csv_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton),"Import &CSV...",self)
         data_menu.addAction(self.import_csv_action)
-        self.fetch_api_action=QAction(QIcon.fromTheme("network-transmit-receive"),"&Fetch from API...",self)
+        self.fetch_api_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ArrowDown),"&Fetch from API...",self)
         data_menu.addAction(self.fetch_api_action)
-        self.manage_api_action=QAction(QIcon.fromTheme("preferences-system"),"Manage A&PI Sources...",self);self.manage_api_action.triggered.connect(self.handle_manage_api_sources);data_menu.addAction(self.manage_api_action);data_menu.addSeparator()
-        self.delete_checked_action=QAction(QIcon.fromTheme("edit-delete"),"Delete Checked Rows...",self) # Renamed from delete_selected_action
+        self.manage_api_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_SettingsIcon),"Manage A&PI Sources...",self)
+        self.manage_api_action.triggered.connect(self.handle_manage_api_sources);data_menu.addAction(self.manage_api_action);data_menu.addSeparator()
+        self.delete_checked_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon),"Delete Checked Rows...",self)
         data_menu.addAction(self.delete_checked_action)
-        self.clear_all_data_action=QAction(QIcon.fromTheme("edit-clear-all"),"Clear All Polygon Data...",self)
+        self.clear_all_data_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DialogResetButton),"Clear All Polygon Data...",self)
         data_menu.addAction(self.clear_all_data_action)
-        data_menu.addSeparator() # Added separator
-        self.export_csv_template_action = QAction(QIcon.fromTheme("document-export"), "Export CSV Template...", self) # Or "text-csv"
+        data_menu.addSeparator()
+        self.export_csv_template_action = QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_FileLinkIcon), "Export CSV Template...", self)
         data_menu.addAction(self.export_csv_template_action)
 
 
         kml_menu=menubar.addMenu("&KML")
-        self.generate_kml_action=QAction(QIcon.fromTheme("document-export"),"&Generate KML for Checked Rows...",self)
+        self.generate_kml_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon),"&Generate KML for Checked Rows...",self) # SP_FileIcon or SP_DriveHDIcon
         kml_menu.addAction(self.generate_kml_action)
 
         self.view_menu=menubar.addMenu("&View")
-        self.toggle_ge_view_action=QAction("Google Earth View",self);self.toggle_ge_view_action.setCheckable(True);self.toggle_ge_view_action.toggled.connect(self._handle_ge_view_toggle);self.view_menu.addAction(self.toggle_ge_view_action)
+        self.toggle_ge_view_action=QAction("Google Earth View",self) # Icon set on button directly
+        self.toggle_ge_view_action.setCheckable(True);self.toggle_ge_view_action.toggled.connect(self._handle_ge_view_toggle)
+        self.view_menu.addAction(self.toggle_ge_view_action)
         self.view_menu.addSeparator()
-        self.default_kml_view_settings_action = QAction("Default KML View Settings...", self)
+        self.default_kml_view_settings_action = QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DesktopSettingsIcon),"Default KML View Settings...", self)
         self.default_kml_view_settings_action.triggered.connect(self.open_default_kml_view_settings_dialog)
         self.view_menu.addAction(self.default_kml_view_settings_action)
 
-        self.table_view_editor_action = QAction("Table View Editor...", self) # Added
-        self.view_menu.addAction(self.table_view_editor_action) # Added
+        self.table_view_editor_action = QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView), "Table View Editor...", self)
+        self.view_menu.addAction(self.table_view_editor_action)
 
-        self.view_menu.addSeparator() # Added Separator for theme toggle
-        self.toggle_theme_action = QAction("Toggle Theme (Light/Dark)", self) # Added
-        self.toggle_theme_action.triggered.connect(self._toggle_theme) # Added
-        self.view_menu.addAction(self.toggle_theme_action) # Added
+        self.view_menu.addSeparator()
+        self.toggle_theme_action = QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_CustomBase), "Toggle Theme (Light/Dark)", self) # SP_CustomBase as placeholder
+        self.toggle_theme_action.triggered.connect(self._toggle_theme)
+        self.view_menu.addAction(self.toggle_theme_action)
+        self.view_menu.addSeparator() # Separator before toolbar toggles
 
-        help_menu=menubar.addMenu("&Help");self.about_action=QAction(QIcon.fromTheme("help-about"),"&About",self);self.about_action.triggered.connect(self.handle_about);help_menu.addAction(self.about_action)
-        self.ge_instructions_action=QAction("GE &Instructions",self) # Will connect to KMLHandler
+        # Add toggle action for Multi-KML Toolbar
+        toggle_multi_kml_toolbar_action = self.multi_kml_toolbar.toggleViewAction()
+        toggle_multi_kml_toolbar_action.setText("Multi-KML Toolbar")
+        self.view_menu.addAction(toggle_multi_kml_toolbar_action)
+
+        help_menu=menubar.addMenu("&Help")
+        self.about_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation),"&About",self)
+        self.about_action.triggered.connect(self.handle_about);help_menu.addAction(self.about_action)
+        self.ge_instructions_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxQuestion),"GE &Instructions",self) # Will connect to KMLHandler
         help_menu.addAction(self.ge_instructions_action)
 
         self.toolbar=QToolBar("Main Toolbar");self.toolbar.setIconSize(QSize(20,20));self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon);self.toolbar.setMovable(True);self.addToolBar(Qt.ToolBarArea.TopToolBarArea,self.toolbar)
         self.toolbar.addAction(self.import_csv_action);self.toolbar.addSeparator()
-        self.toggle_ge_view_button=QPushButton("GE View: OFF");self.toggle_ge_view_button.setCheckable(True);self.toggle_ge_view_button.toggled.connect(self._handle_ge_view_toggle);self.toolbar.addWidget(self.toggle_ge_view_button);self.toolbar.addSeparator()
+
+        self.toggle_ge_view_button=QPushButton("GE View: OFF")
+        self.toggle_ge_view_button.setIcon(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_GlobeIcon)) # SP_GlobeIcon or SP_CommandLink
+        self.toggle_ge_view_button.setCheckable(True);self.toggle_ge_view_button.toggled.connect(self._handle_ge_view_toggle)
+        self.toolbar.addWidget(self.toggle_ge_view_button);self.toolbar.addSeparator()
+
         self.toolbar.addWidget(QLabel(" API Source: "));self.api_source_combo_toolbar=QComboBox();self.api_source_combo_toolbar.setMinimumWidth(150);self.refresh_api_source_dropdown();self.toolbar.addWidget(self.api_source_combo_toolbar)
 
-        self.fetch_api_toolbar_action=QAction(QIcon.fromTheme("network-transmit-receive"),"&Fetch from Selected API",self) # Renamed for clarity
+        self.fetch_api_toolbar_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ArrowDown),"&Fetch from Selected API",self)
         self.toolbar.addAction(self.fetch_api_toolbar_action)
 
-        manage_api_toolbar_action=QAction(QIcon.fromTheme("preferences-system"),"Manage API Sources",self);manage_api_toolbar_action.triggered.connect(self.handle_manage_api_sources);self.toolbar.addAction(manage_api_toolbar_action)
+        manage_api_toolbar_action=QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_SettingsIcon),"Manage API Sources",self)
+        manage_api_toolbar_action.triggered.connect(self.handle_manage_api_sources);self.toolbar.addAction(manage_api_toolbar_action)
         self.toolbar.addSeparator();self.toolbar.addAction(self.generate_kml_action);self.toolbar.addAction(self.delete_checked_action)
 
         # Add Table View Editor to toolbar for easier access
-        self.edit_table_view_toolbar_button = QPushButton(QIcon.fromTheme("view-list-tree"), "Edit Table View") # Added
-        self.toolbar.addSeparator() # Added
-        self.toolbar.addWidget(self.edit_table_view_toolbar_button) # Added
+        self.edit_table_view_toolbar_button = QPushButton("Edit Table View")
+        self.edit_table_view_toolbar_button.setIcon(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
+        self.toolbar.addSeparator()
+        self.toolbar.addWidget(self.edit_table_view_toolbar_button)
+
+        # --- Create Multi-KML Operations Toolbar ---
+        self.multi_kml_toolbar = QToolBar("Multi-KML Operations Toolbar")
+        self.multi_kml_toolbar.setObjectName("multiKmlToolbar")
+
+        # Define actions for the Multi-KML toolbar
+        self.multi_kml_view_action = QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DriveNetIcon), "Multi-KML View", self)
+        self.multi_kml_view_action.triggered.connect(lambda: self.log_message("Placeholder: Multi-KML View clicked", "info"))
+
+        self.multi_kml_edit_action = QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_FileLinkIcon), "Multi-KML Editor", self) # Or SP_EditIcon
+        self.multi_kml_edit_action.triggered.connect(lambda: self.log_message("Placeholder: Multi-KML Editor clicked", "info"))
+
+        self.exit_multi_kml_mode_action = QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DialogCancelButton), "Exit Multi-KML Mode", self)
+        self.exit_multi_kml_mode_action.triggered.connect(lambda: self.log_message("Placeholder: Exit Multi-KML Mode clicked", "info"))
+
+        self.save_all_edits_action = QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton), "Save All Edits", self)
+        self.save_all_edits_action.triggered.connect(lambda: self.log_message("Placeholder: Save All Edits clicked", "info"))
+
+        self.cancel_all_edits_action = QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DialogCloseButton), "Cancel All Edits", self)
+        self.cancel_all_edits_action.triggered.connect(lambda: self.log_message("Placeholder: Cancel All Edits clicked", "info"))
+
+        # Add actions to the Multi-KML toolbar
+        self.multi_kml_toolbar.addAction(self.multi_kml_view_action)
+        self.multi_kml_toolbar.addAction(self.multi_kml_edit_action)
+        self.multi_kml_toolbar.addSeparator()
+        self.multi_kml_toolbar.addAction(self.exit_multi_kml_mode_action)
+        self.multi_kml_toolbar.addSeparator()
+        self.multi_kml_toolbar.addAction(self.save_all_edits_action)
+        self.multi_kml_toolbar.addAction(self.cancel_all_edits_action)
+
+        # Make the toolbar detachable and dockable
+        self.multi_kml_toolbar.setFloatable(True)
+        self.multi_kml_toolbar.setMovable(True)
+
+        # Add the toolbar to the main window, initially at the top
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.multi_kml_toolbar)
+
 
     def _connect_signals(self):
         # Connections to DataHandler
@@ -318,6 +414,11 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self._main_status_bar)
         self._main_status_bar.showMessage("Ready.",3000)
 
+        # Add version label to the status bar
+        self.version_status_label = QLabel(f"v{VERSION}") # Use VERSION from main_app.py and make it concise
+        self.version_status_label.setObjectName("versionStatusLabel") # For QSS styling
+        self._main_status_bar.addPermanentWidget(self.version_status_label)
+
     def _setup_main_content_area_models_views(self):
         # This part needs to be called before DataHandler and KMLHandler instantiation
         # self.map_view_widget = MapViewWidget(self.credential_manager, self) # OLD
@@ -337,8 +438,24 @@ class MainWindow(QMainWindow):
 
     def _setup_main_content_area_layout(self): # Split from _setup_main_content_area
         # This part layouts the widgets after they (and handlers) are created
+
+        # Create a placeholder for KML Editor Controls panel
+        self.kml_editor_controls_placeholder = QWidget()
+        self.kml_editor_controls_placeholder.setMinimumHeight(50) # Ensure it's visible and shrinkable
+        # You could add a QLabel to it for identification during development:
+        # placeholder_layout = QVBoxLayout(self.kml_editor_controls_placeholder)
+        # placeholder_layout.addWidget(QLabel("KML Editor Controls Placeholder - Resizable"))
+        # self.kml_editor_controls_placeholder.setStyleSheet("background-color: lightblue;")
+
+
+        # Vertical splitter for map_stack (top) and KML editor controls placeholder (bottom)
+        self.left_vertical_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.left_vertical_splitter.addWidget(self.map_stack)
+        self.left_vertical_splitter.addWidget(self.kml_editor_controls_placeholder)
+        self.left_vertical_splitter.setSizes([400, 100]) # Initial sizes: map stack, controls placeholder
+
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.main_splitter.addWidget(self.map_stack)
+        self.main_splitter.addWidget(self.left_vertical_splitter) # Add new vertical splitter to the left
 
         right_pane_widget = QWidget(); right_pane_layout = QVBoxLayout(right_pane_widget); right_pane_layout.setContentsMargins(10,0,10,10)
 
@@ -475,7 +592,11 @@ class MainWindow(QMainWindow):
         self.log_message(f"View Toggled. Active map index: {current_map_index} ({'GE View ON' if checked else 'KML Editor ON'})","info")
 
 
-    def handle_about(self):QMessageBox.about(self,f"About {APP_NAME_MW}",f"<b>{APP_NAME_MW}</b><br>Version:{APP_VERSION_MW}<br><br>{ORGANIZATION_TAGLINE_MW}<br><br>Processes geographic data for KML generation.")
+    def handle_about(self):
+        # from main_app import VERSION # Ensure VERSION is available (already imported at class level)
+        about_dialog = AboutDialog(version=VERSION, parent=self)
+        about_dialog.exec()
+
     def handle_show_ge_instructions(self): # This now calls KMLHandler's method
         if hasattr(self, 'kml_handler'): self.kml_handler._show_ge_instructions_popup()
 

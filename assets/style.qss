@@ -3,15 +3,17 @@
 
 /* General Window & Dialog Styling */
 QWidget {
-    font-family: "Segoe UI", Arial, sans-serif;
+    background-color: #F5F5F5; /* Main background */
+    color: #212121; /* Main text color */
+    /* font-family is now set globally via QApplication.setFont() */
 }
 
 /* GroupBox Styling */
 QGroupBox {
-    border: 1px solid palette(mid);
+    border: 1px solid palette(mid); /* Keep using palette for borders for theme consistency */
     border-radius: 5px;
     margin-top: 1ex;
-    font-weight: bold;
+    font-weight: bold; /* This should make the title bold as well */
 }
 
 QGroupBox::title {
@@ -19,11 +21,12 @@ QGroupBox::title {
     subcontrol-position: top left;
     padding: 0 3px;
     border-radius: 3px;
+    /* font-weight: bold; */ /* Already bold due to QGroupBox rule */
 }
 
 /* Label Styling */
 QLabel {
-    background-color: transparent;
+    background-color: transparent; /* Keep labels transparent by default */
 }
 
 /* Button Styling */
@@ -31,19 +34,24 @@ QPushButton {
     padding: 5px 10px;
     border-radius: 4px;
     min-width: 60px;
-    border: 1px solid palette(mid);
+    font-weight: bold;
+    background-color: #007ACC; /* Accent color */
+    color: white;
+    border: 1px solid #005C99; /* Darker shade for border */
 }
 
 QPushButton:hover {
-    background-color: palette(highlight);
-    color: palette(highlighted-text);
+    background-color: #005C99; /* Darker accent for hover */
+    color: white;
 }
 
 QPushButton:pressed {
-    background-color: palette(dark);
+    background-color: #004C8C; /* Even darker for pressed */
+    color: white;
 }
 
 QPushButton:disabled {
+    background-color: palette(button); /* Use palette for disabled state for theme consistency */
     color: palette(disabled-text);
     border-color: palette(mid);
 }
@@ -84,15 +92,15 @@ QComboBox::drop-down {
 
 QComboBox QAbstractItemView {
     border: 1px solid palette(mid);
-    selection-background-color: palette(highlight);
-    selection-color: palette(highlighted-text);
+    selection-background-color: #007ACC; /* Accent color */
+    selection-color: white;
 }
 
 /* TableView Styling */
 QTableView {
     gridline-color: palette(mid);
-    selection-background-color: palette(highlight);
-    selection-color: palette(highlighted-text);
+    selection-background-color: #007ACC; /* Accent color */
+    selection-color: white;
     border: 1px solid palette(mid);
 }
 
@@ -185,8 +193,8 @@ QMenuBar {
 }
 
 QMenuBar::item:selected {
-    background: palette(highlight);
-    color: palette(highlighted-text);
+    background-color: #007ACC; /* Accent color */
+    color: white;
 }
 
 QMenu {
@@ -194,8 +202,8 @@ QMenu {
 }
 
 QMenu::item:selected {
-    background-color: palette(highlight);
-    color: palette(highlighted-text);
+    background-color: #007ACC; /* Accent color */
+    color: white;
 }
 
 QToolBar {
@@ -289,4 +297,31 @@ LoadingScreenWidget QGroupBox#logGroup::title {
 /* Ensure WebEngineView has a white background */
 QWebEngineView {
     background-color: white;
+}
+
+#versionStatusLabel {
+    padding: 2px 5px;
+    border-left: 1px solid #C0C0C0; /* Light grey border */
+    color: #555555; /* Dark grey color */
+}
+
+/* Splitter Handle Styling */
+QSplitter::handle {
+    background-color: #D0D0D0; /* Light grey, slightly darker than default #F5F5F5 background */
+}
+
+QSplitter::handle:vertical {
+    height: 8px;
+}
+
+QSplitter::handle:horizontal {
+    width: 8px;
+}
+
+QSplitter::handle:hover {
+    background-color: #B0B0B0; /* Darker grey on hover */
+}
+
+QSplitter::handle:pressed {
+    background-color: #007ACC; /* Accent color when grabbed */
 }
