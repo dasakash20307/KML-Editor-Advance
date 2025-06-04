@@ -293,6 +293,8 @@ function getEditedGeometry() {
         }
     });
 
+    // For multi-KML save, return the FeatureCollection.
+    // For single KML save, the Python backend needs to extract the single feature.
     const featureCollection = {
         type: 'FeatureCollection',
         features: featuresArray

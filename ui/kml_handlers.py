@@ -198,7 +198,7 @@ class KMLHandler(QObject):
         new_kml_content_str = None
 
         def _perform_save_operations():
-            nonlocal new_kml_content_str
+            nonlocal new_kml_content_str, edited_name, edited_description
             if not self.lock_handler.kml_file_lock_manager.acquire_kml_lock(original_kml_filename):
                 return False
             
@@ -215,7 +215,56 @@ class KMLHandler(QObject):
 
                 if edited_geometry_json:
                     try:
-                        geojson_geom = json.loads(edited_geometry_json)
+                        geojson_data = json.loads(edited_geometry_json)
+                        
+                        # Check if the data is a FeatureCollection (from multi-edit) or a single geometry (from single edit)
+                        if isinstance(geojson_data, dict) and geojson_data.get("type") == "FeatureCollection":
+                            features = geojson_data.get("features", [])
+                            if not features:
+                                self.log_message_callback("Received empty FeatureCollection from map edit.", "warning")
+                                # If no features, maybe the polygon was deleted? Or no changes?
+                                # For now, treat as no valid geometry to save.
+                                return False # Indicate no save operation performed due to lack of features
+
+                            # In single KML edit mode, we expect only one feature in the FeatureCollection
+                            # Find the feature corresponding to the current db_id
+                            single_feature = None
+                            for feature in features:
+                                props = feature.get("properties", {})
+                                try:
+                                    feature_db_id = int(props.get("db_id"))
+                                    if feature_db_id == db_id:
+                                        single_feature = feature
+                                        break
+                                except (ValueError, TypeError):
+                                    self.log_message_callback(f"Skipping feature with invalid or missing db_id in FeatureCollection: {props.get('db_id')}", "warning")
+                                    continue
+
+                            if not single_feature:
+                                self.log_message_callback(f"Could not find feature with matching db_id {db_id} in the received FeatureCollection.", "error")
+                                QMessageBox.critical(self.main_window_ref, "Save Error", f"Edited geometry data for ID {db_id} not found in map data.")
+                                return False # Indicate failure
+
+                            geojson_geom = single_feature.get("geometry")
+                            if not geojson_geom:
+                                self.log_message_callback(f"Feature with db_id {db_id} has no geometry.", "error")
+                                QMessageBox.critical(self.main_window_ref, "Save Error", f"Edited feature for ID {db_id} has no geometry data.")
+                                return False # Indicate failure
+
+                            # Update name/description from the feature properties if available
+                            feature_props = single_feature.get("properties", {})
+                            edited_name = feature_props.get('name') if feature_props.get('name') is not None else edited_name # Use existing edited_name if not in feature
+                            edited_description = feature_props.get('description') if feature_props.get('description') is not None else edited_description # Use existing edited_description if not in feature
+
+                        elif isinstance(geojson_data, dict) and geojson_data.get("type") in ["Polygon", "LineString", "Point"]:
+                             # This case handles the old single-geometry format (though JS now sends FeatureCollection)
+                             # Keep for robustness or if JS logic changes back
+                             self.log_message_callback("Received single geometry object (non-FeatureCollection). Processing.", "info")
+                             geojson_geom = geojson_data
+                        else:
+                            raise ValueError(f"Unsupported or unexpected top-level GeoJSON type: {geojson_data.get('type')}")
+
+                        # Now process the single geometry object (either extracted from FC or received directly)
                         geom_type_from_geojson = geojson_geom.get("type")
                         raw_coordinates = geojson_geom.get("coordinates")
 
@@ -232,7 +281,7 @@ class KMLHandler(QObject):
                                 else:
                                     raise ValueError("Invalid point structure in Polygon outer ring.")
                         elif geom_type_from_geojson in ["LineString", "Point"]:
-                            self.log_message_callback(f"Received geometry type '{geom_type_from_geojson}' from map edit, but current save logic via add_polygon_to_kml_object is primarily for Polygons. Ensure this is intended if it's not a polygon.", "warning")
+                            self.log_message_callback(f"Received geometry type '{geom_type_from_geojson}' from map edit. Processing.", "info")
                             if geom_type_from_geojson == "LineString":
                                 if not (raw_coordinates and isinstance(raw_coordinates, list)):
                                     raise ValueError("LineString coordinates missing or invalid structure.")
@@ -248,6 +297,7 @@ class KMLHandler(QObject):
                                 alt = raw_coordinates[2] if len(raw_coordinates) > 2 and raw_coordinates[2] is not None else 0.0
                                 parsed_simplekml_coords.append((raw_coordinates[0], raw_coordinates[1], alt))
                         else:
+                            # This case should ideally not be reached if the FeatureCollection/single geometry check is thorough
                             raise ValueError(f"Unsupported or unexpected GeoJSON geometry type for polygon saving: {geom_type_from_geojson}")
 
                     except json.JSONDecodeError as e_json:
@@ -258,7 +308,13 @@ class KMLHandler(QObject):
                         self.log_message_callback(f"ValueError processing GeoJSON geometry: {e_val}", "error")
                         QMessageBox.critical(self.main_window_ref, "Save Error", f"Invalid geometry data: {e_val}")
                         return False
-                
+                else:
+                    # Handle case where edited_geometry_json is empty or None
+                    self.log_message_callback("edited_geometry_json is empty or None.", "warning")
+                    # Depending on requirements, this might mean the feature was deleted or no geometry exists.
+                    # For now, treat as no valid geometry to save.
+                    return False # Indicate no save operation performed
+
                 if not parsed_simplekml_coords:
                     self.log_message_callback("Coordinates list is empty after processing GeoJSON.", "error")
                     QMessageBox.critical(self.main_window_ref, "Save Error", "No valid coordinates found in the edited geometry.")
