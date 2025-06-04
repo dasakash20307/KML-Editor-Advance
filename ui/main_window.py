@@ -625,30 +625,30 @@ class MainWindow(QMainWindow):
     def _update_ui_for_app_mode(self):
         """Enable/disable UI elements based on the application mode."""
         app_mode = self.credential_manager.get_app_mode()
-        is_central_app = (app_mode == "Central App")
+        # is_central_app = (app_mode == "Central App") # No longer solely dependent on this for sharing_info_action
 
-        # Enable sharing info action only for Central App
+        # Sharing info action is now always enabled as it serves a purpose in both modes.
         if hasattr(self, 'sharing_info_action'):
-            self.sharing_info_action.setEnabled(is_central_app)
-            self.sharing_info_action.setVisible(is_central_app) # Also hide if not central
-
-        # Example: Disable data modification actions if not Central App
-        # (Adjust as per actual desired restrictions for Connected App)
-        # if hasattr(self, 'delete_checked_action'):
-        #     self.delete_checked_action.setEnabled(is_central_app)
-        # if hasattr(self, 'clear_all_data_action'):
-        #     self.clear_all_data_action.setEnabled(is_central_app)
-        # if hasattr(self.kml_editor_widget, 'edit_mode_button'): # Assuming editor has an edit button
-        #     self.kml_editor_widget.edit_mode_button.setEnabled(is_central_app)
+            self.sharing_info_action.setEnabled(True)
+            self.sharing_info_action.setVisible(True)
+            # Optionally, change text based on mode:
+            # if app_mode == "Central App":
+            #     self.sharing_info_action.setText("Share Central App Paths...")
+            # elif app_mode == "Connected App":
+            #     self.sharing_info_action.setText("Configure Central App Connection...")
+            # else:
+            #     self.sharing_info_action.setText("App Path Information...")
 
         self.log_message(f"UI updated for {app_mode} mode.", "info")
 
     def _open_sharing_info_dialog(self):
-        if self.credential_manager.get_app_mode() == "Central App":
-            dialog = SharingInfoDialog(self.credential_manager, self)
-            dialog.exec()
-        else:
-            QMessageBox.information(self, "Sharing Info", "This feature is available only in 'Central App' mode.")
+        app_mode = self.credential_manager.get_app_mode()
+        if not app_mode:
+            QMessageBox.warning(self, "Mode Error", "Application mode is not determined. Cannot open sharing/configuration dialog.")
+            return
+
+        dialog = SharingInfoDialog(self.credential_manager, app_mode, self)
+        dialog.exec()
 
     # Placeholder for _setup_main_content_area to avoid breaking the call order
     # It's split into _setup_main_content_area_models_views and _setup_main_content_area_layout
