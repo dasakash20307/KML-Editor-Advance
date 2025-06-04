@@ -92,7 +92,7 @@ class MainWindow(QMainWindow):
 
         # Set global application font
         if app and isinstance(app, QApplication): # Ensure app instance exists and is QApplication
-            font = QFont("Segoe UI", 12)
+            font = QFont("Segoe UI", 11)  # Changed from 12 to 11 as requested
             app.setFont(font)
 
         if app and self.credential_manager:
@@ -228,17 +228,19 @@ class MainWindow(QMainWindow):
         header_widget.setObjectName("mainWindowHeader") # Added object name
         header_layout = QHBoxLayout(header_widget); header_layout.setContentsMargins(5,5,5,5); header_layout.setSpacing(5)
 
-        # Use window icon for header logo if possible, else fallback to dilasa_logo.jpg
+        # Always prioritize the organization's logo
         header_logo_label = QLabel()
-        window_icon = self.windowIcon()
-        if not window_icon.isNull():
-            pixmap = window_icon.pixmap(QSize(40,40))
-            header_logo_label.setPixmap(pixmap)
-        elif os.path.exists(resource_path(LOGO_FILE_NAME_MW)): # Fallback to dilasa_logo.jpg
-            pixmap=QPixmap(resource_path(LOGO_FILE_NAME_MW))
+        # First try the dedicated logo file
+        org_logo_path = resource_path(LOGO_FILE_NAME_MW)  # dilasa_logo.jpg
+        if os.path.exists(org_logo_path):
+            pixmap = QPixmap(org_logo_path)
             header_logo_label.setPixmap(pixmap.scaled(40,40,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation))
+        # Then try window icon
+        elif not self.windowIcon().isNull():
+            pixmap = self.windowIcon().pixmap(QSize(40,40))
+            header_logo_label.setPixmap(pixmap)
         else:
-            header_logo_label.setText("[L]") # Fallback text
+            header_logo_label.setText("Dilasa") # Organization name as text fallback
         header_layout.addWidget(header_logo_label,0,Qt.AlignmentFlag.AlignVCenter)
 
         title_label=QLabel("Advanced KML Editor");title_label.setFont(QFont("Segoe UI",16,QFont.Weight.Bold));title_label.setAlignment(Qt.AlignmentFlag.AlignCenter);header_layout.addWidget(title_label,1)
@@ -334,21 +336,21 @@ class MainWindow(QMainWindow):
         self.multi_kml_toolbar = QToolBar("Multi-KML Operations Toolbar")
         self.multi_kml_toolbar.setObjectName("multiKmlToolbar")
 
-        # Define actions for the Multi-KML toolbar
+        # Define actions for the Multi-KML toolbar with proper connections
         self.multi_kml_view_action = QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DriveNetIcon), "Multi-KML View", self)
-        self.multi_kml_view_action.triggered.connect(lambda: self.log_message("Placeholder: Multi-KML View clicked", "info"))
+        self.multi_kml_view_action.triggered.connect(self._toggle_multi_kml_mode)
 
         self.multi_kml_edit_action = QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_FileLinkIcon), "Multi-KML Editor", self) # Or SP_EditIcon
-        self.multi_kml_edit_action.triggered.connect(lambda: self.log_message("Placeholder: Multi-KML Editor clicked", "info"))
+        self.multi_kml_edit_action.triggered.connect(self.multi_kml_handler.enter_multi_edit_mode)
 
         self.exit_multi_kml_mode_action = QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DialogCancelButton), "Exit Multi-KML Mode", self)
-        self.exit_multi_kml_mode_action.triggered.connect(lambda: self.log_message("Placeholder: Exit Multi-KML Mode clicked", "info"))
+        self.exit_multi_kml_mode_action.triggered.connect(lambda: self.multi_kml_handler.enable_single_kml_mode())
 
         self.save_all_edits_action = QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton), "Save All Edits", self)
-        self.save_all_edits_action.triggered.connect(lambda: self.log_message("Placeholder: Save All Edits clicked", "info"))
+        self.save_all_edits_action.triggered.connect(self.multi_kml_handler.save_multi_kml_edits)
 
         self.cancel_all_edits_action = QAction(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DialogCloseButton), "Cancel All Edits", self)
-        self.cancel_all_edits_action.triggered.connect(lambda: self.log_message("Placeholder: Cancel All Edits clicked", "info"))
+        self.cancel_all_edits_action.triggered.connect(self.multi_kml_handler.cancel_multi_edit)
 
         # Add actions to the Multi-KML toolbar
         self.multi_kml_toolbar.addAction(self.multi_kml_view_action)
@@ -968,32 +970,57 @@ class MainWindow(QMainWindow):
         """Creates the GroupBox for Multi-KML operations."""
         multi_kml_group = QGroupBox("Multi-KML Operations")
         multi_kml_layout = QHBoxLayout(multi_kml_group)
-        multi_kml_layout.setContentsMargins(5, 10, 5, 5)
-        multi_kml_layout.setSpacing(10)
+        multi_kml_layout.setContentsMargins(5, 5, 5, 5)  # Reduced top margin
+        multi_kml_layout.setSpacing(8)  # Reduced spacing
+        
+        # Set smaller font for all buttons
+        button_font = QFont("Segoe UI", 10)
 
         # Multi-KML View button (blue)
         self.multi_kml_view_button = QPushButton("Multi-KML View")
         self.multi_kml_view_button.setCheckable(True)
-        self.multi_kml_view_button.setStyleSheet("background-color: #0078D7; color: white; padding: 4px 8px;")
+        self.multi_kml_view_button.setFont(button_font)
+        self.multi_kml_view_button.setStyleSheet("background-color: #0078D7; color: white; padding: 3px 6px;")
+        self.multi_kml_view_button.clicked.connect(self._toggle_multi_kml_mode)
         multi_kml_layout.addWidget(self.multi_kml_view_button)
         
         # Multi-KML Editor button
         self.multi_kml_editor_button = QPushButton("Multi-KML Editor")
+        self.multi_kml_editor_button.setFont(button_font)
+        self.multi_kml_editor_button.setStyleSheet("padding: 3px 6px;")
+        self.multi_kml_editor_button.clicked.connect(self.multi_kml_handler.enter_multi_edit_mode)
         multi_kml_layout.addWidget(self.multi_kml_editor_button)
         
         # Single-KML Editor button (to exit multi-KML mode)
-        self.single_kml_editor_button = QPushButton("Exit Multi-KML Mode") # Renamed for clarity
+        self.single_kml_editor_button = QPushButton("Exit Multi-KML Mode")
+        self.single_kml_editor_button.setFont(button_font)
+        self.single_kml_editor_button.setStyleSheet("padding: 3px 6px;")
+        self.single_kml_editor_button.clicked.connect(lambda: self.multi_kml_handler.enable_single_kml_mode())
         multi_kml_layout.addWidget(self.single_kml_editor_button)
         
         # Multi-KML Save button
-        self.multi_kml_save_button = QPushButton("Save All Edits") # Renamed for clarity
+        self.multi_kml_save_button = QPushButton("Save All Edits")
+        self.multi_kml_save_button.setFont(button_font)
+        self.multi_kml_save_button.setStyleSheet("padding: 3px 6px;")
+        self.multi_kml_save_button.clicked.connect(self.multi_kml_handler.save_multi_kml_edits)
         multi_kml_layout.addWidget(self.multi_kml_save_button)
         
         # Multi-KML Cancel button
-        self.multi_kml_cancel_button = QPushButton("Cancel All Edits") # Renamed for clarity
+        self.multi_kml_cancel_button = QPushButton("Cancel All Edits")
+        self.multi_kml_cancel_button.setFont(button_font)
+        self.multi_kml_cancel_button.setStyleSheet("padding: 3px 6px;")
+        self.multi_kml_cancel_button.clicked.connect(self.multi_kml_handler.cancel_multi_edit)
         multi_kml_layout.addWidget(self.multi_kml_cancel_button)
         
         multi_kml_layout.addStretch()
         
-        # Set initial visibility and enabled state in enable_single_kml_mode / enable_multi_kml_mode
+        # Hide buttons that should be initially hidden (will be shown in multi-KML mode)
+        self.multi_kml_editor_button.hide()
+        self.multi_kml_save_button.hide()
+        self.multi_kml_cancel_button.hide()
+        self.single_kml_editor_button.hide()
+        
+        # Set initial enabled states
+        self.multi_kml_view_button.setEnabled(True)
+        
         return multi_kml_group

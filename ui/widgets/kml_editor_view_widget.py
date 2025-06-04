@@ -4,11 +4,11 @@ import os
 import json
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QLineEdit, QPushButton,
-    QFormLayout, QLabel, QComboBox, QGroupBox
+    QFormLayout, QLabel, QComboBox, QGroupBox, QSplitter
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEngineSettings, QWebEnginePage # Make sure QWebEngineSettings is imported
-from PySide6.QtCore import QUrl, Slot, QObject, Signal
+from PySide6.QtCore import QUrl, Slot, QObject, Signal, Qt
 from PySide6.QtWebChannel import QWebChannel
 from core.utils import resource_path  # Add this import
 
@@ -71,8 +71,11 @@ class KMLEditorViewWidget(QWidget):
     def _setup_ui(self):
         main_layout = QVBoxLayout()
         
+        # Create a vertical splitter for resizable map and controls
+        self.main_splitter = QSplitter(Qt.Orientation.Vertical)
+        
         # Map view
-        main_layout.addWidget(self.web_view, stretch=1)
+        self.main_splitter.addWidget(self.web_view)
         
         # Controls panel
         controls_group = QGroupBox("KML Editor Controls")
@@ -94,7 +97,13 @@ class KMLEditorViewWidget(QWidget):
         controls_layout.addRow("Actions:", button_layout)
         
         controls_group.setLayout(controls_layout)
-        main_layout.addWidget(controls_group)
+        self.main_splitter.addWidget(controls_group)
+        
+        # Set initial sizes (greater height for map, smaller for controls)
+        self.main_splitter.setSizes([700, 300])
+        
+        # Add the splitter to the main layout
+        main_layout.addWidget(self.main_splitter)
         
         # Initial button states
         self.save_button.setEnabled(False)
