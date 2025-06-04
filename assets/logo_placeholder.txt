@@ -1,0 +1,11 @@
+This is a placeholder for the logo_placeholder.png file.
+
+Please replace this text file with an actual PNG image named "logo_placeholder.png".
+This image will be used as a fallback when the main organization logo (dilasa_logo.jpg) is not found.
+
+Recommended specifications:
+- Size: 128x128 pixels
+- Format: PNG with transparency
+- Content: A simple, neutral placeholder image representing your organization
+
+This fallback ensures the application never displays a generic computer icon, even when the main logo is missing. 

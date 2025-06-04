@@ -62,25 +62,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"Advanced KML Editor - v{VERSION}") # Use imported VERSION
 
-        # Set window icon
-        app_icon_path_generic = resource_path(APP_ICON_FILE_NAME_MW) # Usually app_icon.ico
-        logo_png_path = resource_path("assets/logo.png")
-
-        icon_to_set = None
-        if os.path.exists(logo_png_path):
-            loaded_icon = QIcon(logo_png_path)
-            if not loaded_icon.isNull():
-                icon_to_set = loaded_icon
-
-        if icon_to_set is None and os.path.exists(app_icon_path_generic):
-            loaded_icon = QIcon(app_icon_path_generic)
-            if not loaded_icon.isNull():
-                icon_to_set = loaded_icon
-
-        if icon_to_set is None:
-            icon_to_set = QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
-
-        self.setWindowIcon(icon_to_set)
+        # Set window icon using the centralized icons system
+        from core.icons import get_app_icon
+        self.setWindowIcon(get_app_icon())
 
         self.db_manager = db_manager
         self.credential_manager = credential_manager
@@ -228,16 +212,11 @@ class MainWindow(QMainWindow):
         header_widget.setObjectName("mainWindowHeader") # Added object name
         header_layout = QHBoxLayout(header_widget); header_layout.setContentsMargins(5,5,5,5); header_layout.setSpacing(5)
 
-        # Always prioritize the organization's logo
+        # Use the centralized icons system for the organization logo
+        from core.icons import get_organization_logo
         header_logo_label = QLabel()
-        # First try the dedicated logo file
-        org_logo_path = resource_path(LOGO_FILE_NAME_MW)  # dilasa_logo.jpg
-        if os.path.exists(org_logo_path):
-            pixmap = QPixmap(org_logo_path)
-            header_logo_label.setPixmap(pixmap.scaled(40,40,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation))
-        # Then try window icon
-        elif not self.windowIcon().isNull():
-            pixmap = self.windowIcon().pixmap(QSize(40,40))
+        pixmap = get_organization_logo(QSize(40, 40))
+        if not pixmap.isNull():
             header_logo_label.setPixmap(pixmap)
         else:
             header_logo_label.setText("Dilasa") # Organization name as text fallback
