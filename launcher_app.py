@@ -30,8 +30,8 @@ APP_NAME_LAUNCHER = "Dilasa Advance KML Tool"
 COMPANY_NAME_LAUNCHER = "Dilasa Janvikash Pratishthan"
 TAGLINE_LAUNCHER = "Empowering communities with geospatial solutions"
 # Version will be taken from app.applicationVersion()
-DEVELOPER_NAME_LAUNCHER = "A.Das"
-SUPPORT_EMAIL_LAUNCHER = "support@dilasa.org" # Or your actual support email
+DEVELOPER_NAME_LAUNCHER = "Akash Das"
+SUPPORT_EMAIL_LAUNCHER = "dilasango@gmail.com" # Or your actual support email
 
 class InitializationThread(QThread):
     # Signals: progress_value, status_text
