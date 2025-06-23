@@ -4,17 +4,16 @@ import sys
 def resource_path(relative_path):
     """
     Get absolute path to resource, works for dev and for PyInstaller.
-    This function is crucial for finding assets (like images, icons)
+    This function is crucial for finding assets and UI files
     when the application is bundled by PyInstaller.
     """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        # For development, use the directory of the script that calls this function.
-        # If utils.py is in core/, and assets are in ../assets/ relative to core/
-        # then the project root is one level up from core.
-        base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)) 
+    # PyInstaller creates a temp folder and stores path in _MEIPASS
+    # For development, use the directory of the script that calls this function.
+    base_path = getattr(sys, '_MEIPASS', os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)))
     
-    # Assets are expected to be in an 'assets' subdirectory of the project root
-    return os.path.join(base_path, "assets", relative_path)
+    # Check if the path starts with 'assets/' or 'ui/'
+    if relative_path.startswith(('assets/', 'ui/')):
+        # Remove 'assets/' or 'ui/' prefix as base_path already points to project root
+        relative_path = relative_path
+    
+    return os.path.normpath(os.path.join(base_path, relative_path))

@@ -2,17 +2,31 @@
 
 ## Overview
 
-The **Dilasa Advance KML Tool** is a Windows desktop application developed for Dilasa Janvikash Pratishthan. It's designed to simplify the management of farmer field data, facilitate KML polygon generation, and integrate with Google Earth for enhanced data visualization and verification.
+The **Dilasa Advance KML Tool** is a Windows desktop application developed for Dilasa Janvikash Pratishthan. It's designed to simplify the management of farmer field data by importing from CSV files or directly from mWater APIs, facilitating KML polygon generation with a KML-first approach (v5), and integrating with Google Earth for enhanced data visualization and verification.
 
 ## Core Features
 
 *   **Data Management:**
-    *   Import farmer and plot data via CSV files or directly from mWater APIs.
-    *   Store and manage data in a local SQLite database.
+    *   **Data Ingestion (KML-First):**
+        *   Import farmer and plot data via user-provided CSV files (aligned with V5 metadata requirements, including automatic KML generation and storage per record) or by fetching directly from configured mWater API sources.
+        *   - **CSV Template Export:** Allows users to export a blank CSV file containing all V5 headers (mandatory metadata, 4-corner point data, and example KML description columns) to guide data preparation for import.
+        *   **Immediate KML Generation:** For each valid record from an import, a KML file is immediately generated with a dynamic description (based on record data) and stored persistently in the user-configured KML storage folder. This KML file becomes the primary representation of the plot's geographic data.
+        *   **Duplicate Handling:** The system checks for duplicate records based on `response_code` during the import process and skips already existing entries, logging the action.
+    *   **Comprehensive Metadata Storage:**
+        *   Alongside each KML file, detailed metadata is saved to the main SQLite database.
+        *   This metadata includes:
+            *   Essential identifiers: `uuid` (also used for KML filename), `response_code`.
+            *   KML file details: `kml_file_name` and `kml_file_status` (e.g., "Created", "Errored" if KML generation/saving failed).
+            *   Temporal information: `date_added` (can be from API source or processing time), `last_modified`.
+            *   Source/Creator information: `device_code` (either from API data or the current application's device ID), `editor_device_id`, and `editor_device_nickname` (identifying the application instance that performed the import).
+        *   The database is also designed to track KML export history and evaluation status for each record.
 *   **KML Generation:**
+    *   KML files are automatically generated and stored upon data import (API/CSV) as part of the KML-first workflow.
     *   Create KML polygon files from selected records for use in GIS software.
 *   **Map Visualization & Google Earth Integration:**
     *   View selected polygons on an integrated map (Folium-based with OpenStreetMap/Esri Satellite).
+    *   **Interactive KML Display:** View KML polygons and points directly on an interactive map by selecting records from the data table. Associated KML descriptions are displayed alongside the map.
+    *   **Customizable KML View:** Personalize the default appearance of displayed KMLs (colors, opacity, line styles, view mode, and zoom preferences) via 'View -> Default KML View Settings'.
     *   Switch to an embedded Google Earth Web View.
     *   When a polygon is selected in the Google Earth View:
         *   A temporary KML file is automatically created.
@@ -27,32 +41,69 @@ The **Dilasa Advance KML Tool** is a Windows desktop application developed for D
 ## Main UI Components & Functions
 
 *   **Main Window:**
-    *   **Menu Bar:** Access to File (Export CSV), Data (Import CSV, Fetch from API, Manage API Sources, Delete Data), KML (Generate), View (Toggle Google Earth View), and Help (About, GE Instructions).
+    *   **Menu Bar:** Access to File (Export CSV), Data (Import CSV, Fetch from API, Manage API Sources, **Export CSV Template...**, Delete Data), KML (Generate), View (Toggle Google Earth View), and Help (About, GE Instructions).
     *   **Toolbar:** Quick access buttons for common actions like Import CSV, API Fetch, Toggle GE View, Generate KML, and Delete Checked Rows.
     *   **Map/Google Earth View Pane:** Displays either the Folium map or the Google Earth Web View.
     *   **Data Table Pane:**
-        *   Displays all polygon records from the database with details like ID, Status, UUID, Farmer Name, Village, etc.
+        *   Displays all polygon records from the database with comprehensive details. This now includes key v5 metadata such as **DB ID, UUID, Response Code, Farmer Name, Village, KML File Name, KML File Status, Evaluation Status, Times Edited, Last Edit Date, Editor Device ID, Editor Nickname, Device Code (Creator), Date Added, Export Count, Last Exported, and Last Modified.**
         *   Supports selection of multiple rows using checkboxes.
         *   "Select/Deselect All" checkbox for bulk actions.
-    *   **Filter Panel:** Allows filtering of the data table by UUID, date added, KML export status, and record error status.
+    *   **Filter Panel & Controls:**
+        *   A " Filters" button located on a strip above the main table allows users to toggle the visibility of the filter options panel.
+        *   The filter options panel allows filtering of the data table by UUID, KML export status, and record status (e.g., "Valid Records", "Error Records" based on KML file status).
+        *   Filters are applied only when an "Apply Filters" button is clicked.
+        *   A "Clear Filters" button resets all active filter criteria.
+        *   The filter panel automatically hides after filters are applied.
+        *   *(Note: Date-based filtering has been temporarily removed for rework).*
     *   **Log Panel:** Shows status messages, errors, and logs of application activity.
+*   **Startup Sequence:**
+    *   **`launcher_app.py`**: Main application entry point. Manages application setup, styling, and initiates the loading sequence.
+    *   **`ui/loading_screen_widget.py`**: Provides an initial UI with progress indication and logs during application startup. Ensures a responsive user experience while core components are initialized in a background thread.
 *   **Dialogs:**
     *   **API Sources Dialog:** Manage mWater API source URLs.
     *   **Duplicate Dialog:** Handle duplicate record imports.
     *   **Output Mode Dialog:** Choose between single or multiple KML file generation.
     *   **Instruction Popup:** Provides manual steps for Google Earth KML import.
 
+## Key v5 Architectural Changes
+
+The ongoing update to Version 5 introduces significant architectural improvements:
+
+*   **KML-First Data Model:** The application now employs a KML-first approach. When data is imported (via API or CSV), a KML file is immediately generated and stored persistently for each valid record. This KML file becomes the primary source of truth for the geographic data and its description. The SQLite database primarily stores metadata, including a reference to the KML filename (`kml_file_name`), its status (`kml_file_status` e.g., "Created", "Edited", "Errored"), edit history (`edit_count`, `last_edit_date`), and information about the device that created/edited the record (`device_code`, `editor_device_id`, `editor_device_nickname`). `date_added` is also stored to track when the record was first introduced into the system.
+
+*   **User-Defined Configuration (`CredentialManager`):**
+    *   A new `CredentialManager` component manages application configuration, which is set by the user on the first run:
+        *   **Device Nickname:** A user-chosen nickname for the device.
+        *   **Application Mode:** Choice between "Central App" or "Connected App" (to support future shared data access over LAN).
+        *   **Data Paths:** User-defined paths for storing the main SQLite database file (e.g., `dilasa_main_data_v5.db`) and the root folder for KML files (e.g., `kml_files/`).
+    *   This configuration is stored locally in a `device_config.db` file, typically located in a user-specific application data directory (path determined using the `platformdirs` library). This replaces previous hardcoded or fixed data storage locations.
+
+*   **Database Locking Mechanism (`DatabaseLockManager`):**
+    *   To enable safe concurrent use of the main database in the Central/Connected App model, a robust file-based locking mechanism (`.db.lock` file) has been implemented.
+    *   This system prevents simultaneous write operations, manages lock ownership with device ID/nickname, and includes features for heartbeat updates during long operations and stale lock detection/override.
+    *   All database write operations are now routed through this locking system to ensure data integrity in shared environments.
+
+*   **KML File Locking Mechanism (`KMLFileLockManager`):**
+    *   To further enhance data integrity in shared KML storage folders, an application-level locking mechanism for individual KML files (`[UUID].kml.lock`) has been implemented.
+    *   Before creating a new KML file (e.g., during API/CSV import) or when a KML file is accessed for deletion by the Central App, a lock specific to that KML file is managed.
+    *   This prevents other application instances from interfering with an active KML file operation (e.g., concurrent modification or deletion).
+    *   The lock file stores holder information, timestamps, and supports stale lock detection.
+    *   This system works in conjunction with the Database Locking Mechanism to protect both metadata and KML file content.
+
 ## Key Technologies
 
 *   **Language:** Python
-*   **GUI:** PySide6 (Qt)
+*   **GUI:** PySide6 (Qt) - *Theming enhanced with Fusion style and `qtmodern` for a modern dark look.*
+*   **Application Launcher & Startup:** `launcher_app.py` with `ui/loading_screen_widget.py` for threaded initialization.
+*   **UI Styling:** `qtmodern` *(for modern themes and window frames)*, Custom QSS via `assets/style.qss`
 *   **Database:** SQLite
+*   **Path Management:** `platformdirs` (for user-specific configuration paths)
 *   **Mapping & KML:** Folium, simplekml
 *   **APIs:** mWater (for data import), Google Earth Engine (upcoming for historical imagery processing)
 
 ## Current Status
 
-The application is in a beta stage. The core data management, KML generation, and manual Google Earth KML import features are functional. Development is actively focused on integrating Google Earth Engine for advanced historical imagery analysis.
+The application is undergoing a significant update to **Version 5 (v5)**. Key architectural changes, including a KML-first data model, user-defined configurations via `CredentialManager`, and the **Database Locking Mechanism**, have been implemented. The main data table now displays a comprehensive set of v5 metadata, and the filter panel UI has been updated for improved usability (date filters temporarily removed). See 'Key v5 Architectural Changes' for more details. The UI has also been modernized with High DPI support and a new application launcher. Development continues on further v5 enhancements and Google Earth Engine integration.
 
 ## Setup
 
@@ -60,4 +111,14 @@ The application is in a beta stage. The core data management, KML generation, an
 2.  Clone the repository.
 3.  Create a virtual environment and activate it.
 4.  Install dependencies: `pip install -r requirements.txt`
-5.  Run: `python main_app.py`
+5.  Run: `python launcher_app.py`
+6.  **First-Time Setup:** On the first launch, you will be guided through a setup process to configure your device nickname, application mode (Central/Connected), and specific paths for storing the main database and KML files.
+
+## Project Documentation & Development Insights
+
+For more detailed information on the project's v5 transition, architecture, and ongoing development tasks, please refer to the following documents:
+
+*   **`v5_task_and_Concept.md`**: Provides a comprehensive overview of the v5 project plan, architectural changes, glossary of terms, and detailed task breakdowns.
+*   **`Project_Logfile.md`**: Contains a log of development progress, detailing the changes and objectives for each completed task.
+
+These documents offer deeper insights into the development process and the evolution of the application.

@@ -1,0 +1,620 @@
+---
+# Product Requirements Document: KML-Editor-Advance Beta V5.0 Dev-ADas
+
+**Version:** 1.0
+**Date:** June 3, 2025
+**Status:** Final Draft
+**Prepared by:** v5 Updater and Planner (AI Assistant)
+
+---
+
+## 0. Project Context for Development (V5.0 Dev-ADas)
+
+### 0.1. Detailed Background & Current Situation
+
+The "KML-Editor-Advance" project is undergoing a significant upgrade from its previous version (Beta v4.001.Dv-A.Das) to "Beta V5.0 Dev-ADas." This V5 initiative aims to address limitations of the previous version and introduce substantial new functionalities and architectural improvements. The primary driver for this update is to enhance data integrity, modernize the user experience, and enable collaborative data management workflows.
+
+**Key Architectural Shifts from V4 to V5:**
+* **KML-First Paradigm:** The core change is a move from a database-centric model to a KML-first approach. In V5, KML files will be the primary source of truth for geographic information (polygons, points) and rich descriptive content. The application's database will primarily store metadata, references (filenames) to these KML files, versioning information, and status details. This shift is intended to improve data portability, interoperability, and simplify direct KML manipulation.
+* **Modular Design with Handlers:** The V4 codebase, particularly `main_window.py`, handled a broad range of functionalities. V5 introduces a more modular design by delegating specific domains of business logic to dedicated handler classes (e.g., `DataHandler` for data import/export, `KMLHandler` for KML file operations, `LockHandler` for synchronization). This is expected to improve code organization, testability, and maintainability.
+* **Central vs. Connected Application Modes:** A new dual-mode system is being introduced to facilitate shared data access over a Local Area Network (LAN). A "Central App" instance will manage the primary database and KML storage folder (potentially on a shared drive). "Connected App" instances will access this shared data, necessitating robust file and database locking mechanisms to ensure data consistency.
+
+**New Core V5 Features & Enhancements Covered in this PRD:**
+* A visual KML editor utilizing OpenLayers integrated within a `QWebEngineView`.
+* A new application launcher (`launcher_app.py`) with an informative loading screen.
+* Enhanced data import (API, CSV) and export capabilities aligned with the KML-first approach.
+* Robust file and database locking mechanisms.
+* Reliable UI updates and data refresh mechanisms.
+* Restored and improved UI components, including table filters.
+* Modernized UI styling using PySide6, `qtmodern`, and custom QSS.
+* User-configurable table views and map layer options.
+
+**Current Development State & Purpose of this PRD:**
+Based on project logs, foundational V5 tasks (initial styling, launcher, credential management, V5 DB schema, KML-first data ingestion for API/CSV, basic KML display, and initial locking mechanisms) have been conceptually planned and implemented up to approximately Task 10 of the original `Project_report.md`. However, several operational issues and bugs (referred to as problems 'a' through 'j' in planning discussions) have been identified with the current V5 development branch.
+
+This PRD document serves as the comprehensive blueprint for completing the KML-Editor-Advance Beta V5.0 Dev-ADas. It consolidates:
+1.  The intended final architecture and design.
+2.  Detailed plans for resolving all identified issues ('a' through 'j').
+3.  Specifications for implementing all remaining V5 features and enhancements.
+4.  Non-functional requirements, risks, and future considerations.
+
+It is designed to be used by any development agent (AI or human) to understand the project's current state (by cross-referencing with the provided file structure and logs) and the V5 goals, enabling them to systematically implement the required changes, debug existing issues, and finalize the application.
+
+### 0.2. Current Project File Structure and Key File Purposes
+
+*(This is based on the list of files provided during the planning sessions. An AI agent should verify against the actual repository if available to it.)*
+
+* **Root Directory (`dasakash20307/kml-editor-advance/KML-Editor-Advance-5-PH4-Enhanced_Features_UI_Refinements/`):**
+    * `launcher_app.py`: **Purpose:** V5 application entry point. Initializes `QApplication`, `LoadingScreenWidget`, starts main application thread. **Connections:** `main_app.py`, `ui/loading_screen_widget.py`, `core/credential_manager.py`.
+    * `main_app.py`: **Purpose:** Defines `MainWindow` creation and non-GUI initializations (called by `launcher_app.py`). **Connections:** `ui/main_window.py`, `core/utils.py`, `database/db_manager.py`.
+    * `requirements.txt`, `requirements_new.txt`: **Purpose:** Python package dependencies.
+    * `README.md`: **Purpose:** Project overview and instructions.
+    * Documentation (`Project_report.md`, `v5_task_and_Concept.md`, `Project_Logfile.md`, etc.): **Purpose:** Planning, logging, and conceptual documents for V5 development.
+
+* **`core/` Package:** Core application logic, data processing, utilities.
+    * `__init__.py`: Package initializer.
+    * `api_handler.py`: Handles mWater API communication. Used by `DataHandler`.
+    * `credential_manager.py`: Manages device identity, app mode, data paths (`device_config.db`). Central to configuration.
+    * `data_processor.py`: Validates and transforms API/CSV data. Defines `CSV_HEADERS`. Used by `DataHandler`.
+    * `kml_generator.py`: Creates KML document content using `simplekml`. Used by `DataHandler`, `KMLHandler`.
+    * `kml_utils.py`: Utilities for KML files (e.g., merging). Used by `DataHandler`.
+    * `sync_manager.py`: Contains `DatabaseLockManager` and `KMLFileLockManager`. Used by `LockHandler`.
+    * `utils.py`: General utilities (e.g., `resource_path`). Widely used.
+
+* **`database/` Package:** Database interaction.
+    * `db_manager.py`: `DatabaseManager` class for all main SQLite DB operations. Used by many components.
+
+* **`ui/` Package:** User interface components and UI-related logic.
+    * `__init__.py`: Package initializer.
+    * `data_handlers.py`: `DataHandler` class for data import/export logic. Instantiated by `MainWindow`.
+    * `first_run_setup_dialogs.py`: Dialogs for initial app setup. Used by `launcher_app.py`/`CredentialManager`.
+    * `kml_handlers.py`: `KMLHandler` class for KML viewing/editing logic. Instantiated by `MainWindow`.
+    * `loading_screen_widget.py`: UI for the startup screen. Used by `launcher_app.py`.
+    * `lock_handlers.py`: `LockHandler` class as UI's interface to `SyncManager`. Instantiated by `MainWindow`.
+    * `main_window.py`: `MainWindow` class, the central UI hub. Orchestrates other UI components and handlers.
+    * `splash_screen.py`: (Likely V4 remnant, retired based on logs).
+    * `table_delegates.py`: Custom delegates for `QTableView` (e.g., `EvaluationStatusDelegate`). Used by `MainWindow`.
+    * `table_models.py`: `PolygonTableModel` and `PolygonFilterProxyModel`. Used by `MainWindow`.
+    * **`ui/dialogs/` Sub-Package:** Various `QDialog` subclasses.
+        * `__init__.py`: Package initializer.
+        * `api_import_progress_dialog.py`: Dialog for showing API/CSV import progress. Used by `DataHandler`.
+        * `api_sources_dialog.py`: Dialog for configuring API data sources. Used by `MainWindow`/`DataHandler`.
+        * `default_view_settings_dialog.py`: Dialog for map view and KML styling preferences. Used by `MainWindow`, settings affect map widgets.
+        * `duplicate_dialog.py`: Dialog for handling duplicate entries. Used by `DataHandler`.
+        * `output_mode_dialog.py`: Dialog for KML export options. Used by `DataHandler`.
+        * *(New Dialogs planned: `sharing_info_dialog.py`, `table_view_editor_dialog.py`)*
+    * **`ui/widgets/` Sub-Package:** Custom `QWidget`s.
+        * `google_earth_webview_widget.py`: For Google Earth interaction. Used by `MainWindow`.
+        * `kml_editor_view_widget.py`: Hosts `QWebEngineView` for OpenLayers KML editor. Used by `MainWindow`, interacts with `KMLHandler`.
+        * `map_view_widget.py`: Hosts Folium map for basic KML display. Used by `MainWindow`, interacts with `KMLHandler`.
+    * **`ui/web_content/kml_editor/` Sub-Package:** Assets for OpenLayers editor.
+        * `kml_editor.html`: Main HTML file for the OpenLayers map. Loaded by `KMLEditorViewWidget`.
+        * `kml_editor_map.js`: JavaScript for OpenLayers map setup, KML loading, editing, `QWebChannel` interaction.
+        * `kml_editor_styles.css`: Custom CSS for the OpenLayers editor page.
+
+* **`assets/` Package:** Static assets.
+    * `style.qss`: Global Qt StyleSheet. Loaded by `launcher_app.py`.
+    * **`assets/js_libs/openlayers/`:** Contains `ol.js`, `ol.css`.
+    * **`assets/images/`:** (Planned for logo).
+
+* **`tests/` Package:** Unit tests.
+    * `test_kml_file_lock_manager.py`, `test_map_view_kml_parsing.py`.
+
+### 0.3. Role of this PRD Document
+
+This Product Requirements Document (PRD) is the **master specification** for the KML-Editor-Advance Beta V5.0 Dev-ADas. Its roles are:
+1.  **To provide a unified vision:** Consolidate all decided features, architectural changes, and bug fixes into a single, coherent document.
+2.  **To guide development:** Serve as the primary reference for any development agent (AI or human) tasked with implementing or completing the V5 features. It details *what* needs to be built and *how* it should generally function and integrate.
+3.  **To define scope:** Clearly outline what is included in the V5.0 release and what is deferred.
+4.  **To facilitate communication:** Act as a common understanding between stakeholders regarding the intended product.
+5.  **To serve as a basis for testing and QA:** Requirements herein will inform test case creation.
+
+The AI agent should use this PRD to:
+* Understand the context and current state of the project.
+* Identify specific tasks for implementation, debugging, or updates based on the detailed plans.
+* Recognize module dependencies and interaction points.
+* Adhere to the defined architectural principles and non-functional requirements.
+
+---
+
+## 1. Overview & Introduction
+
+* **1.1. Project Purpose:**
+    * The KML-Editor-Advance application is a tool designed for creating, editing, and managing KML (Keyhole Markup Language) files, primarily for geographic data related to agricultural and land-based projects. The V5.0 Dev-ADas update aims to significantly overhaul the application's architecture and functionality to improve data integrity, user experience, and introduce collaborative capabilities. Key goals include transitioning to a KML-first data paradigm, implementing robust Central/Connected application modes for shared data access, introducing an advanced visual KML editor using OpenLayers, and modernizing the overall user interface.
+* **1.2. Goals & Objectives for V5.0:**
+    * Improve data integrity and enable multi-user collaboration through robust file and database locking mechanisms.
+    * Enhance data management efficiency by adopting a KML-first architecture where KML files are the primary data source.
+    * Increase user productivity and accuracy with the introduction of a visual KML editor utilizing OpenLayers technology.
+    * Modernize the application's look, feel, and startup experience with a new launcher and consistent UI theming.
+    * Enable shared data access across a Local Area Network (LAN) via Central and Connected application modes.
+    * Resolve existing usability issues related to data display refreshes, filtering, and interaction with Google Earth mode.
+    * Introduce new usability features such as a configurable table view and improved map layer options.
+* **1.3. Target Audience/Users:**
+    * GIS field staff involved in data collection and KML generation.
+    * Data managers responsible for overseeing and validating geographic datasets.
+    * Project coordinators requiring tools for KML data visualization and minor edits.
+* **1.4. Scope:**
+    * **IN SCOPE for V5.0:** All features and fixes detailed in Section 4 of this document, including the new KML-first architecture, Central/Connected modes with locking, OpenLayers-based KML visual editor (geometry and description editing), revamped UI table with improved filtering and customizability, enhanced data import/export (API & CSV to KML-first), modernized launcher and UI styling, and fixes for previously identified bugs (locking, refresh, GE mode, map controls).
+    * **OUT OF SCOPE for V5.0:** A comprehensive automated data migration utility from pre-V5 versions (assumes fresh V5 setup or manual migration), advanced KML styling features within the visual editor (e.g., beyond basic geometry display properties defined by user settings), support for highly complex multi-geometry KMLs or advanced KML features (e.g., network links, time-based elements) within the editor's initial V5 release, direct integration with cloud storage providers beyond file-system level sharing for Central/Connected modes.
+
+---
+
+## 2. V5 Core Architectural Principles
+
+* **2.1. KML-First Data Approach:**
+    * The primary source of truth for geographic data (geometry, placemark details, descriptions) will be individual KML files once they are generated from imported data (API, CSV) or created/edited within the application.
+    * The main SQLite database will store metadata associated with these KML files, including a reference to the KML filename (typically UUID-based), creation/modification dates, edit history, status (e.g., "Created," "Edited," "Errored," "File Deleted"), and any tabular data not suitable for direct KML storage (e.g., farmer name, village, etc., though these will also be in the KML description).
+* **2.2. Modular Component Architecture:**
+    * The application will follow a modular structure to enhance maintainability and separation of concerns, as outlined in `v5_task_and_Concept.md`.
+    * **`core` Package:** Contains foundational logic (CredentialManager, SyncManager, DataProcessor, KMLGenerator, APIHandler, KMLUtils, Utils).
+    * **`ui` Package:** Contains user interface components (MainWindow, Dialogs, Handlers - DataHandler, KMLHandler, LockHandler, Models, Widgets).
+    * **`database` Package:** `DBManager` for SQLite interactions.
+    * **Handler Interaction Model:** `MainWindow` instantiates handlers. UI actions in `MainWindow` delegate to methods in these handlers. Handlers perform core logic (using `core` modules and `DBManager`) and then signal or call back to `MainWindow` to update the UI (e.g., refresh table, show messages).
+* **2.3. Central vs. Connected Application Modes:**
+    * **Central App Mode:** The application instance manages the primary database and KML storage folder, which can be located on a shared network drive. This instance acts as the authority for data and has higher privileges for managing locks (e.g., overriding stale locks).
+    * **Connected App Mode:** Application instances configure themselves to connect to the database and KML storage folder managed by a Central App instance. These instances rely on the Central App's data paths and participate in the locking mechanism to ensure data integrity, typically with more restricted lock override capabilities.
+* **2.4. UI Modernization Strategy:**
+    * The application will be built using PySide6.
+    * A 'Fusion' style will be applied globally, enhanced by the `qtmodern` library for a dark theme and modern window framing.
+    * A global QSS stylesheet (`assets/style.qss`) will be used for further application-wide styling consistency and customization.
+
+---
+## 3. User Stories
+
+* **3.1. Data Integrity & Sharing:**
+    * "As a data manager (Central App user), I want robust file locking so that multiple users accessing shared data do not cause corruption or data loss when creating, editing, or deleting KMLs and their associated database records."
+    * "As a field agent (Connected App user), I want to reliably access the latest KML data from a central repository, be notified if a KML I want to edit is locked by someone else, and be able to submit new KML data without conflicts."
+* **3.2. KML Editing & Creation:**
+    * "As a data validation officer, I want to visually inspect and adjust the vertices (add, move, delete) of a KML polygon directly on an interactive map to ensure its accuracy against various base maps (Esri, OpenStreetMap)."
+    * "As a user creating new records from API or CSV, I want the system to automatically generate a valid KML file for each record, store it, and link it to the metadata in the database."
+    * "As a user, I want to easily update the name, description, and other relevant textual details associated with a KML placemark through a clear form integrated with the visual KML editor."
+* **3.3. Data Management & Usability:**
+    * "As a data analyst, I want to quickly filter a large list of KML records based on criteria like their KML File Status, UUID, or Farmer Name to find specific entries."
+    * "As a frequent user, I want to customize the columns visible in the main data table and their order to suit my specific workflow and hide unnecessary information, and have these preferences saved."
+    * "As a data entry operator, I want the application to automatically refresh the data table after I import new records, delete existing ones, or when KML statuses change, so I always see the current state of the dataset."
+    * "As a user preparing data for CSV import, I want to be able to export a template CSV file that shows all required V5 headers and example KML description fields."
+    * "As a user working with Google Earth Pro, I want to easily copy the file path of a selected KML and see clear instructions on how to open it in Google Earth Pro."
+* **3.4. Application Experience:**
+    * "As a first-time user, I want a simple setup process that guides me through configuring the application mode (Central/Connected) and necessary data paths."
+    * "As a user, I want to see an informative loading screen with progress and branding (organization logo) when the application starts up."
+
+---
+
+## 4. Detailed Feature Specifications & Technical Plans
+
+* **4.1. Application Launcher & Initialization (Corresponds to CA5, Tasks 2, 15 from)**
+    * **4.1.1. Requirement:**
+        * The application must have a new, dedicated entry point (`launcher_app.py`) separate from the main application logic.
+        * Upon launch, an informative loading screen (`LoadingScreenWidget`) must be displayed immediately, showing application branding (organization logo), name, version information, and developer credits.
+        * The loading screen must feature a progress bar and a collapsible text area to display detailed logs of the initialization process and any startup errors.
+        * Main application initialization (including `CredentialManager` setup, `DatabaseManager` connection, and `MainWindow` creation) must occur in a background thread to keep the loading screen UI responsive.
+        * The loading screen should accurately reflect the progress of these initialization stages.
+        * On successful initialization, the loading screen should close, and the `MainWindow` should be displayed. If initialization fails, the loading screen should remain visible, clearly displaying the error messages from the logs.
+    * **4.1.2. Technical Plan:**
+        * **`launcher_app.py`:**
+            * Performs early `QApplication` setup: HighDPI scaling (Qt.AA_EnableHighDpiScaling - if still applicable for PySide6, or rely on default behavior), 'Fusion' style, Windows dark mode awareness hook using `ctypes`, and loading of the global QSS stylesheet (`assets/style.qss`).
+            * Creates and displays an instance of `LoadingScreenWidget`.
+            * Instantiates and starts an `InitializationThread` (a `QThread` subclass).
+            * The `InitializationThread`'s `run()` method will execute the sequence of main application initialization tasks. This includes instantiating `CredentialManager`, performing first-run checks, connecting to the database via `DatabaseManager`, and ultimately creating the `MainWindow` instance.
+            * `InitializationThread` will emit signals to `LoadingScreenWidget` to update its progress bar (`update_progress(value, text_status)`) and log panel (`append_log(message, level)`).
+            * Upon completion (success or failure) of the initialization sequence, the thread signals `launcher_app.py`.
+            * `launcher_app.py` then either hides/closes `LoadingScreenWidget` and shows `MainWindow` (wrapped with `qtmodern.windows.ModernWindow`) or keeps the launcher visible if errors occurred.
+        * **`ui/loading_screen_widget.py`:**
+            * A `QWidget` or `QDialog` (modal, frameless during initial loading phase).
+            * UI elements: `QLabel` for logo (using `QPixmap` loaded via `core.utils.resource_path`), `QLabel`s for App Name, Company Name, Tagline, Version Code, Developer Name, Support Email. A `QProgressBar` widget. A `QGroupBox` (collapsible) containing a read-only `QTextEdit` for logs.
+            * Implements public slots: `update_progress(self, value, text_status)` and `append_log(self, message, level="INFO")`.
+            * Styling for the progress bar will be applied via QSS for a modern look (as per detailed plan for Problem 'i').
+        * **`main_app.py` Refactoring:** The old `CustomSplashScreen` and direct `QApplication` execution are removed. `main_app.py` now provides functions like `perform_non_gui_initialization()` and `create_main_window_instance()` to be called by the `InitializationThread` and `launcher_app.py` respectively.
+    * **4.1.3. Key Modules & Files:** `launcher_app.py`, `ui/loading_screen_widget.py`, `main_app.py` (refactored), `core/utils.py` (for `resource_path`), `assets/images/org_logo.png` (new asset), `assets/style.qss`.
+
+* **4.2. Credential Management & First Run Setup (Corresponds to CA4 Part 1, Task 3 from)**
+    * **4.2.1. Requirement:**
+        * Each application installation must possess a unique, persistent 8-digit alphanumeric device UUID and a user-configurable device nickname.
+        * On the very first launch (or if configuration is corrupted), the user must be guided through a setup process to:
+            * Provide a device nickname.
+            * Select the application mode: "Central App" or "Connected App."
+            * Configure paths for the main database file and the KML files storage folder. Path input methods differ based on selected mode (file dialogs for Central, text input for Connected).
+        * These settings (device UUID, nickname, app mode, paths) must be persistently stored in a local secondary database (`device_config.db`).
+        * Other parts of the application must be able to retrieve these critical settings.
+    * **4.2.2. Technical Plan:**
+        * **`core/credential_manager.py` (`CredentialManager` class):**
+            * Manages `device_config.db` (SQLite) located in a user-specific application data directory (determined using the `platformdirs` library).
+            * `is_first_run()`: Detects first run by checking for `device_config.db`'s existence or its valid state.
+            * Generates UUID using `uuid.uuid4().hex[:8]`.
+            * Stores and provides getter methods for: `device_id`, `device_nickname`, `app_mode` ("Central App" / "Connected App"), `main_db_path`, `kml_folder_path`.
+            * Handles scenarios where `device_config.db` exists but is incomplete/corrupt, allowing for reconfiguration.
+        * **`ui/first_run_setup_dialogs.py`:** Defines a sequence of modal `QDialog` subclasses, styled by the global theme:
+            * `NicknameDialog`: `QLineEdit` for nickname.
+            * `ModeSelectionDialog`: `QRadioButtons` for "Central App" / "Connected App".
+            * `PathConfigurationDialog`: Dynamically adjusts UI. For "Central App," uses `QFileDialog.getSaveFileName` (for DB) and `QFileDialog.getExistingDirectory` (for KML folder). For "Connected App," provides `QLineEdit`s for pasting shared network paths. Includes input validation.
+        * **Integration with Launcher:** `launcher_app.py` (during its `InitializationThread`) instantiates `CredentialManager`. If `is_first_run()` is true (or config is corrupt), `launcher_app.py` (or `CredentialManager` itself) will execute the sequence of `FirstRunSetupDialogs` before proceeding with main application load. User input from dialogs is saved via `CredentialManager`.
+        * **`database/db_manager.py` Update:** Hardcoded database path logic removed; `DatabaseManager` now accepts `db_path` in its constructor (from `CredentialManager`).
+    * **4.2.3. Key Modules & Files:** `core/credential_manager.py`, `ui/first_run_setup_dialogs.py`, `launcher_app.py`, `platformdirs` library, `uuid` module, `sqlite3` module.
+
+* **4.3. V5 Database Schema & KML Storage Setup (Corresponds to CA1 Part 1 & DB aspects of CA4, Task 4 from)**
+    * **4.3.1. Requirement:**
+        * Define and implement the V5 SQL schema for the main `polygon_data` table in the application's primary SQLite database.
+        * `DatabaseManager` must be modified to connect to and manage a database file at a path provided by `CredentialManager`.
+        * Establish the root folder (path from `CredentialManager`) where KML files will be stored, and ensure the DB schema supports linking records to these KML files.
+    * **4.3.2. Technical Plan:**
+        * **`database/db_manager.py` (`DatabaseManager` class):**
+            * Constructor `__init__(self, db_path)` receives the full database path.
+            * The `_create_tables()` method defines the V5 `polygon_data` table schema:
+                * **Retained/Adapted from V4:** `id` (INTEGER PRIMARY KEY AUTOINCREMENT), `uuid` (TEXT UNIQUE), `response_code` (TEXT UNIQUE), `farmer_name` (TEXT), `village_name` (TEXT), `block` (TEXT), `district` (TEXT), `proposed_area_acre` (REAL), `p1_utm_str`...`p4_substituted` (TEXT, for initial 4-point import data only), `error_messages` (TEXT), `kml_export_count` (INTEGER), `last_kml_export_date` (TIMESTAMP), `date_added` (TIMESTAMP), `last_modified` (TIMESTAMP), `evaluation_status` (TEXT).
+                * **New Columns for V5:** `device_code` (TEXT, e.g., from API), `kml_file_name` (TEXT NOT NULL, e.g., `[UUID].kml`), `kml_file_status` (TEXT: "Created", "Edited", "Errored", "File Deleted", "Pending Deletion"), `edit_count` (INTEGER DEFAULT 0), `last_edit_date` (TIMESTAMP), `editor_device_id` (TEXT), `editor_device_nickname` (TEXT).
+            * V4 `status` column is effectively replaced by `kml_file_status`.
+            * Assumes a fresh V5 database setup; `_create_tables` establishes the schema if the DB file is new/empty. The existing `_migrate_schema` for `evaluation_status` is retained for minor adjustments if needed but no full V4->V5 data migration utility is within V5.0 scope.
+            * All CRUD methods (`add_or_update_polygon_data`, `get_all_polygon_data_for_display`, `get_polygon_data_by_id`, etc.) are updated to handle/select the new V5 columns.
+        * **KML Storage:** KML files (e.g., `[UUID].kml`) will be physically stored in the KML storage folder path obtained from `CredentialManager`. The `kml_file_name` column in the database links records to these files.
+    * **4.3.3. Key Modules & Files:** `database/db_manager.py`, `core/credential_manager.py`, `sqlite3` module.
+
+* **4.4. Data Ingestion: API Fetch & KML Generation (Corresponds to CA1 Part 2, Task 5 from)**
+    * **4.4.1. Requirement:**
+        * Fetch data from configured mWater APIs.
+        * For each valid record:
+            * Process and map API data to the V5 DB schema structure.
+            * Generate a KML file with a dynamic description based on record data.
+            * Save this KML file to the designated KML storage folder (this operation must acquire a KML file lock).
+            * Write a comprehensive metadata record to the main SQLite database, including `kml_file_name`, `kml_file_status`="Created", `device_code` (if from API), and current `editor_device_id`/`nickname` as creator (this operation must acquire a database lock).
+        * Handle duplicate `response_code` entries (skip and log).
+        * Provide user feedback via `APIImportProgressDialog`.
+    * **4.4.2. Technical Plan:**
+        * **`ui/data_handlers.py` (`DataHandler` class, method `handle_fetch_from_api` which calls `_process_imported_data`):** Orchestrates the entire KML-first workflow per API record.
+            1. Calls `core.api_handler.fetch_data_from_mwater_api` to get raw data.
+            2. For each row:
+                a. Uses `core.data_processor.process_api_row_data` (with `API_FIELD_TO_DB_FIELD_MAP`) to clean, validate, and structure data (including UTM parsing, point substitution logic).
+                b. Generates UUID if not present in API data (log warning).
+                c. Checks for duplicate `response_code` in DB via `DatabaseManager`. Skips if duplicate.
+                d. If record is `valid_for_kml`: Calls `core.kml_generator` to create a `simplekml.Kml` object. `add_polygon_to_kml_object` uses point data; `create_kml_description_for_placemark` uses other fields (excluding a predefined list).
+                e. Constructs KML filename (`f"{uuid_value}.kml"`).
+                f. Uses `LockHandler` to `acquire_kml_file_lock`. If successful, saves KML file to path from `CredentialManager`. If KML save fails or lock fails, sets `kml_file_status` to "Errored" or "Error - KML Lock Failed". Releases KML lock in `finally` block.
+                g. Prepares metadata dictionary for DB (UUID, response_code, `kml_file_name`, `kml_file_status`, `date_added`, `device_code`, creator `editor_device_id`/`nickname` from `CredentialManager`).
+                h. Uses `LockHandler` to `execute_db_operation_with_lock` for calling `DatabaseManager.add_or_update_polygon_data`.
+        * `APIImportProgressDialog` is updated throughout the batch process.
+        * Table refresh triggered after batch completion (Problem 'd' fix).
+    * **4.4.3. Key Modules & Files:** `ui/data_handlers.py`, `core/api_handler.py`, `core/data_processor.py`, `core/kml_generator.py`, `ui/lock_handlers.py` (and `core/sync_manager.py`), `database/db_manager.py`, `core/credential_manager.py`, `simplekml` library, `requests` library.
+
+* **4.5. Data Ingestion: Enhanced CSV Import & Template Export (Corresponds to CA2 Part 2, Task 10 from)**
+    * **4.5.1. Requirement:**
+        * Import data from user-selected CSV files, aligning with V5 KML-first data requirements.
+        * For each valid CSV row: process data, generate KML (with dynamic description from CSV columns), save KML (with KML lock), save metadata to DB (with DB lock), including creator info.
+        * Handle duplicates based on `response_code`.
+        * Provide user feedback via `APIImportProgressDialog`.
+        * Allow users to export a blank CSV template file with all V5 mandatory headers, 4-corner point data columns, and example columns for KML description content.
+    * **4.5.2. Technical Plan:**
+        * **`ui/data_handlers.py` (`DataHandler` class):**
+            * **`handle_import_csv()`:** Prompts user for CSV file(s). Reads CSV data (using `csv` module). Wraps the core processing loop (call to `_process_imported_data`) with `LockHandler.execute_db_operation_with_lock` for batch database integrity.
+            * **`_process_imported_data(is_api_data=False)`:**
+                * For each CSV row (dictionary): Uses `core.data_processor.process_csv_row_data` to validate against `CSV_HEADERS`, parse UTMs, structure data (including specific `kml_desc_*` fields).
+                * Subsequent KML generation (using `core.kml_generator`, incorporating `kml_desc_*` fields into description), KML file saving (with KML lock via `LockHandler`), and DB metadata saving (with `editor_device_id`/`nickname` from `CredentialManager`) mirrors the API import workflow. Heartbeats updated during DB lock for batch.
+            * **`handle_export_csv_template()`:** Defines header list using `core.data_processor.CSV_HEADERS.values()`. Uses `QFileDialog.getSaveFileName` to get save path from user. Writes header row to a CSV file (UTF-8-SIG encoding). Shows `QMessageBox` on completion/error.
+        * **`core/data_processor.py`:**
+            * `CSV_HEADERS` (OrderedDict): Defines all V5 CSV column names (matching internal field names where possible for simplicity, e.g., `uuid`, `response_code`, `farmer_name`, `p1_utm_str`, and new `kml_desc_survey_date`, `kml_desc_crop_type`, `kml_desc_notes`).
+            * `process_csv_row_data()`: Validates against `CSV_HEADERS`, processes data, reports status ("valid_for_kml", "error_missing_identifiers", etc.).
+    * **4.5.3. Key Modules & Files:** `ui/data_handlers.py`, `core/data_processor.py`, `core/kml_generator.py`, `ui/lock_handlers.py`, `csv` module, `PySide6.QtWidgets.QFileDialog`, `PySide6.QtWidgets.QMessageBox`.
+
+* **4.6. Locking Mechanisms (DB & KML) (Corresponds to CA4 Parts 2 & 3, Tasks 8, 9 from; Addresses Problems 'a', 'e')**
+    * **4.6.1. Requirement:** Implement robust, file-based distributed locking for the main SQLite database and individual KML files. This system must prevent concurrent write/delete conflicts from different application instances, correctly allow the lock-initiating instance (self) to perform operations without being blocked by its own lock, handle stale locks gracefully, differentiate behavior for "Central App" and "Connected App" modes (especially regarding lock overrides), and provide clear user feedback on lock status.
+    * **4.6.2. Technical Plan (Intended Final State):**
+        * **Core Managers (`core/sync_manager.py`):**
+            * `DatabaseLockManager`: Manages a `[db_name].db.lock` file located in the same directory as the main SQLite database.
+            * `KMLFileLockManager`: Manages individual `[UUID].kml.lock` files located in the same shared KML folder as their corresponding KML files.
+            * Both managers will implement methods such as `acquire_lock(expected_duration, operation_description)`, `force_acquire_lock(...)`, `release_lock()`, `update_heartbeat()`, and `get_current_lock_info()`.
+        * **Lock File Content (JSON):** Each lock file (`.db.lock` or `.kml.lock`) will store:
+            * `holder_device_id`: (String) Unique ID of the device holding the lock, from `CredentialManager`.
+            * `holder_nickname`: (String) User-defined nickname of the device, from `CredentialManager`.
+            * `start_time_iso`: (String) ISO 8601 UTC timestamp of when the lock was acquired.
+            * `heartbeat_time_iso`: (String) ISO 8601 UTC timestamp, periodically updated by the lock holder to indicate activity.
+            * `expected_duration_seconds`: (Integer) An estimate of how long the operation needing the lock is expected to take. Used for stale lock calculation.
+            * `operation_description`: (String) A brief textual description of the operation for which the lock is held (e.g., "API Data Import," "Editing KML polygon").
+        * **Self-Held Lock Logic (Addresses Problem 'a'):** The `acquire_lock` methods in both managers MUST robustly compare the `holder_device_id` from an existing lock file with the `current_device_id` obtained from `CredentialManager`. If they match (ensuring consistent string comparison), the lock is considered self-held. In this case, `update_heartbeat()` is called, and `True` (or an equivalent success status) is returned, allowing the current application instance to proceed with its operations.
+        * **Stale Lock Detection:** A lock will be considered stale if the current UTC time minus the `heartbeat_time_iso` exceeds the sum of `expected_duration_seconds` and a configurable `grace_period_seconds`.
+        * **`LockHandler` (`ui/lock_handlers.py`):** This class will be the primary interface for UI components to request and manage locks.
+            * It will be instantiated by `MainWindow` and provided with references to `CredentialManager`, `DatabaseLockManager`, and `KMLFileLockManager`.
+            * It will offer methods like `execute_db_operation_with_lock(operation_callable, *args, **kwargs)` and `acquire_kml_lock_for_editing(kml_filename, operation_desc)`.
+            * **UI Interaction:**
+                * If a resource is busy (lock held by another, non-stale), `LockHandler` will initiate a `QTimer` based retry mechanism (using `MAX_LOCK_RETRIES`, `LOCK_RETRY_TIMEOUT_MS` constants) and update the `MainWindow` status bar (e.g., "Resource is locked by [nickname], trying again...").
+                * If a stale lock is detected, `LockHandler` will prompt the user via `QMessageBox.question` (e.g., "Resource [name] locked by [nickname] appears stale. Override?"). The ability to execute `force_acquire_lock` upon user confirmation will depend on `CredentialManager.get_app_mode()` ("Central App" will have higher privileges for overriding).
+            * **Heartbeats:** For long-running operations wrapped by `execute_db_operation_with_lock`, `LockHandler` will manage periodic calls to `DatabaseLockManager.update_heartbeat()`. Similar logic will apply to KML editing sessions if they are expected to be lengthy.
+            * **Robust Release:** `LockHandler` will ensure `release_lock()` is called appropriately, often within `finally` blocks, by the respective core lock managers. Core lock managers will only delete lock files if the `holder_device_id` matches the current device.
+        * **Integration for Specific Operations (Addresses Problem 'e'):**
+            * **Database Writes:** All database write operations (e.g., during API/CSV imports in `DataHandler`, KML metadata updates post-edit in `KMLHandler`, direct `MainWindow` operations like deletions) must be channeled through `LockHandler` methods that acquire and release the database lock.
+            * **KML File Creation (e.g., in `DataHandler` during imports):** `LockHandler` must be used to acquire the specific KML file lock before `simplekml.save()`. Lock released afterwards.
+            * **KML File Editing (Task 11, via `KMLHandler`):** `LockHandler` acquires KML file lock upon initiating an edit session. If acquisition fails, editing is disallowed. Lock is held during the session (with heartbeats if necessary). Lock is released on save (after file write and DB update) or cancel.
+            * **KML File Deletion (e.g., in `DataHandler` or `MainWindow`, primarily Central App):** Before attempting `os.remove(kml_file_path)`, check `KMLFileLockManager.is_kml_locked(kml_filename)`. If actively locked by *another* user, skip deletion of that specific file and its DB record, notifying the user. If not actively locked by another, or if the lock is stale and the "Central App" user chooses to override, `LockHandler` will acquire the KML lock (potentially forcibly), then the file is deleted, and then the lock is released.
+    * **4.6.3. Key Modules & Files:** `core/sync_manager.py`, `ui/lock_handlers.py`, `core/credential_manager.py`, `json` module, `os` module, `datetime` module, `PySide6.QtCore.QTimer`, `PySide6.QtWidgets.QMessageBox`.
+
+* **4.7. Main Table UI & Data Display**
+    * **4.7.1. Table Model & Display (Corresponds to CA2 Part 1, Task 6 from)**
+        * **Requirement:** The main `QTableView` in `MainWindow` must correctly display all V5 metadata columns from the `polygon_data` table, providing users with comprehensive information about each record and its associated KML file.
+        * **Technical Plan:**
+            * **`ui/table_models.py` (`PolygonTableModel`):**
+                * The `_headers` list will be expanded to include user-friendly names for all new V5 columns: "DB ID", "UUID", "Response Code", "Evaluation Status", "Farmer Name", "Village", "Date Added", "KML File Name", "KML File Status", "Times Edited", "Last Edit Date", "Editor Device ID", "Editor Nickname", "Device Code (Creator)", "Export Count", "Last Exported", "Last Modified". Column order to be user-experience focused.
+                * Column index constants (e.g., `DB_ID_COL`, `UUID_COL`, `KML_FILE_NAME_COL`) within `PolygonTableModel` will be updated/created to reflect the new header order.
+                * The `data()` method will be updated to fetch and return data for these new columns from its internal data store (`self._data`), ensuring correct mapping of tuple indices (from DB query results) to column constants. Existing display logic for checkboxes, `EvaluationStatusDelegate` background roles (based on `EVALUATION_STATUS_COL`), and error text coloring (now based on `KML_FILE_STATUS_COL`) will be maintained and correctly indexed.
+                * `columnCount()` method will return `len(self._headers)`.
+            * **`ui/main_window.py` (`MainWindow._setup_main_content_area`):**
+                * `QTableView` column widths (`table_view.setColumnWidth`) will be adjusted for all new and reordered columns.
+                * `EvaluationStatusDelegate` (from `ui.table_delegates`) will be set for the correct `EVALUATION_STATUS_COL` index.
+                * Default sort column (e.g., by "Date Added") will use the correct column index.
+    * **4.7.2. Data Refresh Mechanism (Addresses Problem 'd')**
+        * **Requirement:** The main data table must refresh reliably and automatically after any data creation, modification, or deletion operation performed within the application.
+        * **Technical Plan:**
+            * **Handler-to-MainWindow Communication:** `DataHandler` and `KMLHandler` instances (and any other future handlers performing data modifications) will be provided with a reference to the `MainWindow` instance upon their initialization.
+            * **Triggering Refresh:** After a data-modifying operation in a handler is successfully completed (including DB commits and lock releases), the handler will call `self.main_window_reference.load_data_into_table()`. To ensure this UI update happens on the main GUI thread, especially if the handler logic might run in a worker thread or to decouple, this call will be wrapped: `QtCore.QTimer.singleShot(0, self.main_window_reference.load_data_into_table)`.
+            * **`MainWindow` Direct Operations:** Methods within `MainWindow` that directly cause data changes (e.g., `handle_delete_checked_rows`, `handle_clear_all_data`, or status updates in `on_table_selection_changed` for missing KMLs) will also call `self.load_data_into_table()` upon successful completion and lock release.
+            * **`PolygonTableModel.update_data(new_data)`:** This method in `ui/table_models.py` will be modified:
+                ```python
+                def update_data(self, new_data):
+                    self.beginResetModel()
+                    self._data = new_data if new_data is not None else []
+                    self.endResetModel()
+                ```
+                This ensures that when `MainWindow.load_data_into_table()` calls `self.source_model.update_data()`, the `QTableView` is correctly signaled to perform a full refresh.
+    * **4.7.3. Filter Options (Addresses Problem 'b'; Corresponds to CA2 Part 3, Task 12 from)**
+        * **Requirement:** Restore the filter panel UI in `MainWindow` and ensure its functionality for V5 columns, particularly filtering by `kml_file_status`.
+        * **Technical Plan (`ui/main_window.py`):**
+            * **UI Restoration:**
+                * In `_setup_table_editors_strip()`: Ensure `self.toggle_filter_panel_button` (" Filters" button) is created and its `clicked` signal is connected to a slot (e.g., `_handle_toggle_filter_panel_visibility`).
+                * In `_handle_toggle_filter_panel_visibility()`: Implement `self.filter_groupbox.setVisible(not self.filter_groupbox.isVisible())`.
+                * In `_setup_filter_panel()`:
+                    * Confirm `self.filter_groupbox` (e.g., `QGroupBox`) is created.
+                    * Instantiate filter widgets: `self.uuid_filter_input` (QLineEdit), `self.export_status_filter_combo` (QComboBox with "All", "Exported", "Not Exported"), `self.record_status_filter_combo` (QComboBox populated with `kml_file_status` values like "All", "Created", "Errored", "Edited", "File Deleted"). (Date filters remain removed as per Task 6 log).
+                    * Add these widgets to a layout (e.g., `QFormLayout`) which is then set on `self.filter_groupbox`.
+                    * Ensure `self.filter_groupbox` is added to the main window's layout and initially set to `setVisible(False)`.
+                    * Ensure `self.apply_filters_button` and `self.clear_filters_button` are part of this panel and correctly connected.
+            * **Functionality (`PolygonFilterProxyModel` in `ui/table_models.py`):**
+                * The `filterAcceptsRow()` method will be updated:
+                    * Logic for "Record Status" filter will operate on the `kml_file_status` column from `PolygonTableModel` (using the correct column index).
+                    * Other existing filters (UUID, Export Status) will use correct column indices for V5 data structure.
+                * `MainWindow.apply_filters()` will read values from the filter UI widgets and call setter methods on the `PolygonFilterProxyModel` instance (e.g., `set_kml_file_status_filter(text)`).
+    * **4.7.4. Table View Editor (New Feature - Problem 'h')**
+        * **Requirement:** Allow users to customize which columns are visible in the main data table and reorder these visible columns, with settings persisted.
+        * **Technical Plan:**
+            * **New Dialog (`ui/dialogs/table_view_editor_dialog.py`):** A `QDialog` with two `QListWidget`s ("Available Columns," "Visible & Ordered Columns"). Buttons for moving items (">", "<") and reordering ("Up", "Down" or enable drag-drop on the visible list: `setDragDropMode(QtWidgets.QAbstractItemView.InternalMove)`). "Save," "Cancel," "Reset to Default" buttons.
+            * **Configuration Storage (`core/credential_manager.py`):** Methods `save_table_column_config(config_list_of_headers_in_order)` and `load_table_column_config()` to store/retrieve the ordered list of visible column header strings in `device_config.db` (e.g., as a JSON string). `CredentialManager` also provides a default column order/visibility list (perhaps derived from `PolygonTableModel._headers`).
+            * **`MainWindow` Integration:**
+                * Add a "Table View Editor" button (e.g., in `_setup_table_editors_strip()`) to open the `TableViewEditorDialog`.
+                * New method `_apply_table_column_configuration()`:
+                    1. Loads config from `CredentialManager` (or default).
+                    2. Iterates through all master columns defined in `PolygonTableModel._headers`.
+                    3. For each column, finds its logical index (from its position in `_headers`).
+                    4. If the column header is *not* in the loaded visible list, calls `self.table_view.setColumnHidden(logicalIndex, True)`.
+                    5. If it *is* in the visible list, calls `self.table_view.setColumnHidden(logicalIndex, False)`.
+                    6. After setting visibility, iterates through the *loaded ordered list of visible headers*. For each header string, determines its logical index. Then, uses `self.table_view.horizontalHeader().moveSection(self.table_view.horizontalHeader().visualIndex(logicalIndex), new_visual_position)` to place it correctly. `new_visual_position` increments for each visible column.
+                * Call `_apply_table_column_configuration()` on `MainWindow` initialization and after `TableViewEditorDialog` is accepted (saved).
+
+* **4.8. Map Views & KML Interaction**
+    * **4.8.1. Basic KML Loading & Description (Folium MapView) (Corresponds to CA1 Part 3, CA3 Part 1, Task 7 from)**
+        * **Requirement:** The existing Folium-based `MapViewWidget` should, upon table row selection, load the associated KML file, parse it to display the polygon (or marker for point data) on the map, and show its embedded KML description in a read-only view. If a KML file is not found, its status should be updated in the database, and the map cleared.
+        * **Technical Plan (`ui/widgets/map_view_widget.py`):**
+            * A `QTextEdit` (`self.description_edit`) is part of the layout for KML descriptions.
+            * `load_kml_for_display(self, kml_file_path)`:
+                1. Reads KML file content.
+                2. Calls static method `_parse_kml_data(kml_content_string)` to extract geometry (coordinates list), description text, and geometry type (point/polygon). This parser handles common KML namespaces and converts lon/lat order to lat/lon for Folium.
+                3. Clears previous map features (re-initializes `self.current_map` or clears layers).
+                4. If polygon data, renders `folium.Polygon` (styling from `DefaultViewSettingsDialog` via `CredentialManager`). If point data, renders `folium.Marker`.
+                5. Centers/zooms map to new geometry using `fit_bounds()`, adjusted by user's default zoom offset (from `CredentialManager`).
+                6. Displays extracted KML description in `self.description_edit`; shows errors if KML parsing fails.
+            * `__init__` accepts `credential_manager` to fetch default view settings. `clear_map()` also clears description.
+        * **Integration (`MainWindow` or `KMLHandler`):** On table selection, retrieves `kml_file_name` and constructs full path. If file exists, calls `map_view_widget.load_kml_for_display()`. If file doesn't exist, calls `map_view_widget.clear_map()`, then uses `LockHandler` to update `kml_file_status` to "File Deleted" in DB (via `DatabaseManager.update_kml_file_status`), and triggers table refresh.
+    * **4.8.2. KML Visual Editor (OpenLayers) (Corresponds to CA3 Part 2, Task 11 from)**
+        * **Core Functionality Requirement:**
+            * Load KML associated with selected table row into an OpenLayers map within `KMLEditorViewWidget` (`QWebEngineView`).
+            * Allow user to toggle an "Edit Mode."
+            * In Edit Mode: Display polygon vertices; allow dragging vertices; allow adding new vertices to segments; allow deleting existing vertices.
+            * Provide a separate panel (Qt-based) for editing KML placemark's name and description fields.
+            * "Save" action: Retrieve modified geometry (GeoJSON or coordinate list) from OpenLayers and name/description from Qt panel. Re-generate KML content using `KMLGenerator` (modified to handle variable point lists). Overwrite the KML file (acquiring/releasing KML file lock via `LockHandler`). Update DB metadata (`last_edit_date`, `edit_count`, `editor_device_id/nickname`, `kml_file_status` to "Edited" - acquiring/releasing DB lock via `LockHandler`).
+            * "Cancel" action: Discard all changes, release KML lock if held for editing.
+        * **Technical Plan Core:**
+            * **`ui/widgets/kml_editor_view_widget.py`:** Hosts `QWebEngineView`. Manages Qt panel for name/description editing (`QLineEdit`, `QTextEdit`). Contains "Edit KML," "Save Changes," "Cancel Edit" `QPushButton`s. Sets up `QWebChannel` for Python-JS communication.
+            * **`ui/web_content/kml_editor/kml_editor.html`:** Basic HTML structure with a `div` for the OpenLayers map and links to `ol.css`, `kml_editor_map.js`, and `kml_editor_styles.css`.
+            * **`ui/web_content/kml_editor/kml_editor_map.js`:**
+                * Initializes OpenLayers map (`ol.Map`) with a base layer (Esri default).
+                * Implements JS functions callable from Python via `QWebChannel` (e.g., `loadKmlToMap(kml_content_or_path_or_coords)`, `enableMapEditing()`, `disableMapEditing()`, `getEditedGeometry()`).
+                * Uses `ol.format.KML` to read KML data and display features on a vector layer.
+                * For editing, uses `ol.interaction.Select` (to select features for modification) and `ol.interaction.Modify` (to allow dragging vertices and adding/deleting vertices on selected features).
+                * When editing is enabled, features are made selectable/modifiable. When disabled, interactions are removed/deactivated.
+                * `getEditedGeometry()`: Formats the modified feature's geometry (e.g., as GeoJSON coordinates or simple coordinate array) and sends it back to Python via `QWebChannel` (e.g., `pythonInterface.updateEditedGeometry(geometry_data)`).
+            * **Python-Side Editing Workflow (`KMLEditorViewWidget` and `KMLHandler`):**
+                1. `MainWindow` (or `KMLHandler`) tells `KMLEditorViewWidget` the KML to load.
+                2. `KMLEditorViewWidget` loads KML name/description into Qt inputs and calls `js_interface.loadKmlToMap()`.
+                3. "Edit KML" button click: `KMLEditorViewWidget` calls `LockHandler.acquire_kml_lock_for_editing()`. If success, calls `js_interface.enableMapEditing()`; enables Qt name/desc inputs and Save/Cancel buttons.
+                4. User edits geometry in map (JS) and text in Qt panel. JS calls Python via `QWebChannel` to update a temporary "edited geometry" store in `KMLEditorViewWidget`. Qt inputs update a temporary "edited description" store.
+                5. "Save Changes" button click: `KMLEditorViewWidget` calls `KMLHandler.save_edited_kml(original_kml_filename, edited_geometry_data, edited_name_desc_data)`.
+                6. `KMLHandler.save_edited_kml()`:
+                    a. Uses `LockHandler` for DB lock.
+                    b. Uses `KMLGenerator` to create new KML content from edited geometry and description. `KMLGenerator.add_polygon_to_kml_object` must accept a variable list of coordinates.
+                    c. Saves (overwrites) the KML file (KML lock is already held).
+                    d. Updates DB metadata via `DatabaseManager` (edit count, last edit date, editor device from `CredentialManager`, `kml_file_status`="Edited").
+                    e. (DB lock released by `LockHandler`).
+                    f. Signals `KMLEditorViewWidget` to disable editing mode (`js_interface.disableMapEditing()`) and reload the saved KML.
+                    g. Signals `MainWindow` to refresh table.
+                7. "Cancel Edit" button click: `KMLEditorViewWidget` discards temp changes, calls `js_interface.disableMapEditing()`, reloads original KML. `LockHandler.release_kml_lock()` is called by `KMLEditorViewWidget`.
+        * **Map Controls & Styling (Addresses Problem 'f'):**
+            * **Requirement:** OpenLayers map should use KML styling (colors, opacity, width) and view settings (zoom) from `DefaultViewSettingsDialog` via `CredentialManager`.
+            * **Technical Plan:** `KMLEditorViewWidget` retrieves settings from `CredentialManager`. Passes them as a dictionary to a JS function (e.g., `setMapDisplaySettings(settings)`) via `QWebChannel`. In `kml_editor_map.js`, `setMapDisplaySettings` updates global JS style variables or directly applies them to the KML vector layer's `ol.style.Style` (fill, stroke) and the `ol.View` (maxZoom, initialZoom/zoomOffset on fit). (Detailed in previous "Plan for Problem 'f'").
+        * **Button Character Fix (Addresses Problem 'j' Part 1):**
+            * **Requirement:** OpenLayers map control buttons (zoom, etc.) must display correctly.
+            * **Technical Plan:** In `kml_editor.html`, ensure `ol.css` is correctly linked and loaded. Check `kml_editor_styles.css` for conflicting CSS rules. Ensure UTF-8 encoding for all web assets. (Detailed in previous "Plan for Problem 'j' Part 1").
+        * **Simplified Base Layers (Addresses Problem 'j' Part 2):**
+            * **Requirement:** Allow users to switch between Esri (default) and OpenStreetMap base layers.
+            * **Technical Plan:** `kml_editor_map.js` defines `ol.layer.Tile` for Esri (visible default) and OSM (hidden default). `KMLEditorViewWidget` adds a `QComboBox` ("Esri", "OpenStreetMap"). `QComboBox.currentTextChanged` signal calls a JS function `switchBaseLayer(layerTitle)` via `QWebChannel`. JS function toggles visibility of the respective OpenLayers tile layers. (Detailed in previous "Plan for Problem 'j' Part 2").
+    * **4.8.3. Google Earth Mode Functionality (Addresses Problem 'g')**
+        * **Requirement:** Restore "Copy File Path" to clipboard and instruction popup when interacting with GE mode.
+        * **Technical Plan:** `MainWindow.on_table_selection_changed` (or its delegate in `KMLHandler`) retrieves the full KML path. If GE mode is active/triggered, it calls a method (e.g., `process_kml_for_google_earth(path)`) on the `GoogleEarthViewWidget` instance. This method in `GoogleEarthViewWidget` uses `QtGui.QGuiApplication.clipboard().setText(path)` and shows a `QtWidgets.QMessageBox.information()` with instructions for opening in Google Earth Pro (Desktop). (Detailed in previous "Plan for Problem 'g'").
+
+* **4.9. KML Download/Export (Corresponds to CA1 Part 4, Task 13 from)**
+    * **4.9.1. Requirement:**
+        * Allow users to export KML data for rows selected in the main table.
+        * The export must use the persistently stored KML files (KML-first approach), not regenerate KML from database coordinates on-the-fly.
+        * Provide two export modes via `OutputModeDialog`:
+            * "Single Consolidated KML File": Merges all placemarks from selected individual KML files into a single new KML file for the user to save.
+            * "Multiple Individual KML Files": Copies the individual KML files (for selected rows) directly to a user-selected output directory.
+        * Update `kml_export_count` and `last_kml_export_date` in the database for each successfully exported record (this operation requires a database lock).
+        * Filter out records for export where the KML file doesn't exist or its status is "Errored" or "File Deleted."
+    * **4.9.2. Technical Plan:**
+        * **`ui/main_window.py` (`handle_generate_kml` method):** Delegates core logic to `DataHandler.handle_generate_kml`.
+        * **`ui/data_handlers.py` (`DataHandler.handle_generate_kml` method):**
+            1. Retrieves list of checked item database IDs from `PolygonTableModel`.
+            2. For each ID, fetches the corresponding `kml_file_name` from `DatabaseManager`.
+            3. Constructs full paths to KML files using `kml_root_path` from `CredentialManager`.
+            4. Filters out records if KML file doesn't exist or status is inappropriate.
+            5. Prompts user for output folder and KML output mode using `OutputModeDialog`.
+            6. **If "Single Consolidated KML File" mode:**
+                * Uses `core.kml_utils.merge_kml_files(source_kml_paths_list, output_kml_path)`. This utility will use `lxml` or `xml.etree.ElementTree` to parse each source KML, extract all `<Placemark>` elements, and add them under the `<Document>` element of a new `simplekml.Kml` object, which is then saved.
+            7. **If "Multiple Individual KML Files" mode:**
+                * For each valid source KML file, copies it using `shutil.copy()` to the user's output directory.
+            8. For each record successfully included in the export, prepares data to update `kml_export_count` and `last_kml_export_date`. This batch update to the database is performed via `DatabaseManager` and wrapped with `LockHandler.execute_db_operation_with_lock`.
+            9. Triggers table refresh via `MainWindow`.
+    * **4.9.3. Key Modules & Files:** `ui/data_handlers.py`, `ui/main_window.py`, `core/kml_utils.py`, `database/db_manager.py`, `core/credential_manager.py`, `ui/dialogs/output_mode_dialog.py`, `simplekml`, `lxml` (or `xml.etree.ElementTree`), `shutil`.
+
+* **4.10. Central/Connected App Path Sharing & Network Checks (Corresponds to CA4 Part 4, Task 14 from)**
+    * **4.10.1. Requirement:**
+        * **Central App:** Provide a UI mechanism for the user to easily view and copy its currently configured main database file path and KML files folder path, to assist in configuring Connected Apps.
+        * **Connected App:** During startup (after initial configuration), perform checks to verify network accessibility of the configured Central App's database and KML folder paths. Display clear status or error messages on the loading screen if resources are inaccessible.
+    * **4.10.2. Technical Plan:**
+        * **Central App Path Sharing UI:**
+            * **`ui/main_window.py`:** Add a new `QAction` (e.g., "Sharing Information" or "View Shared Paths") to a menu (e.g., "Settings" or "File").
+            * This action will create and show an instance of a new dialog: `ui/dialogs/sharing_info_dialog.py` (New File).
+            * **`ui/dialogs/sharing_info_dialog.py`:** A modal `QDialog` that:
+                * Reads the current main DB path and KML folder path from `CredentialManager`.
+                * Displays these paths in read-only `QLineEdit` widgets.
+                * Provides a "Copy" `QPushButton` next to each path, which uses `QtGui.QGuiApplication.clipboard().setText(path_string)` to copy the respective path.
+                * Includes a "Close" button.
+        * **Connected App Network Checks:**
+            * **`launcher_app.py` (within `InitializationThread`):**
+                * After `CredentialManager` is loaded and if `app_mode` is "Connected App":
+                    * Retrieve the configured Central App's DB path and KML folder path.
+                    * Emit log messages to `LoadingScreenWidget`: "Attempting to verify access to Central Database at [path]..." and "Attempting to verify access to Central KML folder at [path]...".
+                    * Use `os.path.exists()` or similar `os.path` functions to check:
+                        * For DB path: Check if the parent directory exists. (A direct file existence check might try to lock it or might fail on network paths if permissions are tight for just existence checks).
+                        * For KML folder path: Check if the directory exists (`os.path.isdir()`).
+                    * If checks fail (e.g., path does not exist, network error if `os.path` raises one for inaccessible network paths):
+                        * Emit a critical error message to `LoadingScreenWidget` log: "Error: Cannot connect to Central App resource at [path]. Please ensure the Central App (Nickname: [Central_App_Nickname_from_config_if_stored]) is running, network paths are correct, folders are shared properly, and network is available."
+                        * The launcher might then decide to halt further loading of `MainWindow` or allow `MainWindow` to load in a severely restricted/offline mode (details of restricted mode are out of scope for V5.0 initial plan unless specified).
+    * **4.10.3. Key Modules & Files:** `ui/main_window.py`, `ui/dialogs/sharing_info_dialog.py` (new), `launcher_app.py`, `core/credential_manager.py`, `os.path` module, `PySide6.QtGui.QGuiApplication`.
+
+* **4.11. UI Styling & Theming (Corresponds to CA6, Tasks 1, 16 from)**
+    * **4.11.1. Requirement:** Achieve a consistent, modern visual theme across the entire application, including all main windows, dialogs, and widgets. The theme should be based on Fusion style, enhanced by `qtmodern` (dark theme), and further customized with a global QSS stylesheet.
+    * **4.11.2. Technical Plan:**
+        * **Initial Setup (`launcher_app.py` - Task 1):**
+            * `QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)` (Review if needed for PySide6, as high DPI is often default).
+            * `app.setStyle('Fusion')`.
+            * (Conditional for Windows) `ctypes.windll.uxtheme.SetPreferredAppMode(2)` for native dark mode title bars.
+            * Load global QSS from `assets/style.qss` using `app.setStyleSheet()`.
+            * Apply `qtmodern.styles.dark(app)`.
+            * Wrap the main window instance (`MainWindow`) with `qtmodern.windows.ModernWindow`.
+        * **Finalization (`assets/style.qss` - Task 16):**
+            * Iteratively develop and refine `assets/style.qss` to cover all common Qt widgets (`QPushButton`, `QLineEdit`, `QComboBox`, `QTableView`, `QGroupBox`, `QTextEdit`, `QProgressBar`, etc.) and custom application widgets/dialogs.
+            * Aim for a cohesive look that complements the `qtmodern` dark theme.
+            * Remove any conflicting inline `setStyleSheet` calls from individual widget implementations, promoting `style.qss` as the single source of truth for custom styling.
+            * Test styling consistency across all parts of the application on different operating systems if possible.
+    * **4.11.3. Key Files & Libraries:** `launcher_app.py`, `assets/style.qss`, `qtmodern` library, `PySide6.QtWidgets.QApplication`.
+
+---
+
+## 5. Non-Functional Requirements
+
+* **5.1. Usability:**
+    * **Intuitive Interface:** The application should be usable with minimal training for users familiar with basic GIS concepts and desktop applications. Navigation should be clear, and workflows logical.
+    * **Feedback:** Consistent and timely feedback for user actions (e.g., button clicks, data operations, errors) via status bar messages, progress dialogs, or informational popups (as per Improvement Suggestion 2 in planning review).
+    * **Responsiveness:** UI should remain responsive during background operations. Long operations (>2-3 seconds) must show progress.
+    * **Accessibility:** Adhere to standard HCI principles. Ensure sufficient color contrast, keyboard navigability where possible.
+    * **Error Handling:** Errors should be presented to the user in a non-alarming way, with clear messages and, where possible, guidance on how to resolve the issue or report it.
+* **5.2. Reliability & Data Integrity:**
+    * **Locking:** The database and KML file locking mechanisms (detailed in 4.6) must be robust to prevent data corruption in single-user and multi-user (Central/Connected App) scenarios.
+    * **Transactional Operations:** Database operations involving multiple steps should be transactional where appropriate to ensure atomicity.
+    * **KML Standards:** Generated KML files should adhere to OGC KML 2.2/2.3 standards for broad compatibility.
+    * **Error Recovery:** The application should handle unexpected errors gracefully, log them, and avoid data loss.
+* **5.3. Performance:**
+    * **Startup Time:** Application should launch to an interactive state within an acceptable timeframe (e.g., < 10-15 seconds on a typical target machine after initial setup).
+    * **Data Loading (Table):** Loading and displaying data in the main table should be performant for datasets up to ~10,000 records. Filtering should also be responsive.
+    * **KML Operations (OpenLayers):** Rendering and basic editing of typical KML polygons (e.g., up to 500-1000 vertices) in the OpenLayers editor should be smooth and interactive. Performance with extremely complex KMLs may be a known limitation for V5.0.
+    * **Batch Operations (API/CSV Import):** Importing batches of ~100-200 records should complete within a reasonable time (e.g., a few minutes, depending on KML complexity and network), with continuous progress feedback.
+* **5.4. Maintainability & Extensibility:**
+    * **Modular Codebase:** Adherence to the defined modular architecture (core, UI, handlers, database) to facilitate easier understanding, debugging, and future enhancements.
+    * **Code Quality:** Code should be reasonably commented, especially complex sections. Use of Python type hints is encouraged.
+    * **Configuration Driven:** Key settings (paths, API endpoints - if they change) should be configurable rather than hardcoded where practical.
+* **5.5. Installation & Setup:**
+    * **Dependencies:** All required Python libraries listed in `requirements_new.txt`.
+    * **First-Run Experience:** The initial setup process (via `FirstRunSetupDialogs`) must be clear, guiding the user through essential configurations.
+
+---
+
+## 6. Risks and Mitigations
+
+*(Adapted from `v5_task_and_Concept.md` Section 6 and `Project_report.md`, plus our planning discussions)*
+
+* **6.1. Locking Mechanism Complexity & Reliability (Problem 'a' & 'e'):**
+    * **Risk:** Incorrect implementation could lead to data corruption, deadlocks, or the application blocking itself. The "self-locking" issue is a prime example.
+    * **Mitigation:** Implement the detailed plan for section 4.6 rigorously, focusing on robust device ID comparison for self-held locks. Thorough unit testing for `DatabaseLockManager` and `KMLFileLockManager`. Extensive integration testing simulating Central/Connected App concurrent access. Detailed logging within locking modules for easier debugging.
+* **6.2. KML Visual Editor (OpenLayers & QWebChannel Integration - Task 11):**
+    * **Risk:** Complexity in Python-JavaScript communication via `QWebChannel` leading to instability. Achieving a smooth, intuitive, and bug-free geometry editing experience. Potential performance bottlenecks with very complex KMLs in OpenLayers.
+    * **Mitigation:** Phased implementation of editor features, starting with core vertex manipulation. Robust error handling and type checking for data passed via `QWebChannel`. Leverage OpenLayers' built-in interactions (`ol.interaction.Modify`) as much as possible. Performance testing with sample complex KMLs. Define clear V5 scope for editing features (as per section 1.4).
+* **6.3. Network Dependency and Latency (Connected App Mode - Task 14):**
+    * **Risk:** Application responsiveness and data consistency for "Connected App" instances can be severely affected by unreliable LAN connections or high latency to the Central App's shared resources.
+    * **Mitigation:** Implement reasonable timeouts for network-dependent operations in `LockHandler`. Provide clear, actionable error messages to the user regarding network connectivity issues (e.g., during startup checks by `launcher_app.py`). For V5.0, Connected App mode assumes a relatively stable LAN; advanced offline capabilities are out of scope.
+* **6.4. Data Integrity during KML-First Operations (Tasks 5, 10, 11, 13):**
+    * **Risk:** Errors during KML file saving (disk full, permissions) after DB metadata has been prepared/updated, or vice-versa, leading to inconsistencies between KML files and DB records.
+    * **Mitigation:** Structure operations to minimize inconsistency windows (e.g., attempt KML file write, if successful then commit DB changes). Use DB transactions for metadata updates. Log any such inconsistencies clearly if they occur, and ensure `kml_file_status` accurately reflects known issues.
+* **6.5. User Adoption of New V5 Concepts:**
+    * **Risk:** Users familiar with previous versions or different KML tools might find the KML-first approach, distinct Central/Connected modes, or the new OpenLayers editor initially confusing.
+    * **Mitigation:** Clear and simple UI for the first-run setup. Contextual tooltips or help text for new features. Consistent UI patterns. (User documentation/guides are outside this PRD's scope but would be beneficial).
+* **6.6. Scope Management for V5.0:**
+    * **Risk:** Tendency for scope creep, especially for the KML editor and new UI features.
+    * **Mitigation:** Adhere strictly to the features and requirements defined in this PRD for the V5.0 release. Log feature requests beyond this scope in Section 7 (Future Considerations).
+
+---
+
+## 7. Open Issues / Future Considerations (Post V5.0)
+
+* **Comprehensive V4 to V5 Data Migration Utility:** A dedicated tool or script to smoothly migrate existing data from the V4 application's database and structure to the new V5 KML-first format and database schema.
+* **Advanced KML Styling in Editor:** UI within the KML editor to manage a wider range of KML styling options (icons, line styles, label styles, polygon fill patterns) beyond the global settings.
+* **Support for Multi-Geometry KMLs & Folders:** Enhancing the KML editor and data handling to correctly parse, display, edit, and manage KML files containing multiple placemarks, nested folders, or diverse geometry types (lines, points, polygons) within a single file.
+* **Performance Optimization for Extremely Large Datasets/KMLs:** Implementing strategies like data pagination/virtualization for the main table if record counts exceed tens of thousands, and advanced geometry simplification or LOD techniques for rendering very large KMLs in OpenLayers.
+* **Enhanced Custom Map Integration:** Allowing users to add and configure their own WMS/WMTS/XYZ tile server URLs with API key management for more diverse base map options.
+* **Offline Capabilities for Connected App:** Implementing more robust data caching or operation queuing for "Connected App" instances if the network connection to the "Central App" is temporarily lost.
+* **Expanded Automated Testing:** Increasing unit and integration test coverage, especially for UI interactions, the KML visual editor, and various scenarios in Central/Connected app modes.
+* **User Role / Permission Management (Advanced):** If true multi-user editing with different permission levels becomes a requirement for Central App data.
+
+---
+
+## 8. Appendix
+
+* **8.1. Glossary of Terms:**
+    *(Populated directly from the "Glossary of Terms and References" in `Project_report.md` and `v5_task_and_Concept.md`)*
+    * **CA1 (Change Area 1):** Refers to the planned "Overhaul of the Online Fetch System & KML File Handling." This includes the shift to a KML-first data approach where KML files are generated and stored persistently upon data acquisition, with the database primarily storing metadata.
+    * **CA2 (Change Area 2):** Refers to the planned "Table System, Filters, and CSV Import/Export Enhancements." This covers updates to the main data table, its filtering capabilities, and CSV functionalities to align with v5 data structures.
+    * **CA3 (Change Area 3):** Refers to the planned "Viewport Updates (Standard Map & KML Editor)." This focuses on enhancing the map display and introducing a visual KML editor, with OpenLayers being the chosen technology for the editor.
+    * **CA4 (Change Area 4):** Refers to the planned "Central Data Management System (Central vs. Connected App Mode)." This introduces dual operating modes, shared data access over LAN, and associated locking mechanisms for database and KML files.
+    * **CA5 (Change Area 5):** Refers to the planned "App Launcher / Loading Screen." This involves creating a new application entry point with an informative loading screen.
+    * **CA6 (Change Area 6):** Refers to the planned "Modern UI Design and Styling for PySide6." This focuses on updating the application's visual appearance using themes like Fusion, `qtmodern`, and custom QSS.
+    * **KML-first:** An architectural approach where the KML file is treated as the primary source of truth for geographic data (geometry, description) once created, with the database storing metadata and a reference (filename) to this KML file.
+    * **CredentialManager:** A new core component responsible for managing device identity (UUID, nickname), application mode (Central/Connected), and paths to the main database and KML storage folder. It uses a local secondary database (`device_config.db`).
+    * **Locking Mechanism:** Refers to the application-level file-based locking system (for both the main database and individual KML files) to manage concurrent access in the Central/Connected App setup. This is primarily managed by `DatabaseLockManager` and `KMLFileLockManager` in `core/sync_manager.py` and utilized by UI components through `ui/lock_handlers.py`.
+    * **OpenLayers:** A JavaScript library chosen for implementing the advanced KML visual editor within a `QWebEngineView`.
+    * **QWebChannel:** A PySide6 module for bidirectional communication between Python and JavaScript running in `QWebEngineView`.
+* **8.2. Key Technologies & Libraries:**
+    *(Populated directly from "5. Key Technologies & Libraries Summary (Consolidated for v5)" in `Project_report.md`)*
+    * **Core Framework:** `PySide6` (QtWidgets, QtCore, QtGui, QtWebEngineWidgets, QtWebChannel)
+    * **Styling & UI Enhancement:** `qtmodern` (Python package), `ctypes` (Python built-in for Windows), Custom QSS (`assets/style.qss`).
+    * **Database:** `sqlite3` (Python built-in).
+    * **Data Handling & KML:**
+        * `requests` (for API calls).
+        * `simplekml` (for KML generation).
+        * `lxml` or `xml.etree.ElementTree` (Python built-in, for KML parsing/merging).
+        * `utm` (Python package, for UTM conversions - review if still directly used or if logic is now fully in `DataProcessor`).
+        * `folium` (for `MapViewWidget` - basic KML display).
+        * `csv`, `json` (Python built-ins).
+    * **KML Visual Editor:** `OpenLayers` (JavaScript library, bundled in `assets/js_libs/openlayers/`).
+    * **File/OS Operations & Utilities:** `os`, `uuid`, `shutil`, `datetime`, `time`, `io.StringIO` (Python built-ins).
+    * **Path Management:** `platformdirs` (Python package, for local app data paths).
+* **8.3. UI Mockups/Wireframes Descriptions (Conceptual):**
+    * **Loading Screen (`LoadingScreenWidget`):** Centered logo at the top. Below logo: App Title (large font), Version (smaller font). Centered: Progress bar. Below progress bar: Status text line. Bottom: Collapsible section for detailed logs, developer credits/contact.
+    * **First Run Setup (`FirstRunSetupDialogs` sequence):** Series of clean, modal dialogs. Each dialog with a clear instruction label, relevant input fields (QLineEdit for nickname, QRadioButtons for mode, QLineEdits with Browse buttons for paths), and "Next"/"Finish Setup" buttons.
+    * **Main Window (`MainWindow`):** Modern window frame (via `qtmodern`). Menu bar, Toolbar (with icons for common actions). Main area split: Left pane for map views (tabbed: Folium `MapViewWidget`, OpenLayers `KMLEditorViewWidget`, potentially `GoogleEarthViewWidget`). Right pane for `QTableView` displaying KML metadata. Above table: `table_editors_strip` with " Filters" button and "Table View Editor" button. Filter panel (`filter_groupbox`) appears below strip when toggled. Status bar at the bottom.
+    * **KML Visual Editor (`KMLEditorViewWidget`):** `QWebEngineView` occupying most space. Small Qt panel alongside or overlayed for KML Placemark Name (QLineEdit) and Description (QTextEdit). Buttons: "Edit KML" (toggles OpenLayers interactions), "Save Changes," "Cancel Edit." `QComboBox` for base map layer switching.
+    * **Table View Editor Dialog (`TableViewEditorDialog`):** Two `QListWidget`s side-by-side ("Available/Hidden," "Visible & Ordered"). Buttons ("Add >", "< Remove", "Move Up", "Move Down") between them. "Save," "Cancel," "Reset to Default" at bottom.
+
+---

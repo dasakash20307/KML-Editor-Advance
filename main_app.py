@@ -1,89 +1,67 @@
-# File: DilasaKMLTool_v4/main_app.py
+# File: main_app.py (Refactored for threading)
 # ----------------------------------------------------------------------
 import sys
-import os # Import the os module
-from PySide6.QtWidgets import QApplication, QSplashScreen 
-from PySide6.QtGui import QPixmap, QFont, QPainter, QColor 
-from PySide6.QtCore import QTimer, Qt                 
+import os
+from PySide6.QtCore import Qt # Kept as it's a common import
+from ui.main_window import MainWindow
+from core.utils import resource_path
+from core.credential_manager import CredentialManager
+from database.db_manager import DatabaseManager
 
-from ui.main_window import MainWindow   
-from core.utils import resource_path  
+def perform_non_gui_initialization():
+    """
+    Performs non-GUI initialization tasks.
+    Initializes CredentialManager and DatabaseManager.
+    Returns a dictionary with 'success': bool and 'db_manager': instance or 'error': str.
+    """
+    try:
+        print("MainApp: Performing non-GUI initialization...") # For console logging
+        credential_manager = CredentialManager()
 
-APP_NAME_MAIN = "Dilasa Advance KML Tool"
-APP_VERSION_MAIN = "Beta.v4.001.Dv-A.Das"
-ORGANIZATION_TAGLINE_MAIN = "Developed by Dilasa Janvikash Pratishthan to support community upliftment"
-LOGO_FILE_NAME_MAIN = "dilasa_logo.jpg" 
-INFO_COLOR_CONST_MAIN = "#0078D7" 
+        if credential_manager.is_first_run():
+            # This state should ideally be caught by the launcher before calling this.
+            # The launcher is responsible for running the first-time setup dialogs.
+            # If we reach here and it's still a first run, it means setup wasn't completed.
+            error_msg = "First-run setup not completed. Please restart and complete the setup."
+            print(f"MainApp ERROR: {error_msg}")
+            return {"success": False, "error": error_msg, "db_manager": None, "credential_manager": credential_manager}
 
-class CustomSplashScreen(QSplashScreen): 
-    def __init__(self, app_name, app_version, tagline, logo_path):
-        splash_width = 550
-        splash_height = 480 
-        
-        base_pixmap = QPixmap(splash_width, splash_height)
-        base_pixmap.fill(Qt.GlobalColor.white) 
+        db_path = credential_manager.get_db_path()
+        if not db_path: # This implies not first_run but essential path is missing
+            error_msg = "Critical setting (Database path) not found in configuration. The configuration may be incomplete or corrupted."
+            config_file_location = credential_manager.get_config_file_path()
+            detailed_error_msg = f"{error_msg} Expected location: {config_file_location}"
+            print(f"MainApp ERROR: {detailed_error_msg}")
+            return {
+                "success": False,
+                "status": "CORRUPT_CONFIG", # New status flag
+                "error": error_msg, # User-friendly error
+                "config_path": config_file_location, # Path to config file
+                "db_manager": None,
+                "credential_manager": credential_manager # Pass credential_manager for re-setup
+            }
 
-        painter = QPainter(base_pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        print(f"MainApp: Initializing DatabaseManager instance with path: {db_path}") # Message changed slightly
+        db_manager = DatabaseManager(db_path=db_path)
+        # The db_manager is now instantiated but not yet connected. Connection will be handled by launcher.
 
-        logo_pixmap_orig = QPixmap(logo_path)
-        if not logo_pixmap_orig.isNull():
-            logo_scaled = logo_pixmap_orig.scaled(200, 200, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            logo_x = (splash_width - logo_scaled.width()) // 2
-            painter.drawPixmap(logo_x, 30, logo_scaled) 
-        else:
-            painter.setFont(QFont("Segoe UI", 12)); painter.drawText(0, 30, splash_width, 200, Qt.AlignmentFlag.AlignCenter, "[Logo Not Found]")
+        print("MainApp: Non-GUI initialization successful (CredentialManager and DBManager instance created).") # Message changed slightly
+        return {"success": True, "db_manager": db_manager, "credential_manager": credential_manager, "error": None}
 
-        current_y = 30 + (200 if not logo_pixmap_orig.isNull() else 200) + 20 
+    except Exception as e:
+        import traceback
+        detailed_error = traceback.format_exc()
+        print(f"MainApp ERROR: Exception during non-GUI initialization: {e}\n{detailed_error}")
+        return {"success": False, "error": str(e), "detailed_error": detailed_error, "db_manager": None, "credential_manager": None}
 
-        painter.setFont(QFont("Segoe UI", 22, QFont.Weight.Bold)); painter.setPen(QColor("#202020"))
-        text_rect_app_name = painter.boundingRect(0,0, splash_width - 40, 0, Qt.TextFlag.TextWordWrap | Qt.AlignmentFlag.AlignCenter, app_name)
-        painter.drawText(20, current_y, splash_width - 40, text_rect_app_name.height(), Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap , app_name)
-        current_y += text_rect_app_name.height() + 15
-        
-        painter.setFont(QFont("Segoe UI", 11)); painter.setPen(QColor("#333333"))
-        text_rect_tagline = painter.boundingRect(0,0, splash_width - 60, 0, Qt.TextFlag.TextWordWrap | Qt.AlignmentFlag.AlignCenter, tagline)
-        painter.drawText(30, current_y, splash_width - 60, text_rect_tagline.height(), Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap, tagline)
-        current_y += text_rect_tagline.height() + 25 
-        
-        painter.setFont(QFont("Segoe UI", 10, QFont.Weight.Normal, False)) 
-        painter.setPen(QColor(INFO_COLOR_CONST_MAIN)) 
-        text_rect_version = painter.boundingRect(0,0, splash_width - 40, 0, Qt.TextFlag.TextWordWrap | Qt.AlignmentFlag.AlignCenter, app_version)
-        painter.drawText(20, current_y, splash_width - 40, text_rect_version.height(), Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap, app_version)
-        
-        painter.end() 
-        super().__init__(base_pixmap) 
-        self.setWindowFlags(Qt.WindowType.SplashScreen | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
-
-
-def main():
-    # Set environment variable to pass Chromium flags
-    # Disable GPU acceleration to prevent rendering issues
-    # Attempt to resolve rendering issues by disabling GPU compositing, while keeping WebGL enabled.
+def create_main_window_instance(db_manager, credential_manager): # Added credential_manager
+    """
+    Instantiates and returns the MainWindow.
+    Requires db_manager and credential_manager instances.
+    """
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu-compositing"
+    # MainWindow will need to be updated to accept credential_manager too
+    main_window = MainWindow(db_manager=db_manager, credential_manager=credential_manager)
+    return main_window
 
-    app = QApplication(sys.argv)
-    app.setApplicationName(APP_NAME_MAIN)
-    app.setApplicationVersion(APP_VERSION_MAIN)
-
-    logo_full_path = resource_path(LOGO_FILE_NAME_MAIN)
-    main_window = MainWindow() 
-    splash = CustomSplashScreen(APP_NAME_MAIN, APP_VERSION_MAIN, ORGANIZATION_TAGLINE_MAIN, logo_full_path)
-    splash.show()
-    
-    if splash.screen(): 
-        screen_geo = splash.screen().geometry()
-        splash.move((screen_geo.width() - splash.width()) // 2,
-                    (screen_geo.height() - splash.height()) // 2)
-
-    def show_main_window_after_splash():
-        splash.close()
-        main_window.show() 
-        main_window.activateWindow() 
-        main_window.raise_()         
-
-    QTimer.singleShot(4000, show_main_window_after_splash) 
-    sys.exit(app.exec())
-
-if __name__ == "__main__":
-    main()
+# The 'if __name__ == "__main__":' block is removed as launcher_app.py is the entry point.

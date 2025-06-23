@@ -6,46 +6,65 @@ import datetime
 # These constants will be used by the main application to instantiate the DB manager
 # For modularity, the DB_FOLDER_NAME and DB_FILE_NAME could also be passed
 # to the DatabaseManager constructor if you prefer more flexibility later.
-DB_FOLDER_NAME_CONST = "DilasaKMLTool_v4" # AppData subfolder for this version
-DB_FILE_NAME_CONST = "app_data_v4.db"   # Specific DB file for this version
 
 class DatabaseManager:
     """
     Manages all interactions with the SQLite database for the Dilasa KML Tool.
     Handles creation of tables, and CRUD operations for API sources and polygon data.
     """
-    def __init__(self, db_folder_name=None, db_file_name=None):
+    def __init__(self, db_path):
         """
         Initializes the DatabaseManager.
         Connects to the database and creates tables if they don't exist.
 
         Args:
-            db_folder_name (str, optional): Name of the folder within AppData.
-                                            Defaults to DB_FOLDER_NAME_CONST.
-            db_file_name (str, optional): Name of the SQLite database file.
-                                          Defaults to DB_FILE_NAME_CONST.
+            db_path (str): The full path to the SQLite database file.
         """
-        folder_name = db_folder_name or DB_FOLDER_NAME_CONST
-        file_name = db_file_name or DB_FILE_NAME_CONST
+        self.db_path = db_path
         
-        app_data_dir = os.getenv('APPDATA')
-        if not app_data_dir:  # Fallback for systems where APPDATA might not be set
-            app_data_dir = os.path.expanduser("~")
-            print(f"Warning: APPDATA environment variable not found. Using user home directory: {app_data_dir}")
-
-        self.db_path = os.path.join(app_data_dir, folder_name)
-        os.makedirs(self.db_path, exist_ok=True) # Ensure the directory exists
-        self.db_path = os.path.join(self.db_path, file_name)
+        # Ensure the directory for the db_path exists
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir and not os.path.exists(db_dir): # Check if db_dir is not empty (for relative paths)
+            os.makedirs(db_dir, exist_ok=True)
 
         self.conn = None
         self.cursor = None
-        self._connect()
-        self._create_tables()
-        self._migrate_schema() # Add migration step
         # print(f"Database initialized at: {self.db_path}") # For debugging
+
+    def connect(self) -> bool:
+        """
+        Establishes the database connection and sets up tables.
+        This must be called on the thread that will be using the database.
+        Returns True on success, False on failure.
+        """
+        try:
+            self._connect() # This will raise an exception on failure
+            # If _connect succeeded, conn and cursor should be set.
+            # The internal methods _create_tables and _migrate_schema already have
+            # checks for self.conn and self.cursor, but it's good practice.
+            if not self.conn or not self.cursor:
+                print(f"DB Error in DatabaseManager.connect: _connect did not establish connection/cursor.")
+                return False
+            self._create_tables()
+            self._migrate_schema()
+            print(f"Database connection successful and tables/schema are ready at: {self.db_path}")
+            return True
+        except sqlite3.Error as e: # Catching sqlite3.Error specifically from _connect or others
+            print(f"DatabaseManager.connect: Failed to connect or setup database: {e}")
+            self.conn = None # Ensure conn and cursor are None if connect fails
+            self.cursor = None
+            return False
+        except Exception as e: # Catch any other unexpected error during connect sequence
+            print(f"DatabaseManager.connect: An unexpected error occurred: {e}")
+            self.conn = None
+            self.cursor = None
+            return False
 
     def _migrate_schema(self):
         """Checks for and applies necessary schema migrations."""
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager._migrate_schema: Connection or cursor not available.")
+            return
         try:
             self.cursor.execute("PRAGMA table_info(polygon_data)")
             columns = [row[1] for row in self.cursor.fetchall()]
@@ -54,6 +73,13 @@ class DatabaseManager:
                 self.cursor.execute("ALTER TABLE polygon_data ADD COLUMN evaluation_status TEXT DEFAULT 'Not Evaluated Yet'")
                 self.conn.commit()
                 print("'evaluation_status' column added successfully.")
+
+            # Add migration for the new kml_placemark_name column
+            if 'kml_placemark_name' not in columns: # Ensure 'columns' is defined from PRAGMA table_info
+                print("Schema migration: Adding 'kml_placemark_name' column to 'polygon_data' table.")
+                self.cursor.execute("ALTER TABLE polygon_data ADD COLUMN kml_placemark_name TEXT") # Default NULL
+                self.conn.commit()
+                print("'kml_placemark_name' column added successfully.")
         except sqlite3.Error as e:
             print(f"Schema migration error: {e}")
 
@@ -70,6 +96,9 @@ class DatabaseManager:
 
     def _create_tables(self):
         """Creates the necessary tables if they don't already exist."""
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager._create_tables: Connection or cursor not available.")
+            return
         try:
             # mWater API Sources Table
             self.cursor.execute('''
@@ -80,7 +109,7 @@ class DatabaseManager:
                 )
             ''')
 
-            # Polygon Data Table - Updated for v4 with KML export tracking
+            # Polygon Data Table - Updated for v5
             self.cursor.execute('''
                 CREATE TABLE IF NOT EXISTS polygon_data (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,13 +124,20 @@ class DatabaseManager:
                     p2_utm_str TEXT, p2_altitude REAL, p2_easting REAL, p2_northing REAL, p2_zone_num INTEGER, p2_zone_letter TEXT, p2_substituted BOOLEAN DEFAULT 0,
                     p3_utm_str TEXT, p3_altitude REAL, p3_easting REAL, p3_northing REAL, p3_zone_num INTEGER, p3_zone_letter TEXT, p3_substituted BOOLEAN DEFAULT 0,
                     p4_utm_str TEXT, p4_altitude REAL, p4_easting REAL, p4_northing REAL, p4_zone_num INTEGER, p4_zone_letter TEXT, p4_substituted BOOLEAN DEFAULT 0,
-                    status TEXT NOT NULL, -- e.g., 'valid_for_kml', 'error_missing_points', 'error_parsing'
-                    error_messages TEXT,  -- Store as newline-separated string or JSON string
+                    error_messages TEXT,
                     kml_export_count INTEGER DEFAULT 0,
                     last_kml_export_date TIMESTAMP,
                     date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    evaluation_status TEXT DEFAULT 'Not Evaluated Yet'
+                    evaluation_status TEXT DEFAULT 'Not Evaluated Yet',
+                    device_code TEXT,
+                    kml_file_name TEXT NOT NULL,
+                    kml_placemark_name TEXT, -- <<<< NEW COLUMN ADDED
+                    kml_file_status TEXT,
+                    edit_count INTEGER DEFAULT 0,
+                    last_edit_date TIMESTAMP,
+                    editor_device_id TEXT,
+                    editor_device_nickname TEXT
                 )
             ''')
             self.conn.commit()
@@ -110,6 +146,9 @@ class DatabaseManager:
 
     # --- mWater API Sources Methods ---
     def add_mwater_source(self, title, url):
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.add_mwater_source: Connection or cursor not available.")
+            return None
         try:
             self.cursor.execute("INSERT INTO mwater_sources (title, url) VALUES (?, ?)", (title, url))
             self.conn.commit()
@@ -122,6 +161,9 @@ class DatabaseManager:
             return None
 
     def get_mwater_sources(self):
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.get_mwater_sources: Connection or cursor not available.")
+            return []
         try:
             self.cursor.execute("SELECT id, title, url FROM mwater_sources ORDER BY title")
             return self.cursor.fetchall()
@@ -130,6 +172,9 @@ class DatabaseManager:
             return []
 
     def update_mwater_source(self, source_id, title, url):
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.update_mwater_source: Connection or cursor not available.")
+            return False
         try:
             self.cursor.execute("UPDATE mwater_sources SET title = ?, url = ? WHERE id = ?", (title, url, source_id))
             self.conn.commit()
@@ -142,6 +187,9 @@ class DatabaseManager:
             return False
 
     def delete_mwater_source(self, source_id):
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.delete_mwater_source: Connection or cursor not available.")
+            return False
         try:
             self.cursor.execute("DELETE FROM mwater_sources WHERE id = ?", (source_id,))
             self.conn.commit()
@@ -153,6 +201,9 @@ class DatabaseManager:
     # --- Polygon Data Methods ---
     def check_duplicate_response_code(self, response_code):
         """Checks if a response_code already exists. Returns the record ID if found, else None."""
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.check_duplicate_response_code: Connection or cursor not available.")
+            return None
         try:
             self.cursor.execute("SELECT id FROM polygon_data WHERE response_code = ?", (response_code,))
             result = self.cursor.fetchone()
@@ -166,6 +217,10 @@ class DatabaseManager:
         Adds a new polygon record or updates an existing one based on response_code if overwrite is True.
         data_dict should contain keys matching the polygon_data table columns.
         """
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.add_or_update_polygon_data: Connection or cursor not available.")
+            return None
+
         response_code_val = data_dict.get('response_code')
         if not response_code_val:
             print(f"DB Error: Missing 'response_code' in data_dict for add/update.")
@@ -238,12 +293,19 @@ class DatabaseManager:
 
     def get_all_polygon_data_for_display(self):
         """Fetches specific columns for display in the Treeview."""
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.get_all_polygon_data_for_display: Connection or cursor not available.")
+            return []
         try:
             self.cursor.execute("""
-                SELECT id, status, uuid, farmer_name, village_name, date_added, kml_export_count, last_kml_export_date, evaluation_status
+                SELECT id, uuid, response_code, farmer_name, village_name, date_added,
+                       kml_export_count, last_kml_export_date, evaluation_status,
+                       device_code, kml_file_name, kml_placemark_name, kml_file_status, -- <<<< kml_placemark_name ADDED HERE
+                       edit_count, last_edit_date, editor_device_id, editor_device_nickname,
+                       last_modified
                 FROM polygon_data 
                 ORDER BY date_added DESC
-            """) 
+            """)
             return self.cursor.fetchall()
         except sqlite3.Error as e:
             print(f"DB: Error fetching polygon data for display: {e}")
@@ -251,6 +313,9 @@ class DatabaseManager:
 
     def get_polygon_data_by_id(self, record_id):
         """Fetches a full polygon record by its database ID."""
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.get_polygon_data_by_id: Connection or cursor not available.")
+            return None
         try:
             self.cursor.execute("SELECT * FROM polygon_data WHERE id = ?", (record_id,))
             row = self.cursor.fetchone()
@@ -264,6 +329,9 @@ class DatabaseManager:
 
     def update_kml_export_status(self, record_id):
         """Updates the KML export count and date for a given record ID."""
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.update_kml_export_status: Connection or cursor not available.")
+            return False
         try:
             current_time_iso = datetime.datetime.now().isoformat()
             self.cursor.execute("""
@@ -280,6 +348,9 @@ class DatabaseManager:
             return False
 
     def delete_polygon_data(self, record_id_list):
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.delete_polygon_data: Connection or cursor not available.")
+            return False
         if not isinstance(record_id_list, list): record_id_list = [record_id_list]
         if not record_id_list: return False # No IDs to delete
         try:
@@ -292,6 +363,9 @@ class DatabaseManager:
             return False
 
     def delete_all_polygon_data(self):
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.delete_all_polygon_data: Connection or cursor not available.")
+            return False
         try:
             self.cursor.execute("DELETE FROM polygon_data")
             # Optionally, reset the autoincrement sequence if desired (usually not necessary)
@@ -304,6 +378,9 @@ class DatabaseManager:
 
     def update_evaluation_status(self, record_id, status):
         """Updates the evaluation_status for a given record ID."""
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.update_evaluation_status: Connection or cursor not available.")
+            return False
         try:
             current_time_iso = datetime.datetime.now().isoformat()
             self.cursor.execute("""
@@ -318,6 +395,95 @@ class DatabaseManager:
             print(f"DB: Error updating evaluation_status for ID '{record_id}': {e}")
             return False
 
+    def update_kml_file_status(self, db_id: int, new_status: str) -> bool:
+        """
+        Updates the KML file status and last_modified timestamp for a given record ID.
+        # TODO: Integrate with sync_manager for thread safety in future versions.
+        """
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.update_kml_file_status: Connection or cursor not available.")
+            return False
+        try:
+            current_time_iso = datetime.datetime.now().isoformat()
+            self.cursor.execute("""
+                UPDATE polygon_data
+                SET kml_file_status = ?,
+                    last_modified = ?
+                WHERE id = ?
+            """, (new_status, current_time_iso, db_id))
+            self.conn.commit()
+            return self.cursor.rowcount > 0 # True if a row was updated
+        except sqlite3.Error as e:
+            print(f"DB: Error updating kml_file_status for ID '{db_id}' to '{new_status}': {e}")
+            return False
+
+    def update_polygon_data_by_id(self, record_id: int, data_to_update: dict) -> bool:
+        """
+        Updates specific fields for an existing polygon record identified by its ID.
+        Automatically updates the 'last_modified' timestamp.
+
+        Args:
+            record_id: The ID of the record to update.
+            data_to_update: A dictionary where keys are column names and values are the new values.
+
+        Returns:
+            True if the update was successful, False otherwise.
+        """
+        if not self.cursor or not self.conn:
+            print(f"DB Error in DatabaseManager.update_polygon_data_by_id: Connection or cursor not available.")
+            # self._log("DB Error: Connection or cursor not available for update_polygon_data_by_id.", "error") # If using self._log
+            return False
+        if not data_to_update:
+            print(f"DB Info: No data provided to update for record ID {record_id}.")
+            # self._log(f"DB Info: No data provided to update for record ID {record_id}.", "info")
+            return True # No changes to make, so technically not a failure
+
+        # Ensure 'last_modified' is always updated
+        data_to_update['last_modified'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        set_clauses = []
+        values = []
+
+        # Get valid column names to prevent SQL injection and errors
+        # This pragma query might be slightly inefficient if called very frequently in a loop,
+        # but for a single update operation, it's robust.
+        # Consider caching valid_columns if performance becomes an issue here.
+        self.cursor.execute("PRAGMA table_info(polygon_data)")
+        valid_columns = {row[1] for row in self.cursor.fetchall()}
+
+        for key, value in data_to_update.items():
+            if key in valid_columns and key != 'id': # Cannot update 'id' (primary key)
+                set_clauses.append(f"{key} = ?")
+                values.append(value)
+        
+        if not set_clauses:
+            print(f"DB Warning: No valid fields to update for record ID {record_id} after filtering.")
+            # self._log(f"DB Warning: No valid fields to update for record ID {record_id} after filtering.", "warning")
+            return True
+
+        sql = f"UPDATE polygon_data SET {', '.join(set_clauses)} WHERE id = ?"
+        values.append(record_id)
+
+        try:
+            self.cursor.execute(sql, values)
+            self.conn.commit()
+            if self.cursor.rowcount > 0:
+                # self._log(f"DB: Successfully updated record ID {record_id}.", "info")
+                print(f"DB: Successfully updated record ID {record_id}.")
+                return True
+            else:
+                # self._log(f"DB Warning: Update for record ID {record_id} affected 0 rows.", "warning")
+                print(f"DB Warning: Update for record ID {record_id} affected 0 rows (record might not exist or values were the same).")
+                # If you want to be stricter and return False if the record didn't exist:
+                # self.cursor.execute("SELECT EXISTS(SELECT 1 FROM polygon_data WHERE id=?)", (record_id,))
+                # if not self.cursor.fetchone()[0]:
+                #     return False # Record does not exist
+                return True # For now, 0 rows affected (e.g. same values) is not an error
+        except sqlite3.Error as e:
+            # self._log(f"DB Error updating polygon data for ID {record_id}: {e}", "error")
+            print(f"DB Error updating polygon data for ID {record_id}: {e}")
+            return False
+
     def close(self):
         """Closes the database connection."""
         if self.conn:
@@ -330,12 +496,15 @@ if __name__ == '__main__':
     print("Testing DatabaseManager...")
     # Create a temporary DB for testing or use the default path
     # For isolated testing, you might want to pass a specific test DB name
-    # db_manager = DatabaseManager(db_file_name="test_app_data_v4.db")
-    db_manager = DatabaseManager()
-    print(f"Using database at: {db_manager.db_path}")
-
-    # Test mWater sources
-    print("\n--- Testing mWater Sources ---")
+    db_manager = DatabaseManager(db_path="temp_v5_test.db")
+    print(f"Attempting to connect to database at: {db_manager.db_path}")
+    if not db_manager.connect():
+        print("Failed to connect to the database. Aborting tests.")
+        # Optionally exit: import sys; sys.exit(1)
+    else:
+        print("Database connection successful for testing.")
+        # Test mWater sources
+        print("\n--- Testing mWater Sources ---")
     source_id1 = db_manager.add_mwater_source("Test Source 1", "http://example.com/api1")
     source_id2 = db_manager.add_mwater_source("Test Source 2", "http://example.com/api2")
     print(f"Added source 1 ID: {source_id1}")
@@ -353,15 +522,31 @@ if __name__ == '__main__':
     # Test polygon data
     print("\n--- Testing Polygon Data ---")
     sample_poly_data1 = {
-        "uuid": "uuid-test-001", "response_code": "rc-test-001", "farmer_name": "Test Farmer 1",
-        "village_name": "Test Village", "status": "valid_for_kml", "evaluation_status": "Eligible", # Added for testing
-        "p1_utm_str": "43Q 123 456", "p1_altitude": 100.0, "p1_easting": 123.0, "p1_northing": 456.0, "p1_zone_num": 43, "p1_zone_letter": "Q",
-        # ... (add other point data if needed for full test)
+        "uuid": "uuid-test-001", "response_code": "rc-test-001", "farmer_name": "Test Farmer 1", # This will be poly_id1
+        "village_name": "Test Village", "block": "Test Block A", "district": "Test District X",
+        "proposed_area_acre": "5.0",
+        "kml_file_name": "uuid-test-001.kml", "kml_file_status": "Created",
+        "evaluation_status": "Eligible", "device_code": "dev001_apidata", # Simulating it came from API
+        "editor_device_id": "local_editor_001", "editor_device_nickname": "Local Editor",
+        "p1_utm_str": "43Q 123456 7890123", "p1_altitude": 100.0, "p1_easting": 123456.0, "p1_northing": 7890123.0, "p1_zone_num": 43, "p1_zone_letter": "Q", "p1_substituted": False,
+        "p2_utm_str": "43Q 123556 7890123", "p2_altitude": 101.0, "p2_easting": 123556.0, "p2_northing": 7890123.0, "p2_zone_num": 43, "p2_zone_letter": "Q", "p2_substituted": False,
+        "p3_utm_str": "43Q 123556 7890023", "p3_altitude": 102.0, "p3_easting": 123556.0, "p3_northing": 7890023.0, "p3_zone_num": 43, "p3_zone_letter": "Q", "p3_substituted": False,
+        "p4_utm_str": "43Q 123456 7890023", "p4_altitude": 103.0, "p4_easting": 123456.0, "p4_northing": 7890023.0, "p4_zone_num": 43, "p4_zone_letter": "Q", "p4_substituted": False,
+        "error_messages": None,
+        "date_added": "2023-10-01T10:00:00Z", # Simulating date_added from API
+        "last_modified": "2023-10-01T10:00:00Z" # Will be overwritten by db_manager
     }
     sample_poly_data2 = {
         "uuid": "uuid-test-002", "response_code": "rc-test-002", "farmer_name": "Test Farmer 2",
-        "village_name": "Another Village", "status": "error_missing_points", "error_messages": "Point 3 missing", "evaluation_status": "Not Evaluated Yet",
-        # ...
+        "village_name": "Another Village", "block": "Test Block B", "district": "Test District Y",
+        "proposed_area_acre": "2.3",
+        "kml_file_name": "uuid-test-002.kml", "kml_file_status": "Errored",
+        "error_messages": "Point 3 UTM string malformed.\nKML generation failed due to point error.",
+        "evaluation_status": "Not Evaluated Yet", "device_code": "local_app_dev002", # Simulating it used app's device_id
+        "editor_device_id": "local_editor_001", "editor_device_nickname": "Local Editor",
+        "p1_utm_str": "44N 223456 8890123", "p1_altitude": 200.0, "p1_easting": 223456.0, "p1_northing": 8890123.0, "p1_zone_num": 44, "p1_zone_letter": "N",
+        "p2_utm_str": "44N 223556 8890123", "p2_altitude": 201.0, "p2_easting": 223556.0, "p2_northing": 8890123.0, "p2_zone_num": 44, "p2_zone_letter": "N",
+        # Missing P3, P4 to simulate error
     }
 
     poly_id1 = db_manager.add_or_update_polygon_data(sample_poly_data1)
@@ -373,7 +558,28 @@ if __name__ == '__main__':
         print(f"Updating evaluation status for ID {poly_id1} to 'Not Eligible'")
         db_manager.update_evaluation_status(poly_id1, "Not Eligible")
         updated_record = db_manager.get_polygon_data_by_id(poly_id1)
-        print(f"Record {poly_id1} after status update: {updated_record.get('evaluation_status')}")
+        if updated_record:
+            print(f"Record {poly_id1} after eval status update: Status='{updated_record.get('evaluation_status')}', LastMod='{updated_record.get('last_modified')}'")
+            original_last_modified = updated_record.get('last_modified') # Moved inside the check
+            # Test for update_kml_file_status
+            print(f"Updating KML file status for ID {poly_id1} to 'File Deleted'")
+            update_kml_success = db_manager.update_kml_file_status(poly_id1, "File Deleted")
+            if update_kml_success:
+                record_after_kml_update = db_manager.get_polygon_data_by_id(poly_id1)
+                if record_after_kml_update:
+                    print(f"Record {poly_id1} after KML status update: KML Status='{record_after_kml_update.get('kml_file_status')}', LastMod='{record_after_kml_update.get('last_modified')}'")
+                    if record_after_kml_update.get('kml_file_status') == "File Deleted":
+                        print(f"SUCCESS: KML status correctly updated for ID {poly_id1}.")
+                    else:
+                        print(f"FAILURE: KML status NOT updated for ID {poly_id1}.")
+                    if record_after_kml_update.get('last_modified') != original_last_modified:
+                         print(f"SUCCESS: last_modified timestamp updated for ID {poly_id1}.")
+                    else:
+                        print(f"FAILURE: last_modified timestamp NOT updated for ID {poly_id1}.")
+                else:
+                    print(f"FAILURE: Could not retrieve record {poly_id1} after KML status update.")
+            else:
+                print(f"FAILURE: update_kml_file_status returned False for ID {poly_id1}.")
 
 
     # Test duplicate handling (skip)
@@ -381,34 +587,43 @@ if __name__ == '__main__':
     print(f"Attempted to add polygon 1 again (no overwrite), result ID: {poly_id1_again}") # Should be same as poly_id1
 
     # Test duplicate handling (overwrite)
-    sample_poly_data1_updated = sample_poly_data1.copy()
-    sample_poly_data1_updated["farmer_name"] = "Test Farmer 1 Updated Name"
-    sample_poly_data1_updated["evaluation_status"] = "Eligible" # Update for overwrite
+    sample_poly_data1_updated = sample_poly_data1.copy() # Start with a copy of the original
+    sample_poly_data1_updated["farmer_name"] = "Test Farmer 1 Updated Name by overwrite"
+    sample_poly_data1_updated["kml_file_status"] = "Created - Overwritten"
+    sample_poly_data1_updated["editor_device_id"] = "overwrite_editor_002"
+    sample_poly_data1_updated["editor_device_nickname"] = "Overwrite Editor"
+    sample_poly_data1_updated["evaluation_status"] = "Not Eligible" # Changed from Eligible
+
     poly_id1_overwrite = db_manager.add_or_update_polygon_data(sample_poly_data1_updated, overwrite=True)
-    print(f"Attempted to add polygon 1 again (overwrite), result ID: {poly_id1_overwrite}")
+    print(f"Attempted to add polygon 1 again (overwrite), result ID: {poly_id1_overwrite}") # Should be same as poly_id1
 
     all_polys = db_manager.get_all_polygon_data_for_display()
     print(f"All polygon data for display ({len(all_polys)} records):")
     for poly_row in all_polys:
         print(poly_row)
     
-    if poly_id1_overwrite: # Use the ID from the overwritten record if it exists
+    if poly_id1_overwrite: 
         full_poly1 = db_manager.get_polygon_data_by_id(poly_id1_overwrite)
-        print(f"\nFull data for polygon ID {poly_id1_overwrite}: {full_poly1}")
-        if full_poly1:
+        if full_poly1: # Check if full_poly1 is not None
+            print(f"\nFull data for polygon ID {poly_id1_overwrite}: {full_poly1}")
             db_manager.update_kml_export_status(poly_id1_overwrite)
             updated_poly1 = db_manager.get_polygon_data_by_id(poly_id1_overwrite)
-            print(f"Updated KML export status for ID {poly_id1_overwrite}: Count={updated_poly1.get('kml_export_count')}, Date={updated_poly1.get('last_kml_export_date')}")
+            if updated_poly1: # Check if updated_poly1 is not None
+                print(f"Updated KML export status for ID {poly_id1_overwrite}: Count={updated_poly1.get('kml_export_count')}, Date={updated_poly1.get('last_kml_export_date')}")
+            else:
+                print(f"Could not retrieve record {poly_id1_overwrite} after updating KML export status.")
+        else:
+            print(f"Could not retrieve full data for polygon ID {poly_id1_overwrite}.")
 
     # db_manager.delete_all_polygon_data()
     # print("\nDeleted all polygon data.")
     # print(f"Polygon data after delete all: {db_manager.get_all_polygon_data_for_display()}")
 
-    db_manager.close()
+        db_manager.close() # Ensure close is called if connect was successful
     print("\nDatabaseManager tests finished.")
 
-    # To clean up the test database file:
-    # test_db_file = os.path.join(os.getenv('APPDATA') or os.path.expanduser("~"), DB_FOLDER_NAME_CONST, "test_app_data_v4.db")
+    # To clean up the test database file (if created in current dir):
+    # test_db_file = "temp_v5_test.db"
     # if os.path.exists(test_db_file):
     #     os.remove(test_db_file)
     #     print(f"Removed test database: {test_db_file}")
